@@ -1,0 +1,3 @@
+# Packet P5-EVIDENCE: verify_tiers.py, attack.py, reviewer's map (BUILD-SPEC 18)
+
+Starts when T2 is merged; extend as T3/T4 land. Standard library only (urllib, json, tomllib with run.py's fallback parser copied). Reads `.dogfood.toml`, uses the demo tokens, creates its own event via the API with a unique slug, never modifies fixture data. Every check prints `TIER  label ..... PASS|FAIL` plus request/response detail on failure, like run.py. Exit code 0 always (it is a report). Files: scripts/verify_tiers.py, scripts/attack.py, tests/test_evidence_scripts.py (runs both against the Django live server test case), README "Reviewer's map" section.

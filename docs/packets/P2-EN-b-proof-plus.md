@@ -1,0 +1,9 @@
+# Packet P2-EN-b: stronger normalization proof (after P2-EN is merged)
+
+Read planning notes summarised here and BUILD-SPEC 9/17. Extend `src/results/engine.py` (pure, stdlib) and `scripts/normalization_proof.py`; regenerate docs/NORMALIZATION-PROOF.md deterministically.
+1. **Leave-one-review-out cross-validation** on the fixture (126 reviews minus the superseded duplicate): for each review, refit without it and predict it as μ_p + b_j; report RMSE and MAE for project-mean-only and additive λ ∈ {0, 1, 2, 5, 10}. Projects/judges left with no other review are skipped and counted. State which λ predicts unseen reviews best. This is the evidence for the predeclared default λ.
+2. **Permutation test** for judge effects: 2 000 seeded shuffles of judge labels within each track; statistic = variance of fitted offsets (λ = 0 on the connected graph, or λ = 2); report the observed value, the null distribution quantiles and the p-value.
+3. **Agreement** between the official normalized ranking and the derived Bradley–Terry (rank-only) ranking: Spearman ρ and Kendall τ, plus the projects where they disagree by more than 5 places.
+4. A short "Method lineage" paragraph with citations: Henderson BLUP / linear mixed models (λ = σ²_error / σ²_judge), Many-Facet Rasch rater severity (Linacre), Ge–Welling–Ghahramani 2013 review calibration, Wang & Shah 2019 (limits of linear-bias models), Hunter 2004 (MM for Bradley–Terry).
+Tests in tests/test_engine.py: LOO on a synthetic offset-only dataset favours the additive model; permutation p-value is small when offsets are injected and large when they are not (seeded); agreement stats are 1.0 on identical rankings.
+Files: src/results/engine.py, scripts/normalization_proof.py, docs/NORMALIZATION-PROOF.md, tests/test_engine.py.

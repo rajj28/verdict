@@ -89,7 +89,7 @@ Validation: `submissions_open_at < submissions_close_at`; `judging_open_at >= su
 **events.CustomQuestion**: event FK CASCADE, `public_id` (q_), `prompt`, `help_text`, `kind` (short_text | long_text | url | choice | yes_no), `choices` (JSON list), `required` (bool), `is_public` (bool; false = judges/organizers only), `position`.
 **events.EventRole**: event FK CASCADE, user FK, `role` (participant | judge | organizer), `public_id` (usr-facing id: jdg_ for judges e.g. `jdg_24`, par_ for participants, org_ for organizers), `tracks` M2M Track (judges), `source_id`, `added_by` FK nullable. UniqueConstraint(event, user); UniqueConstraint(event, public_id).
 
-**teams.Team**: event FK, `public_id` (tm_), `name` (unique per event, case-insensitive via Lower constraint), `source_id`, `created_by` FK nullable.
+**teams.Team**: event FK, `public_id` (tm_), `name` (NOT unique: the fixture reuses team names inside one event; identity is `public_id`), `source_id`, `created_by` FK nullable.
 **teams.TeamMember**: team FK CASCADE, user FK, `event` FK (denormalized for the constraint), `is_owner` (bool), `joined_at`. UniqueConstraint(event, user) = one team per person per event.
 **teams.TeamInvite**: team FK CASCADE, `token` (43-char url-safe random, unique), `created_by`, `expires_at` (default now+7d, capped at submissions_close_at), `max_uses` (nullable), `use_count`, `revoked_at`. Rotating creates a new invite and revokes the old one.
 

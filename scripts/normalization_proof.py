@@ -54,6 +54,16 @@ CAL_RANK_REPS = 100
 CAL_RANK_SIGMA_B = 0.6
 CAL_RANK_SEED = 2202  # same seed as the sigma_b = 0.6 row above
 
+# Review-budget planner (packet P7-PLANNER, steps 1-2): balanced random
+# designs with the fixture's 30 judges / 40 projects, sigma estimated
+# from the fixture's included reviews.
+BUDGET_JUDGES = 30
+BUDGET_PROJECTS = 40
+BUDGET_GRID = (3, 4, 6, 8, 10, 12, 16)
+BUDGET_BIAS = 8.0
+BUDGET_REPS = 200
+BUDGET_SEED = "verdict-budget"
+
 
 # ---------------------------------------------------------------- fixtures
 
@@ -303,6 +313,20 @@ def rank_recovery(design, projects, sigma_b, seed, reps):
     return {m: v / reps for m, v in acc.items()}
 
 
+def organizer_spread(values_by_judge):
+    """Sample SD of per-judge mean scores (organizers' 1-5 definition)."""
+    import statistics
+
+    means = [
+        sum(v) / len(v) for v in values_by_judge.values() if v
+    ]
+    if len(means) < 2:
+        return float("nan"), {}
+    return statistics.stdev(means), {
+        j: sum(v) / len(v) for j, v in values_by_judge.items() if v
+    }
+
+
 # ------------------------------------------------------------------- render
 
 def f2(x):
@@ -404,6 +428,55 @@ def main():
         "reflects which projects each judge happened to receive, not an "
         "estimable judge level \u2014 consistent with the leave-one-out and "
         "permutation results below.")
+    add("")
+    add("### Judge spread, organizers' definition")
+    add("")
+    fixture_data = json.loads(FIXTURES_PATH.read_text(encoding="utf-8"))
+    all_by_judge: dict[str, list[float]] = defaultdict(list)
+    for s in fixture_data["scores"]:
+        all_by_judge[s["judge"]].append(
+            sum(s["criteria"].values()) / len(s["criteria"])
+        )
+    inc_by_judge: dict[str, list[float]] = defaultdict(list)
+    for s in fixture_data["scores"]:
+        if s["project"] == SUPERSEDED:
+            continue
+        inc_by_judge[s["judge"]].append(
+            sum(s["criteria"].values()) / len(s["criteria"])
+        )
+    sd_all, mean_all = organizer_spread(all_by_judge)
+    sd_inc, mean_inc = organizer_spread(inc_by_judge)
+    scored_inc = E.score_reviews(reviews, criteria)
+    spread_lams = (auto.value, 0.0, 2.0)
+    fits_15 = {lam: E.fit_additive(scored_inc, float(lam)) for lam in spread_lams}
+    sd_adj = {}
+    for lam in spread_lams:
+        fit = fits_15[lam]
+        adj = {
+            j: mean_inc[j] - fit.offset.get(j, 0.0) / 25.0
+            for j in mean_inc
+        }
+        sd_adj[float(lam)], _ = organizer_spread(
+            {j: [v] for j, v in adj.items()}
+        )
+    add(f"Sample SD of per-judge mean scores (mean of the three 1\u20135 "
+        f"criteria per review): {sd_all:.4f} over all "
+        f"{sum(len(v) for v in all_by_judge.values())} reviews and "
+        f"{len(mean_all)} judges "
+        f"(this matches the homepage \u03c3 = 0.42 confirmed by the "
+        f"organizers) \u2192 {sd_inc:.4f} after the duplicate policy "
+        f"excludes `{SUPERSEDED}`'s reviews "
+        f"({sum(len(v) for v in inc_by_judge.values())} reviews, "
+        f"{len(mean_inc)} judges) \u2192 {sd_adj[float(auto.value)]:.4f} "
+        f"after offset removal at the CV-chosen \u03bb={auto.value:g} "
+        f"(\u03bb=0: {sd_adj[0.0]:.4f}; \u03bb=2: {sd_adj[2.0]:.4f}).")
+    add("")
+    add("The first drop comes from removing the single all-2s review on the "
+        "superseded project, the second step removes the fitted judge levels "
+        "at each stated shrinkage, and a smaller spread after that removal "
+        "is not itself evidence that the ranking improved \u2014 the check "
+        "for improvement is held-out prediction, the permutation test and "
+        "the simulations, not the spread.")
     add("")
     add("### The judge who marks everything the same")
     add("")
@@ -619,6 +692,36 @@ def main():
             f"elsewhere \u2014 under a fixed budget the net effect here is "
             f"nil to negative, which is itself the design-time lesson: "
             f"check the estimability meter before buying anchors.")
+    add("")
+    add("### How many reviews does normalization need?")
+    add("")
+    budget = E.review_budget_curve(
+        BUDGET_JUDGES, BUDGET_PROJECTS,
+        reviews_per_judge_grid=BUDGET_GRID, bias=BUDGET_BIAS,
+        sigma_noise=None, scored=E.score_reviews(reviews, criteria),
+        reps=BUDGET_REPS, seed=BUDGET_SEED,
+    )
+    add(f"Balanced random designs with {BUDGET_JUDGES} judges and "
+        f"{BUDGET_PROJECTS} projects (same id sets, track-agnostic; "
+        f"`results.engine.review_budget_curve` with seed `{BUDGET_SEED}`, "
+        f"{BUDGET_REPS} reps, additive \u03bb=2.0), noise "
+        f"\u03c3={budget.sigma_noise:.2f} estimated from the fixture's "
+        f"included reviews (pooled residual SD of the additive fit). "
+        f"Each row reports the median expected offset SE and the mean "
+        f"share of judges whose injected bias is detected:")
+    add("")
+    add("| Reviews per judge | Median SE | Power at 8 pts | Power at 12 pts |")
+    add("|---:|---:|---:|---:|")
+    for brow in budget.rows:
+        add(f"| {brow.reviews_per_judge} | {brow.median_se:.2f} | "
+            f"{brow.power[8.0]:.3f} | {brow.power[12.0]:.3f} |")
+    add("")
+    need80 = budget.reviews_needed(power=0.8)
+    need_label = f"\u2248{need80}" if isinstance(need80, int) else need80
+    pow4 = next(r for r in budget.rows if r.reviews_per_judge == 4)
+    add(f"In plain language: at ~4 reviews per judge an 8-point harsh "
+        f"judge is caught ~{pow4.power[8.0]:.0%} of the time; "
+        f"{need_label} reviews per judge reaches 80%.")
     add("")
     add("### Leave-one-review-out cross-validation (predicting unseen reviews)")
     add("")
@@ -860,7 +963,11 @@ def main():
         f"seed `{ANCHOR_SEED}`, trimmed to {len(reviews)} reviews), "
         f"estimability seed `{CAL_EST_SEED}` (200 reps), rank recovery "
         f"\u03c3_b={CAL_RANK_SIGMA_B} seed {CAL_RANK_SEED} "
-        f"({CAL_RANK_REPS} reps). No timestamps are written, so regenerating "
+        f"({CAL_RANK_REPS} reps). Budget planner: "
+        f"{BUDGET_JUDGES} judges / {BUDGET_PROJECTS} projects, grid "
+        f"{{{', '.join(str(k) for k in BUDGET_GRID)}}}, bias {BUDGET_BIAS:g}, "
+        f"\u03c3 estimated from the fixture, {BUDGET_REPS} reps, seed "
+        f"`{BUDGET_SEED}`. No timestamps are written, so regenerating "
         f"twice gives identical bytes.")
     add("")
     text = "\n".join(lines)

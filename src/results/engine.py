@@ -94,6 +94,7 @@ class LambdaChoice:
     folds: int
     n: int = 0
     skipped: int = 0
+    note: str = ""
 
 
 @dataclass(frozen=True)
@@ -884,7 +885,11 @@ def select_lambda(
     predicts the training mean of the held-out review's project mates.
     The winner is the argmin CV RMSE; ties (within 1e-12) go to the
     larger, more conservative lambda. Each fold fit warm-starts from
-    the full-data fit at the same lambda.
+    the full-data fit at the same lambda. When no held-out review can
+    be predicted (``n == 0``, e.g. a single judge or every held-out
+    review lacking training data), the largest grid lambda is returned
+    with ``note`` set and finite (zero) RMSE placeholders, so the
+    result stays valid JSON with no NaN.
     """
     grid_t = tuple(float(g) for g in grid)
     if not grid_t:
@@ -930,14 +935,17 @@ def select_lambda(
                 err = pred - r.score
                 se[lam] += err * err
     if n == 0:
-        nan_table = {lam: float("nan") for lam in grid_t}
         return LambdaChoice(
             value=max(grid_t),
-            cv_rmse=nan_table,
-            baseline_rmse=float("nan"),
+            cv_rmse={lam: 0.0 for lam in grid_t},
+            baseline_rmse=0.0,
             folds=folds,
             n=0,
             skipped=skipped,
+            note=(
+                "cross-validation not possible; "
+                "most conservative lambda used"
+            ),
         )
     cv_rmse = {lam: math.sqrt(se[lam] / n) for lam in grid_t}
     baseline_rmse = math.sqrt(se_base / n)
@@ -1426,4 +1434,202 @@ def estimability(
         reps=reps,
         lam=float(lam),
         n_pairs=len(pairs),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Review-budget planner (packet P7-PLANNER, step 1).
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class BudgetRow:
+    """One grid point of the review-budget curve."""
+
+    reviews_per_judge: int
+    median_se: float
+    power: dict[float, float]  # injected bias -> mean detection share
+    n_pairs: int
+
+
+@dataclass(frozen=True)
+class BudgetCurve:
+    """Review-budget curve over a grid of reviews-per-judge values."""
+
+    n_judges: int
+    n_projects: int
+    grid: tuple[int, ...]
+    bias: float  # primary bias for reviews_needed()
+    biases: tuple[float, ...]  # all reported bias points
+    sigma_noise: float
+    sigma_estimated: bool
+    reps: int
+    seed: str | int
+    lam: float
+    rows: tuple[BudgetRow, ...]
+
+    def reviews_needed(self, power: float = 0.8) -> int | str:
+        """Smallest grid value reaching ``power`` at the primary bias.
+
+        Returns the grid value, or ``"> {max grid}"`` when no grid
+        value reaches it.
+        """
+        for row in self.rows:
+            if row.power.get(self.bias, 0.0) >= power:
+                return row.reviews_per_judge
+        return f"> {max(self.grid)}"
+
+
+def pooled_residual_sd(
+    scored: Sequence[ScoredReview], lam: float = 2.0
+) -> float:
+    """Pooled residual SD of the additive fit at ``lam``.
+
+    Residuals are ``s_r - mu_p - b_j``; the estimate is
+    ``sqrt(SSE / n)`` (population SD of the residuals).
+    """
+    data = list(scored)
+    if not data:
+        raise ValueError("pooled_residual_sd needs at least one review")
+    if lam < 0:
+        raise ValueError("lam must be non-negative")
+    fit = fit_additive(data, lam)
+    sse = sum(
+        (r.score - fit.mu[r.project_id] - fit.offset[r.judge_id]) ** 2
+        for r in data
+    )
+    return math.sqrt(sse / len(data))
+
+
+def _balanced_design(
+    n_judges: int, n_projects: int, reviews_per_judge: int, seed: str | int
+) -> list[tuple[str, str]]:
+    """Balanced random design: each judge reviews ``k`` distinct projects.
+
+    Judges/projects are ``J00...``/``P00...`` (track-agnostic, same sets
+    across grid values). Each judge's picks go to the currently
+    least-covered projects (random choice among ties from ``seed``), so
+    project coverage differs by at most ~1 and every pair is unique.
+    """
+    k = min(reviews_per_judge, n_projects)
+    judges = [f"J{i:02d}" for i in range(n_judges)]
+    projects = [f"P{i:02d}" for i in range(n_projects)]
+    rng = random.Random(f"{seed}:{reviews_per_judge}")
+    order = judges[:]
+    rng.shuffle(order)
+    coverage = {p: 0 for p in projects}
+    pairs: set[tuple[str, str]] = set()
+    for j in order:
+        picked: set[str] = set()
+        for _ in range(k):
+            cands = [p for p in projects if p not in picked]
+            floor = min(coverage[p] for p in cands)
+            least = [p for p in cands if coverage[p] == floor]
+            choice = least[rng.randrange(len(least))]
+            picked.add(choice)
+            coverage[choice] += 1
+            pairs.add((j, choice))
+    return sorted(pairs)
+
+
+def review_budget_curve(
+    n_judges: int,
+    n_projects: int,
+    reviews_per_judge_grid: Sequence[int] = (3, 4, 6, 8, 10, 12, 16),
+    bias: float = 8.0,
+    sigma_noise: float | None = None,
+    scored: Sequence[ScoredReview] | None = None,
+    reps: int = 200,
+    seed: str | int = "verdict",
+    lam: float = 2.0,
+    bias_grid: Sequence[float] | None = None,
+) -> BudgetCurve:
+    """Median offset SE and bias-detection power vs reviews per judge.
+
+    For each grid value a balanced random design with ``n_judges``
+    judges and ``n_projects`` projects (same id sets, track-agnostic;
+    see :func:`_balanced_design`) is scored through :func:`estimability`
+    at penalty ``lam``. Each row reports the median expected offset SE
+    and the mean detection power at each bias in ``bias_grid``
+    (default: the primary ``bias`` plus 12.0, so the proof's power-at-8
+    and power-at-12 columns come from one call).
+
+    When ``sigma_noise`` is None it is estimated from ``scored`` via
+    :func:`pooled_residual_sd` at ``lam`` and reported (``scored`` is
+    then required). Use ``BudgetCurve.reviews_needed(power=0.8)`` for
+    the smallest grid value reaching 80% power at the primary bias
+    (or ``"> max"``). Pure and deterministic: designs derive from
+    ``seed`` per grid value and estimability reseeds per row.
+    """
+    grid = tuple(int(k) for k in reviews_per_judge_grid)
+    if n_judges < 1:
+        raise ValueError("review_budget_curve needs at least 1 judge")
+    if n_projects < 1:
+        raise ValueError("review_budget_curve needs at least 1 project")
+    if not grid:
+        raise ValueError("review_budget_curve needs a non-empty grid")
+    if any(k < 1 for k in grid):
+        raise ValueError("reviews-per-judge grid values must be positive")
+    if bias <= 0:
+        raise ValueError("bias must be positive")
+    if reps < 1:
+        raise ValueError("review_budget_curve needs at least 1 rep")
+    if lam < 0:
+        raise ValueError("lam must be non-negative")
+    if sigma_noise is not None and sigma_noise < 0:
+        raise ValueError("sigma_noise must be non-negative")
+    if bias_grid is None:
+        biases = tuple(sorted({float(bias), 12.0}))
+    else:
+        biases = tuple(float(b) for b in bias_grid)
+        if not biases:
+            raise ValueError("bias_grid must be non-empty")
+        if any(b <= 0 for b in biases):
+            raise ValueError("bias_grid values must be positive")
+    estimated = False
+    if sigma_noise is None:
+        if scored is None:
+            raise ValueError(
+                "review_budget_curve needs scored reviews "
+                "to estimate sigma_noise"
+            )
+        sigma_noise = pooled_residual_sd(list(scored), lam)
+        estimated = True
+    sigma = float(sigma_noise)
+    rows: list[BudgetRow] = []
+    for k in grid:
+        design = _balanced_design(n_judges, n_projects, k, seed)
+        summary = estimability(
+            design,
+            sigma_noise=sigma,
+            bias_grid=biases,
+            reps=reps,
+            seed=f"{seed}:{k}",
+            lam=lam,
+        )
+        by_bias = {
+            b: sum(r.power[b] for r in summary.judges.values())
+            / len(summary.judges)
+            for b in biases
+        }
+        rows.append(
+            BudgetRow(
+                reviews_per_judge=k,
+                median_se=summary.median_se,
+                power=by_bias,
+                n_pairs=summary.n_pairs,
+            )
+        )
+    return BudgetCurve(
+        n_judges=n_judges,
+        n_projects=n_projects,
+        grid=grid,
+        bias=float(bias),
+        biases=biases,
+        sigma_noise=sigma,
+        sigma_estimated=estimated,
+        reps=reps,
+        seed=seed,
+        lam=float(lam),
+        rows=tuple(rows),
     )

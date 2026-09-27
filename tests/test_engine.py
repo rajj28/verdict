@@ -1,5 +1,6 @@
 """Packet P2-EN engine tests: pure stdlib unittest, no Django settings."""
 
+import json
 import math
 import os
 import sys
@@ -10,6 +11,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from results.engine import (  # noqa: E402
     DEFAULT_LAMBDA_GRID,
     FLIP_CAP,
+    BudgetCurve,
+    BudgetRow,
     Comparison,
     Criterion,
     EstimabilityJudge,
@@ -34,9 +37,11 @@ from results.engine import (  # noqa: E402
     offset_variance,
     outliers,
     permutation_test,
+    pooled_residual_sd,
     rank,
     rank_agreement,
     raw_scores,
+    review_budget_curve,
     review_score,
     robustness,
     score_reviews,
@@ -710,6 +715,158 @@ class EstimabilityTests(unittest.TestCase):
         self.assertEqual(res.n_pairs, 0)
         self.assertTrue(math.isnan(res.median_se))
         self.assertTrue(math.isnan(res.power_at_8))
+
+
+class SelectLambdaNoPredictionTests(unittest.TestCase):
+    def test_single_judge_returns_largest_lambda_with_note(self):
+        s = score_reviews(
+            [scored("J", "A", 50), scored("J", "B", 60)], CRIT_0_100
+        )
+        choice = select_lambda(s)
+        self.assertEqual(choice.value, max(DEFAULT_LAMBDA_GRID))
+        self.assertEqual(choice.n, 0)
+        self.assertEqual(
+            choice.note,
+            "cross-validation not possible; most conservative lambda used",
+        )
+        for v in list(choice.cv_rmse.values()) + [choice.baseline_rmse]:
+            self.assertTrue(math.isfinite(v))
+        # Valid strict JSON (NaN/Infinity would fail with allow_nan=False).
+        json.dumps(
+            {
+                "value": choice.value,
+                "cv_rmse": choice.cv_rmse,
+                "baseline_rmse": choice.baseline_rmse,
+                "note": choice.note,
+            },
+            allow_nan=False,
+        )
+
+    def test_all_held_out_skipped_returns_note(self):
+        # Every review carries a unique judge and project, so each
+        # held-out review lacks training data on both sides.
+        s = score_reviews(
+            [
+                scored("J1", "P1", 50),
+                scored("J2", "P2", 60),
+                scored("J3", "P3", 70),
+            ],
+            CRIT_0_100,
+        )
+        choice = select_lambda(s)
+        self.assertEqual(choice.n, 0)
+        self.assertEqual(choice.value, max(DEFAULT_LAMBDA_GRID))
+        self.assertEqual(
+            choice.note,
+            "cross-validation not possible; most conservative lambda used",
+        )
+
+    def test_normal_path_has_empty_note(self):
+        s = score_reviews(
+            [
+                scored("A", f"P{i}", 60)
+                for i in range(8)
+            ]
+            + [
+                scored("B", f"P{i}", 40)
+                for i in range(8)
+            ],
+            CRIT_0_100,
+        )
+        choice = select_lambda(s)
+        self.assertGreater(choice.n, 0)
+        self.assertEqual(choice.note, "")
+
+
+class ReviewBudgetCurveTests(unittest.TestCase):
+    def test_deterministic_and_shaped(self):
+        first = review_budget_curve(
+            6, 8, reviews_per_judge_grid=(3, 4), sigma_noise=11.0,
+            reps=20, seed="verdict-test",
+        )
+        second = review_budget_curve(
+            6, 8, reviews_per_judge_grid=(3, 4), sigma_noise=11.0,
+            reps=20, seed="verdict-test",
+        )
+        self.assertIsInstance(first, BudgetCurve)
+        self.assertEqual(first, second)
+        self.assertEqual([r.reviews_per_judge for r in first.rows], [3, 4])
+        for row in first.rows:
+            self.assertIsInstance(row, BudgetRow)
+            self.assertEqual(row.n_pairs, 6 * row.reviews_per_judge)
+            self.assertTrue(math.isfinite(row.median_se))
+            self.assertGreater(row.median_se, 0)
+            self.assertEqual(sorted(row.power), [8.0, 12.0])
+            for p in row.power.values():
+                self.assertGreaterEqual(p, 0.0)
+                self.assertLessEqual(p, 1.0)
+        # Each judge reviews exactly k distinct projects; pairs unique.
+        self.assertFalse(first.sigma_estimated)
+
+    def test_each_judge_gets_k_distinct_projects(self):
+        curve = review_budget_curve(
+            6, 8, reviews_per_judge_grid=(4,), sigma_noise=11.0,
+            reps=5, seed="verdict-test",
+        )
+        self.assertEqual(curve.rows[0].n_pairs, 24)
+
+    def test_sigma_estimated_from_supplied_reviews(self):
+        reviews = [
+            scored("A", f"P{i}", 60) for i in range(4)
+        ] + [
+            scored("B", f"P{i}", 40) for i in range(4)
+        ]
+        s = score_reviews(reviews, CRIT_0_100)
+        curve = review_budget_curve(
+            4, 4, reviews_per_judge_grid=(2,), sigma_noise=None,
+            scored=s, reps=5, seed="verdict-test",
+        )
+        self.assertTrue(curve.sigma_estimated)
+        self.assertAlmostEqual(
+            curve.sigma_noise, pooled_residual_sd(s), delta=1e-12
+        )
+        with self.assertRaises(ValueError):
+            review_budget_curve(
+                4, 4, reviews_per_judge_grid=(2,), sigma_noise=None,
+                reps=5, seed="verdict-test",
+            )
+
+    def test_reviews_needed_logic(self):
+        curve = review_budget_curve(
+            6, 8, reviews_per_judge_grid=(3, 4), sigma_noise=11.0,
+            reps=20, seed="verdict-test",
+        )
+        needed = curve.reviews_needed(power=0.8)
+        self.assertTrue(needed in (3, 4) or needed == "> 4")
+        # Hand-made curve: threshold logic without simulation noise.
+        made = BudgetCurve(
+            n_judges=2, n_projects=2, grid=(3, 4), bias=8.0,
+            biases=(8.0, 12.0), sigma_noise=10.0, sigma_estimated=False,
+            reps=1, seed="x", lam=2.0,
+            rows=(
+                BudgetRow(3, 4.0, {8.0: 0.5, 12.0: 0.9}, 6),
+                BudgetRow(4, 3.0, {8.0: 0.85, 12.0: 0.95}, 8),
+            ),
+        )
+        self.assertEqual(made.reviews_needed(power=0.8), 4)
+        self.assertEqual(made.reviews_needed(power=0.9), "> 4")
+
+    def test_bad_input_raises(self):
+        with self.assertRaises(ValueError):
+            review_budget_curve(
+                0, 8, reviews_per_judge_grid=(3,), sigma_noise=1.0)
+        with self.assertRaises(ValueError):
+            review_budget_curve(
+                6, 0, reviews_per_judge_grid=(3,), sigma_noise=1.0)
+        with self.assertRaises(ValueError):
+            review_budget_curve(
+                6, 8, reviews_per_judge_grid=(), sigma_noise=1.0)
+        with self.assertRaises(ValueError):
+            review_budget_curve(
+                6, 8, reviews_per_judge_grid=(3,), sigma_noise=-1.0)
+        with self.assertRaises(ValueError):
+            review_budget_curve(
+                6, 8, reviews_per_judge_grid=(3,), sigma_noise=1.0, reps=0)
 
 
 if __name__ == "__main__":

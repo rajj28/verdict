@@ -1,0 +1,254 @@
+{% extends "base.html" %}
+{% load portal_tags %}
+{% comment %}
+The decision record of one publication: the locked rule in plain words, the
+parameters, the canonical inputs with their digest, the interventions pulled
+from the audit log, the limitations, and a Verify action that recomputes the
+ranking from the stored inputs with the current engine (BUILD-SPEC section 16).
+{% endcomment %}
+{% block title %}Decision record {{ publication.public_id }} &middot; {{ event.name }}{% endblock %}
+{% block heading %}Decision record{% endblock %}
+{% block lead %}
+  Everything needed to defend this ranking later: the rule, the inputs, the digest
+  and the hand-written decisions that shaped it.
+{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="Breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/events/">Events</a></li>
+    <li class="breadcrumb-item"><a href="/manage/{{ event.slug }}/">{{ event.name }}</a></li>
+    <li class="breadcrumb-item"><a href="/manage/{{ event.slug }}/results">Results</a></li>
+    <li class="breadcrumb-item active" aria-current="page">{{ publication.public_id }}</li>
+  </ol>
+</nav>
+{% endblock %}
+
+{% block page_actions %}
+<a class="btn btn-outline-secondary" href="/manage/{{ event.slug }}/results">All publications</a>
+{% endblock %}
+
+{% block content %}
+
+<section class="card-verdict p-3 mb-4">
+  <dl class="row mb-0">
+    <dt class="col-sm-3">Publication</dt>
+    <dd class="col-sm-9 mono">{{ publication.public_id }}</dd>
+    <dt class="col-sm-3">Published</dt>
+    <dd class="col-sm-9">
+      <time datetime="{{ publication.published_at|date:'c' }}">{{ publication.published_at|utc }}</time>
+      {% if record.published_by %}by {{ record.published_by }}{% endif %}
+    </dd>
+    <dt class="col-sm-3">Method</dt>
+    <dd class="col-sm-9">{{ record.method }}</dd>
+    <dt class="col-sm-3">&lambda;</dt>
+    <dd class="col-sm-9">
+      <span class="mono">{{ record.params.lam|floatformat:4 }}</span>
+      {% if record.params.lambda_source == 'auto' %}&mdash; chosen by 5-fold cross-validation{% else %}&mdash; pre-declared{% endif %}
+    </dd>
+    <dt class="col-sm-3">Rubric version</dt>
+    <dd class="col-sm-9 mono">{{ record.params.rubric_version }}</dd>
+    <dt class="col-sm-3">Input digest</dt>
+    <dd class="col-sm-9">
+      <span class="mono" id="record-digest">{{ publication.input_digest }}</span>
+      <button class="btn btn-sm btn-outline-secondary" type="button" data-copy="#record-digest">Copy</button>
+    </dd>
+    {% if record.supersedes %}
+      <dt class="col-sm-3">Supersedes</dt>
+      <dd class="col-sm-9 mono">{{ record.supersedes }}</dd>
+    {% endif %}
+    {% if record.note %}
+      <dt class="col-sm-3">Note</dt>
+      <dd class="col-sm-9">{{ record.note }}</dd>
+    {% endif %}
+  </dl>
+</section>
+
+<section class="mb-4">
+  <h2 class="h4">The rule, in plain words</h2>
+  <p class="lead">{{ record.rule_plain }}</p>
+</section>
+
+<section class="mb-4">
+  <h2 class="h4">Verify</h2>
+  <p class="form-hint">
+    Recomputes the ranking from the stored inputs with the current engine, and
+    re-hashes the live database. Both must match: the same inputs must give the
+    same rows, and the data behind them must not have moved.
+  </p>
+  <button class="btn btn-primary" type="button"
+          data-api-method="POST" data-api-url="{{ verify_api }}"
+          data-response-field="verdict" data-response-target="#verify-verdict"
+          data-response-reveal="#verify-box">
+    Verify this publication
+  </button>
+  <div class="mt-3" id="verify-box" hidden>
+    <p class="lead" id="verify-verdict"></p>
+    <p class="form-hint" id="verify-detail"></p>
+    <button class="btn btn-sm btn-outline-secondary" type="button"
+            data-api-method="POST" data-api-url="{{ verify_api }}"
+            data-response-field="detail" data-response-target="#verify-detail">
+      Show which checks ran
+    </button>
+  </div>
+</section>
+
+<section class="mb-4">
+  <h2 class="h4">Included reviews</h2>
+  <p class="form-hint">Exactly the reviews the ranking was computed from, with their criterion values.</p>
+  <div class="table-responsive">
+    <table class="data-table">
+      <caption class="visually-hidden">Reviews included in this publication</caption>
+      <thead>
+        <tr>
+          <th scope="col">Review</th>
+          <th scope="col">Judge</th>
+          <th scope="col">Project</th>
+          <th scope="col">Criterion values</th>
+          <th scope="col" class="num">Rubric v</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in record.included_reviews %}
+          <tr>
+            <td class="mono">{{ row.review_id }}</td>
+            <td><code>{{ row.judge_id }}</code></td>
+            <td><code>{{ row.project_id }}</code></td>
+            <td class="mono">{{ row.criteria_text }}</td>
+            <td class="num">{{ row.rubric_version }}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="5" class="form-hint">No review was included.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="mb-4">
+  <h2 class="h4">Excluded reviews</h2>
+  {% if record.excluded_reviews %}
+    <div class="table-responsive">
+      <table class="data-table">
+        <caption class="visually-hidden">Reviews left out of this publication</caption>
+        <thead>
+          <tr>
+            <th scope="col">Review</th>
+            <th scope="col">Judge</th>
+            <th scope="col">Project</th>
+            <th scope="col">Reason</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in record.excluded_reviews %}
+            <tr>
+              <td class="mono">{{ row.review_id }}</td>
+              <td><code>{{ row.judge_id }}</code></td>
+              <td><code>{{ row.project_id }}</code></td>
+              <td>{{ row.reason }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="form-hint">No review was excluded.</p>
+  {% endif %}
+</section>
+
+<section class="mb-4">
+  <h2 class="h4">Prizes as configured at publication</h2>
+  {% if record.prizes %}
+    <div class="table-responsive">
+      <table class="data-table">
+        <caption class="visually-hidden">Prize configuration stored with this publication</caption>
+        <thead>
+          <tr>
+            <th scope="col">Prize</th>
+            <th scope="col">Scope</th>
+            <th scope="col" class="num">Places</th>
+            <th scope="col">Track</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in record.prizes %}
+            <tr>
+              <td>{{ row.name }}</td>
+              <td>{{ row.scope }}</td>
+              <td class="num">{{ row.places }}</td>
+              <td>{% if row.track_name %}{{ row.track_name }}{% else %}&mdash;{% endif %}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="form-hint">
+      {% if record.one_prize_per_team %}
+        One prize per team: a team that won a higher prize is skipped for the next one.
+      {% else %}
+        A team may win more than one prize.
+      {% endif %}
+    </p>
+  {% else %}
+    <p class="form-hint">No prizes were configured when this was published.</p>
+  {% endif %}
+
+  {% if record.awards %}
+    <h3 class="h5 mt-3">Awards</h3>
+    <ul>
+      {% for award in record.awards %}
+        <li>{{ award.prize }} &mdash; {{ award.project }} ({{ award.team }}){% if award.reason %}: {{ award.reason }}{% endif %}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+  {% if record.unawarded %}
+    <h3 class="h5 mt-3">Left for an organizer</h3>
+    <ul>
+      {% for row in record.unawarded %}
+        <li>{{ row.prize }} &mdash; {{ row.reason }}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+</section>
+
+<section class="mb-4">
+  <h2 class="h4">Interventions</h2>
+  <p class="form-hint">
+    Window changes, review exclusions and assignment batches, read straight from the
+    audit log. This is the list a skeptical organizer reads first.
+  </p>
+  <div class="table-responsive">
+    <table class="data-table">
+      <caption class="visually-hidden">Organizer interventions before and during judging</caption>
+      <thead>
+        <tr>
+          <th scope="col">When</th>
+          <th scope="col">Who</th>
+          <th scope="col">Action</th>
+          <th scope="col">What happened</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in record.interventions %}
+          <tr>
+            <td class="mono">{{ row.at }}</td>
+            <td>{{ row.actor }}</td>
+            <td><code>{{ row.action }}</code></td>
+            <td>{{ row.summary }}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="4" class="form-hint">No recorded intervention.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="mb-4">
+  <h2 class="h4">Limitations</h2>
+  <ul>
+    {% for line in record.limitations %}<li>{{ line }}</li>{% endfor %}
+  </ul>
+</section>
+
+{% endblock %}

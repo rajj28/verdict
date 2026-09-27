@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% load portal_tags %}
+{% comment %}
+The readable audit log. The filters are plain GET parameters and the rows come
+from audit.policy.visible_audit_events, so this page and /api/v1/.../audit show
+the same selection. Nothing on this page can change state.
+{% endcomment %}
+{% block title %}Audit log &middot; {{ event.name }}{% endblock %}
+{% block heading %}Audit log{% endblock %}
+{% block lead %}
+  Every state change in {{ event.name }}, newest first, with who did it and what
+  it changed. Append-only: entries are never edited or removed.
+{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="Breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/events/">Events</a></li>
+    <li class="breadcrumb-item"><a href="/manage/{{ event.slug }}/">{{ event.name }}</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Audit log</li>
+  </ol>
+</nav>
+{% endblock %}
+
+{% block page_actions %}
+<a class="btn btn-outline-secondary" href="{{ export_url }}">Download CSV</a>
+<a class="btn btn-outline-secondary" href="/manage/{{ event.slug }}/exports">Exports</a>
+{% endblock %}
+
+{% block content %}
+
+<form class="card-verdict p-3 mb-3" method="get" action="/manage/{{ event.slug }}/audit">
+  <div class="row g-2 align-items-end">
+    <div class="col-12 col-md-4">
+      <label class="form-label" for="id_filter_action">Action</label>
+      <select class="form-select" id="id_filter_action" name="action">
+        {% for value, label in action_groups %}
+          <option value="{{ value }}"{% if action == value %} selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-12 col-md-3">
+      <label class="form-label" for="id_filter_actor">Actor</label>
+      <select class="form-select" id="id_filter_actor" name="actor">
+        <option value="">Anyone</option>
+        {% for row in actors %}
+          <option value="{{ row.public_id }}"{% if actor == row.public_id %} selected{% endif %}>{{ row.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-12 col-md-3">
+      <label class="form-label" for="id_filter_since">Since</label>
+      <input class="form-control" id="id_filter_since" name="since" type="datetime-local"
+             value="{{ since }}">
+    </div>
+    <div class="col-12 col-md-2">
+      <button class="btn btn-outline-secondary w-100" type="submit">Filter</button>
+    </div>
+  </div>
+</form>
+
+<p class="form-hint">{{ result_count }} entr{{ result_count|pluralize:"y,ies" }} in this view.</p>
+
+<div class="table-responsive">
+  <table class="data-table">
+    <caption class="visually-hidden">Audit log for {{ event.name }}</caption>
+    <thead>
+      <tr>
+        <th scope="col">When</th>
+        <th scope="col">Actor</th>
+        <th scope="col">Action</th>
+        <th scope="col">Target</th>
+        <th scope="col">What changed</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for entry in entries %}
+        <tr>
+          <td><time datetime="{{ entry.event.created_at|date:'c' }}">{{ entry.event.created_at|utc }}</time></td>
+          <td>
+            {{ entry.event.actor_label|default:"system" }}
+            {% if entry.role %}<span class="role-pill role-{{ entry.role }}">{{ entry.role }}</span>{% endif %}
+          </td>
+          <td><code>{{ entry.event.action }}</code></td>
+          <td class="mono">{% if entry.event.target_id %}{{ entry.event.target_type }} {{ entry.event.target_id }}{% else %}&mdash;{% endif %}</td>
+          <td>{{ entry.event.summary }}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="5" class="form-hint">No entry matches this filter.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if page_obj.paginator.num_pages > 1 %}
+  <nav class="mt-3" aria-label="Audit log pages">
+    <ul class="pagination">
+      {% if page_obj.has_previous %}
+        <li class="page-item">
+          <a class="page-link" href="?{% if action %}action={{ action }}&amp;{% endif %}{% if actor %}actor={{ actor }}&amp;{% endif %}{% if since %}since={{ since|urlencode }}&amp;{% endif %}page={{ page_obj.previous_page_number }}">Newer</a>
+        </li>
+      {% endif %}
+      <li class="page-item disabled"><span class="page-link">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span></li>
+      {% if page_obj.has_next %}
+        <li class="page-item">
+          <a class="page-link" href="?{% if action %}action={{ action }}&amp;{% endif %}{% if actor %}actor={{ actor }}&amp;{% endif %}{% if since %}since={{ since|urlencode }}&amp;{% endif %}page={{ page_obj.next_page_number }}">Older</a>
+        </li>
+      {% endif %}
+    </ul>
+  </nav>
+{% endif %}
+
+{% endblock %}

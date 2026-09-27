@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% load portal_tags %}
+{% comment %}
+The public results page. It renders the stored publication's public projection
+only: rank, project, team, track, n, raw and normalized scores, the allocated
+prizes. No judge name, id, offset or comment ever reaches this template
+(BUILD-SPEC sections 3 and 16) — the rows themselves carry none.
+{% endcomment %}
+{% block title %}Results &middot; {{ event.name }}{% endblock %}
+{% block description %}Final results for {{ event.name }}{% if publication %}, published {{ publication.published_at|date:"Y-m-d" }}.{% endif %}{% endblock %}
+
+{% block heading %}{{ event.name }} results{% endblock %}
+{% block lead %}
+  {% if publication %}
+    Published
+    <time datetime="{{ publication.published_at|date:'c' }}">{{ publication.published_at|utc }}</time>
+    using {{ method_label }}{% if publication.params.lam %} with &lambda; {{ publication.params.lam|floatformat:2 }}{% endif %}.
+    Scores are normalized: each judge&rsquo;s habit of scoring high or low is removed
+    before the projects are ranked.
+  {% else %}
+    Results are not published yet.
+  {% endif %}
+{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="Breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/events/">Events</a></li>
+    <li class="breadcrumb-item"><a href="/events/{{ event.slug }}/">{{ event.name }}</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Results</li>
+  </ol>
+</nav>
+{% endblock %}
+
+{% block page_actions %}
+<a class="btn btn-outline-secondary" href="/events/{{ event.slug }}/">Event page</a>
+{% endblock %}
+
+{% block content %}
+
+{% if not publication %}
+  <div class="empty-state">
+    <h2>Not yet published</h2>
+    <p class="mb-3">
+      The organizers have not published the results of this event. Judging may still be
+      running, or the results may be out for a final check.
+    </p>
+    <a class="btn btn-outline-primary" href="/events/{{ event.slug }}/">Back to the event</a>
+  </div>
+{% else %}
+
+  {% if awards %}
+    <section class="mb-4">
+      <h2 class="h4">Prizes</h2>
+      <div class="list-group">
+        {% for award in awards %}
+          <div class="list-group-item">
+            <span class="tag-pill">{{ award.prize }}</span>
+            <a class="link-underline" href="/events/{{ event.slug }}/projects/{{ award.project_id }}">{{ award.project }}</a>
+            <span class="form-hint">{{ award.team }}{% if award.track %} &middot; {{ award.track }}{% endif %}</span>
+          </div>
+        {% endfor %}
+      </div>
+      {% if unawarded %}
+        <div class="alert alert-light border mt-3 mb-0" role="alert">
+          <strong>Still to decide:</strong>
+          <ul class="mb-0 mt-1">
+            {% for row in unawarded %}
+              <li>{{ row.prize }} &mdash; {{ row.reason }}</li>
+            {% endfor %}
+          </ul>
+        </div>
+      {% endif %}
+    </section>
+  {% endif %}
+
+  <section class="mb-4">
+    <h2 class="h4">Ranking</h2>
+    <div class="table-responsive">
+      <table class="data-table">
+        <caption class="visually-hidden">Final ranking for {{ event.name }}</caption>
+        <thead>
+          <tr>
+            <th scope="col" class="num">Rank</th>
+            <th scope="col">Project</th>
+            <th scope="col">Team</th>
+            <th scope="col">Track</th>
+            <th scope="col" class="num">Reviews</th>
+            <th scope="col" class="num">Score</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in ranked %}
+            <tr>
+              <td class="num">{{ row.rank }}</td>
+              <td>
+                <a class="link-underline" href="/events/{{ event.slug }}/projects/{{ row.project_id }}">{{ row.title }}</a>
+              </td>
+              <td>{{ row.team }}</td>
+              <td>{% if row.track %}<span class="track-badge">{{ row.track }}</span>{% else %}&mdash;{% endif %}</td>
+              <td class="num">{{ row.n_reviews }}</td>
+              <td class="num">{{ row.normalized|floatformat:2 }}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="6" class="form-hint">No project could be ranked.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {% if unranked %}
+      <h3 class="h5 mt-4">Not ranked</h3>
+      <p class="form-hint">
+        Unranked is a status, not a zero: these projects were eligible but carry no score
+        the organizers were willing to rank them on.
+      </p>
+      <ul>
+        {% for row in unranked %}
+          <li>
+            <a class="link-underline" href="/events/{{ event.slug }}/projects/{{ row.project_id }}">{{ row.title }}</a>
+            <span class="form-hint">{{ row.status }}{% if row.status_reason %} &mdash; {{ row.status_reason }}{% endif %}</span>
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </section>
+
+  {% for group in by_track %}
+    <section class="mb-4">
+      <h2 class="h4">{{ group.name }}</h2>
+      <div class="table-responsive">
+        <table class="data-table">
+          <caption class="visually-hidden">Ranking within {{ group.name }}</caption>
+          <thead>
+            <tr>
+              <th scope="col" class="num">Rank</th>
+              <th scope="col">Project</th>
+              <th scope="col" class="num">Reviews</th>
+              <th scope="col" class="num">Score</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in group.rows %}
+              <tr>
+                <td class="num">{% if row.rank %}{{ row.rank }}{% else %}&mdash;{% endif %}</td>
+                <td>
+                  <a class="link-underline" href="/events/{{ event.slug }}/projects/{{ row.project_id }}">{{ row.title }}</a>
+                </td>
+                <td class="num">{{ row.n_reviews }}</td>
+                <td class="num">{{ row.normalized|floatformat:2 }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% endfor %}
+
+  <p class="form-hint">
+    How this ranking was produced, who decided what and the data it was computed from
+    are recorded in a decision record the organizers can show you, including a Verify
+    action that recomputes the result from the stored inputs.
+  </p>
+
+{% endif %}
+
+{% endblock %}

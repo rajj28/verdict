@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% comment %}
+Every export an organizer can download, with one line each saying what is inside.
+The links point at the export API, which is the only thing that builds them: the
+same bytes a scripted check reads are the bytes a browser downloads.
+{% endcomment %}
+{% block title %}Exports &middot; {{ event.name }}{% endblock %}
+{% block heading %}Exports{% endblock %}
+{% block lead %}
+  Every CSV, plus one event.json that reproduces this event as a fixture-shaped
+  document. Cells are escaped so a title beginning with = or + cannot become a
+  formula in a spreadsheet.
+{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="Breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/events/">Events</a></li>
+    <li class="breadcrumb-item"><a href="/manage/{{ event.slug }}/">{{ event.name }}</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Exports</li>
+  </ol>
+</nav>
+{% endblock %}
+
+{% block page_actions %}
+<a class="btn btn-outline-secondary" href="/manage/{{ event.slug }}/audit">Audit log</a>
+{% endblock %}
+
+{% block content %}
+
+<section class="mb-4">
+  <h2 class="h4">CSV</h2>
+  <div class="list-group">
+    {% for row in exports %}
+      <div class="list-group-item d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <div>
+          <a class="link-underline mono" href="{{ row.url }}">{{ row.kind }}.csv</a>
+          <div class="form-hint">{{ row.description }}</div>
+        </div>
+        <a class="btn btn-sm btn-outline-primary" href="{{ row.url }}">Download</a>
+      </div>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="mb-4">
+  <h2 class="h4">JSON</h2>
+  <div class="list-group">
+    <div class="list-group-item d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <div>
+        <a class="link-underline mono" href="{{ json_url }}">event.json</a>
+        <div class="form-hint">
+          The whole event in fixture shape: tracks, judges, teams, projects, criteria and
+          scores. It round-trips &mdash; importing it into another install recreates the event
+          with the same source ids, and nothing secret (no password hashes, no token
+          hashes) is ever included.
+        </div>
+      </div>
+      <a class="btn btn-sm btn-outline-primary" href="{{ json_url }}">Download</a>
+    </div>
+  </div>
+</section>
+
+{% endblock %}

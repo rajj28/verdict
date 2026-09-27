@@ -1,6 +1,9 @@
-"""Append-only audit log.
+"""Audit log HTML routes (server-rendered page)."""
 
-HTML routes (server-rendered pages).
-"""
+from django.urls import path
 
-urlpatterns: list = []
+from audit import views
+
+urlpatterns = [
+    path("manage/<slug:slug>/audit", views.audit_log, name="manage-audit"),
+]

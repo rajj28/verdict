@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% load static portal_tags %}
+{% comment %}
+The rubric editor. Read-only rendering: the whole criteria list is one PUT to
+/api/v1/events/{slug}/rubric, assembled from the rows by manage-forms.js, so the
+lock rule (409 once the first review is submitted) stays in judging.services.
+{% endcomment %}
+{% block title %}Rubric &middot; {{ event.name }}{% endblock %}
+{% block heading %}Rubric{% endblock %}
+{% block lead %}
+  The weighted criteria judges score against. Weights are shown as a share of the
+  total, because a weight of 3 against 1 reads very differently from 75% and 25%.
+{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="Breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/events/">Events</a></li>
+    <li class="breadcrumb-item"><a href="/manage/{{ event.slug }}/">{{ event.name }}</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Rubric</li>
+  </ol>
+</nav>
+{% endblock %}
+
+{% block page_actions %}
+<a class="btn btn-outline-secondary" href="/manage/{{ event.slug }}/judges">Judges</a>
+<a class="btn btn-outline-secondary" href="/manage/{{ event.slug }}/assignments">Assignments</a>
+{% endblock %}
+
+{% block content %}
+
+{% if event.scoring_locked_at %}
+  <div class="alert alert-warning" role="alert">
+    <h2 class="h5 alert-heading">Scoring is locked</h2>
+    <p class="mb-0">
+      The first review was submitted
+      <time datetime="{{ event.scoring_locked_at|date:'c' }}">{{ event.scoring_locked_at|utc }}</time>,
+      so the rubric, the ranking method and &lambda; can no longer be changed: a review
+      carries the rubric version it was scored against, and editing it afterwards would
+      make the published results unexplainable. The API refuses an edit with
+      <code>409 scoring_locked</code>, not just this page.
+    </p>
+  </div>
+{% endif %}
+
+<section class="mb-4">
+  <div class="d-flex flex-wrap justify-content-between align-items-baseline gap-2 mb-2">
+    <h2 class="h4 mb-0">Criteria{% if rubric_version %} &middot; version {{ rubric_version }}{% endif %}</h2>
+    <p class="mb-0 form-hint">{{ criterion_rows|length }} criterion{{ criterion_rows|length|pluralize }}</p>
+  </div>
+
+  {% if criterion_rows %}
+    <div class="table-responsive">
+      <table class="data-table">
+        <caption class="visually-hidden">Scoring criteria and their share of the total weight</caption>
+        <thead>
+          <tr>
+            <th scope="col">Key</th>
+            <th scope="col">Criterion</th>
+            <th scope="col">Scale</th>
+            <th scope="col" class="num">Weight</th>
+            <th scope="col" class="num">Share</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in criterion_rows %}
+            <tr>
+              <td><code>{{ row.key }}</code></td>
+              <td>
+                {{ row.name }}
+                {% if row.description %}<div class="form-hint">{{ row.description }}</div>{% endif %}
+              </td>
+              <td class="num">{{ row.min_score }}&ndash;{{ row.max_score }}</td>
+              <td class="num">{{ row.weight }}</td>
+              <td class="num">{{ row.weight_percent }}%</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="empty-state">
+      <h2>No criteria yet</h2>
+      <p class="mb-3">Judges score against these criteria. Add the first one below.</p>
+    </div>
+  {% endif %}
+</section>
+
+{% if not event.scoring_locked_at %}
+<section class="mb-4">
+  <h2 class="h4">Edit criteria</h2>
+  <p class="form-hint">
+    One row per criterion. Key is what a review stores, so it has to stay stable
+    once reviews exist; weight may be any positive number, the share above is
+    recomputed from the total.
+  </p>
+  <form data-api-method="PUT" data-api-url="{{ rubric_api }}" data-success="reload"
+        data-compact="criteria" class="card-verdict p-3">
+    <div data-form-errors class="mb-3"></div>
+    <input type="hidden" name="criteria" data-type="json" value="[]">
+
+    <div id="criterion-rows" class="vstack gap-3 mb-3">
+      {% for row in criterion_rows %}
+        <div class="row g-2 align-items-end" data-row>
+          <div class="col-6 col-md-2">
+            <label class="form-label" for="id_key_{{ forloop.counter }}">Key</label>
+            <input class="form-control" id="id_key_{{ forloop.counter }}" data-key="key"
+                   type="text" pattern="[a-z0-9-]+" maxlength="60" required
+                   value="{{ row.key }}">
+          </div>
+          <div class="col-6 col-md-3">
+            <label class="form-label" for="id_name_{{ forloop.counter }}">Name</label>
+            <input class="form-control" id="id_name_{{ forloop.counter }}" data-key="name"
+                   type="text" maxlength="120" required value="{{ row.name }}">
+          </div>
+          <div class="col-12 col-md-3">
+            <label class="form-label" for="id_description_{{ forloop.counter }}">Description</label>
+            <input class="form-control" id="id_description_{{ forloop.counter }}"
+                   data-key="description" type="text" maxlength="300" value="{{ row.description }}">
+          </div>
+          <div class="col-6 col-md-1">
+            <label class="form-label" for="id_weight_{{ forloop.counter }}">Weight</label>
+            <input class="form-control" id="id_weight_{{ forloop.counter }}" data-key="weight"
+                   type="number" step="0.001" min="0" data-type="float" required
+                   value="{{ row.weight }}">
+          </div>
+          <div class="col-3 col-md-1">
+            <label class="form-label" for="id_min_{{ forloop.counter }}">Min</label>
+            <input class="form-control" id="id_min_{{ forloop.counter }}" data-key="min_score"
+                   type="number" min="0" data-type="int" value="{{ row.min_score }}">
+          </div>
+          <div class="col-3 col-md-1">
+            <label class="form-label" for="id_max_{{ forloop.counter }}">Max</label>
+            <input class="form-control" id="id_max_{{ forloop.counter }}" data-key="max_score"
+                   type="number" min="1" data-type="int" value="{{ row.max_score }}">
+          </div>
+          <div class="col-12 col-md-1">
+            <label class="form-label" for="id_position_{{ forloop.counter }}">Order</label>
+            <input class="form-control" id="id_position_{{ forloop.counter }}" data-key="position"
+                   type="number" min="0" data-type="int" value="{{ forloop.counter0 }}">
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+
+    <div class="d-flex flex-wrap gap-2">
+      <button class="btn btn-outline-secondary" type="button" data-row-add="#criterion-rows"
+              data-row-template="#criterion-row-template">Add criterion</button>
+      <button class="btn btn-primary" type="submit">Save rubric</button>
+    </div>
+  </form>
+
+  <template id="criterion-row-template">
+    <div class="row g-2 align-items-end" data-row>
+      <div class="col-6 col-md-2">
+        <label class="form-label">Key</label>
+        <input class="form-control" data-key="key" type="text" pattern="[a-z0-9-]+"
+               maxlength="60" required>
+      </div>
+      <div class="col-6 col-md-3">
+        <label class="form-label">Name</label>
+        <input class="form-control" data-key="name" type="text" maxlength="120" required>
+      </div>
+      <div class="col-12 col-md-3">
+        <label class="form-label">Description</label>
+        <input class="form-control" data-key="description" type="text" maxlength="300">
+      </div>
+      <div class="col-6 col-md-1">
+        <label class="form-label">Weight</label>
+        <input class="form-control" data-key="weight" type="number" step="0.001" min="0"
+               data-type="float" value="1">
+      </div>
+      <div class="col-3 col-md-1">
+        <label class="form-label">Min</label>
+        <input class="form-control" data-key="min_score" type="number" min="0" data-type="int" value="1">
+      </div>
+      <div class="col-3 col-md-1">
+        <label class="form-label">Max</label>
+        <input class="form-control" data-key="max_score" type="number" min="1" data-type="int" value="5">
+      </div>
+      <div class="col-12 col-md-1">
+        <label class="form-label">Order</label>
+        <input class="form-control" data-key="position" type="number" min="0" data-type="int">
+      </div>
+    </div>
+  </template>
+</section>
+{% endif %}
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/manage-forms.js' %}"></script>
+{% endblock %}

@@ -1,0 +1,273 @@
+{% extends "base.html" %}
+{% load portal_tags %}
+{% comment %}
+Judges, invitations and conflicts. Every write on this page is a data-api-*
+form: add a judge, patch their tracks, invite by email, declare a conflict,
+remove a judge. There is no mail server, so an invitation is shown as a link the
+organizer copies (BUILD-SPEC section 17).
+{% endcomment %}
+{% block title %}Judges &middot; {{ event.name }}{% endblock %}
+{% block heading %}Judges{% endblock %}
+{% block lead %}
+  Who is judging, what they are assigned and which conflicts keep them away from
+  which team. A judge can never also compete in the event they judge: one person
+  holds one role per event, enforced by a database constraint.
+{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="Breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/events/">Events</a></li>
+    <li class="breadcrumb-item"><a href="/manage/{{ event.slug }}/">{{ event.name }}</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Judges</li>
+  </ol>
+</nav>
+{% endblock %}
+
+{% block page_actions %}
+<a class="btn btn-outline-secondary" href="/manage/{{ event.slug }}/assignments">Assignments</a>
+<a class="btn btn-outline-secondary" href="/manage/{{ event.slug }}/progress">Progress</a>
+{% endblock %}
+
+{% block content %}
+
+<section class="mb-4">
+  <h2 class="h4">Judge directory</h2>
+  <p class="form-hint" id="tracks-help">
+    A judge only sees and scores projects in the tracks they hold. Changing the
+    tracks of a judge who already has assignments does not undo those assignments.
+  </p>
+  {% if judge_rows %}
+    <div class="table-responsive">
+      <table class="data-table">
+        <caption class="visually-hidden">Judges of {{ event.name }} with their load and status</caption>        <thead>
+          <tr>
+            <th scope="col">Judge</th>
+            <th scope="col">Tracks &amp; load</th>
+            <th scope="col" class="num">Assigned</th>
+            <th scope="col" class="num">Submitted</th>
+            <th scope="col">Status</th>
+            <th scope="col"><span class="visually-hidden">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in judge_rows %}
+            <tr>
+              <td>
+                {{ row.name }}
+                <div class="form-hint"><code>{{ row.judge }}</code></div>
+              </td>
+              <td>
+                {% for track in row.tracks %}<span class="tag-pill">{{ track }}</span>{% empty %}<span class="form-hint">no track</span>{% endfor %}
+                <form data-api-method="PATCH" data-api-url="{{ judges_api }}/{{ row.judge }}"
+                      data-success="reload" class="d-flex flex-wrap gap-1 align-items-center mt-2">
+                  <label class="visually-hidden" for="id_tracks_{{ row.judge }}">Tracks for {{ row.name }}</label>
+                  <select class="form-select form-select-sm" id="id_tracks_{{ row.judge }}"
+                          name="tracks" multiple size="2" style="min-width: 8rem"
+                          aria-describedby="tracks-help">
+                    {% for track in tracks %}
+                      <option value="{{ track.public_id }}"
+                        {% for assigned in row.tracks %}{% if assigned == track.name %}selected{% endif %}{% endfor %}>
+                        {{ track.name }}
+                      </option>
+                    {% endfor %}
+                  </select>
+                  <button class="btn btn-sm btn-outline-secondary" type="submit">Save tracks</button>
+                </form>
+              </td>
+              <td class="num">{{ row.assigned }}</td>
+              <td class="num">{{ row.submitted }}</td>
+              <td><span class="status-badge {{ row.status_badge }}">{{ row.status_label }}</span></td>
+              <td class="text-end">
+                <button class="btn btn-sm btn-outline-danger" type="button"
+                        data-api-method="DELETE" data-api-url="{{ judges_api }}/{{ row.judge }}"
+                        data-success="reload"
+                        data-confirm="Remove {{ row.name }} as a judge? Their assignments and reviews stay, but they lose the judge role.">
+                  Remove
+                </button>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="empty-state">
+      <h2>No judges yet</h2>
+      <p class="mb-3">
+        Add an existing account by email, or invite someone who has no account
+        yet and copy them the link below.
+      </p>
+    </div>
+  {% endif %}
+</section>
+
+<div class="row g-4 mb-4">
+  <div class="col-lg-6">
+    <section class="h-100">
+      <h2 class="h4">Add an existing account</h2>
+      <form data-api-method="POST" data-api-url="{{ judges_api }}" data-success="reload"
+            class="card-verdict p-3">
+        <div data-form-errors class="mb-3"></div>
+        <div class="mb-3">
+          <label class="form-label" for="id_judge_email">Email <span aria-hidden="true">*</span></label>
+          <input class="form-control" id="id_judge_email" name="email" type="email" required
+                 placeholder="judge@example.org">
+          <div class="form-text">
+            The account must already exist, and must not hold another role in this event.
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="id_judge_tracks">Tracks</label>
+          <select class="form-select" id="id_judge_tracks" name="tracks" multiple>
+            {% for track in tracks %}<option value="{{ track.public_id }}">{{ track.name }}</option>{% endfor %}
+          </select>
+          <div class="form-text">A judge only sees and scores projects in the tracks they hold.</div>
+        </div>
+        <button class="btn btn-primary" type="submit">Add judge</button>
+      </form>
+    </section>
+  </div>
+
+  <div class="col-lg-6">
+    <section class="h-100">
+      <h2 class="h4">Invite by email</h2>
+      <form data-api-method="POST" data-api-url="{{ invites_api }}" data-success="reload"
+            class="card-verdict p-3">
+        <div data-form-errors class="mb-3"></div>
+        <div class="mb-3">
+          <label class="form-label" for="id_invite_emails">Emails <span aria-hidden="true">*</span></label>
+          <input class="form-control" id="id_invite_emails" name="emails" type="text"
+                 data-type="list" required placeholder="one@example.org, two@example.org">
+          <div class="form-text">Comma separated. Each address gets its own single-use link.</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="id_invite_tracks">Tracks</label>
+          <select class="form-select" id="id_invite_tracks" name="tracks" multiple>
+            {% for track in tracks %}<option value="{{ track.public_id }}">{{ track.name }}</option>{% endfor %}
+          </select>
+        </div>
+        <button class="btn btn-primary" type="submit">Create invitations</button>
+        <p class="form-text mt-2 mb-0">
+          There is no mail server on a self-hosted install, so the link appears in the
+          table below for you to send yourself.
+        </p>
+      </form>
+    </section>
+  </div>
+</div>
+
+<section class="mb-4">
+  <h2 class="h4">Invitations</h2>
+  {% if invites %}
+    <div class="table-responsive">
+      <table class="data-table">
+        <caption class="visually-hidden">Judge invitations for {{ event.name }}</caption>
+        <thead>
+          <tr>
+            <th scope="col">Email</th>
+            <th scope="col">Tracks</th>
+            <th scope="col">Link</th>
+            <th scope="col">State</th>
+            <th scope="col">Expires</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for invite in invites %}
+            <tr>
+              <td>{{ invite.email }}</td>
+              <td>
+                {% for track in invite.tracks.all %}<span class="tag-pill">{{ track.name }}</span>{% empty %}<span class="form-hint">no track</span>{% endfor %}
+              </td>
+              <td>
+                {% if invite.accepted_at or invite.revoked_at %}
+                  <span class="form-hint">no longer usable</span>
+                {% else %}
+                  <div class="d-flex gap-2 align-items-center">
+                    <input class="form-control form-control-sm mono" id="id_invite_{{ invite.token }}"
+                           type="text" readonly value="/judge-invite?token={{ invite.token }}">
+                    <button class="btn btn-sm btn-outline-secondary" type="button"
+                            data-copy="#id_invite_{{ invite.token }}">Copy</button>
+                  </div>
+                {% endif %}
+              </td>
+              <td>
+                {% if invite.accepted_at %}<span class="status-badge status-done">Accepted</span>
+                {% elif invite.revoked_at %}<span class="status-badge status-closed">Revoked</span>
+                {% else %}<span class="status-badge status-open">Pending</span>{% endif %}
+              </td>
+              <td><time datetime="{{ invite.expires_at|date:'c' }}">{{ invite.expires_at|utc }}</time></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="form-hint">No invitations yet.</p>
+  {% endif %}
+</section>
+
+<section class="mb-4">
+  <h2 class="h4">Conflicts of interest</h2>
+  <p class="form-hint">
+    A judge with a declared conflict is never assigned a project of that team, by
+    the assignment service, not by this page.
+  </p>
+
+  <form data-api-method="POST" data-api-url="{{ conflicts_api }}" data-success="reload"
+        class="card-verdict p-3 mb-3">
+    <div data-form-errors class="mb-3"></div>
+    <div class="row g-2 align-items-end">
+      <div class="col-12 col-md-3">
+        <label class="form-label" for="id_conflict_judge">Judge</label>
+        <select class="form-select" id="id_conflict_judge" name="judge" required>
+          {% for row in judge_rows %}<option value="{{ row.judge }}">{{ row.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="col-12 col-md-3">
+        <label class="form-label" for="id_conflict_team">Team</label>
+        <select class="form-select" id="id_conflict_team" name="team" required>
+          {% for team in teams %}<option value="{{ team.public_id }}">{{ team.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="col-12 col-md-4">
+        <label class="form-label" for="id_conflict_reason">Reason</label>
+        <input class="form-control" id="id_conflict_reason" name="reason" type="text"
+               maxlength="300" placeholder="Works at the same company">
+      </div>
+      <div class="col-12 col-md-2">
+        <button class="btn btn-primary w-100" type="submit">Declare conflict</button>
+      </div>
+    </div>
+  </form>
+
+  {% if conflicts %}
+    <div class="table-responsive">
+      <table class="data-table">
+        <caption class="visually-hidden">Declared conflicts</caption>
+        <thead>
+          <tr>
+            <th scope="col">Judge</th>
+            <th scope="col">Team</th>
+            <th scope="col">Reason</th>
+            <th scope="col">Declared by</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for conflict in conflicts %}
+            <tr>
+              <td>{{ conflict.judge.user.display_name|default:conflict.judge.public_id }}</td>
+              <td>{{ conflict.team.name }}</td>
+              <td>{% if conflict.reason %}{{ conflict.reason }}{% else %}&mdash;{% endif %}</td>
+              <td><span class="tag-pill">{{ conflict.get_source_display }}</span></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="form-hint">No conflicts declared.</p>
+  {% endif %}
+</section>
+
+{% endblock %}

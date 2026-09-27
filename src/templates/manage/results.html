@@ -1,0 +1,583 @@
+{% extends "base.html" %}
+{% load static %}
+{% load portal_tags %}
+{% comment %}
+The results page. Every number on it comes from results.services.preview (the same
+call the API makes) or from the stored publications; publishing, releasing
+feedback and closing judging are data-api-* forms, so the service keeps the last
+word. Judge names appear here because this page is organizer-only.
+{% endcomment %}
+{% block title %}Results &middot; {{ event.name }}{% endblock %}
+{% block heading %}Results{% endblock %}
+{% block lead %}
+  The official ranking, the judges behind it and the certificate that says how
+  hard it would be to change the winner. Nothing here is public until you
+  publish it.
+{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="Breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/events/">Events</a></li>
+    <li class="breadcrumb-item"><a href="/manage/{{ event.slug }}/">{{ event.name }}</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Results</li>
+  </ol>
+</nav>
+{% endblock %}
+
+{% block page_actions %}
+<a class="btn btn-outline-secondary" href="/manage/{{ event.slug }}/progress">Progress</a>
+<a class="btn btn-outline-secondary" href="/manage/{{ event.slug }}/exports">Exports</a>
+{% if latest_publication %}
+  <a class="btn btn-outline-secondary" href="/manage/{{ event.slug }}/results/publications/{{ latest_publication.public_id }}">Decision record</a>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+
+{% if preview_error %}
+  <div class="alert alert-warning" role="alert">
+    <h2 class="h5 alert-heading">No preview yet</h2>
+    <p class="mb-0">{{ preview_error }}</p>
+  </div>
+{% endif %}
+
+{% if preview %}
+  <section class="card-verdict p-3 mb-4">
+    <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+      <span class="role-pill role-organizer">Official method</span>
+      <strong>{{ method_label }}</strong>
+      {% if components == 1 %}
+        <span class="status-badge status-done">one connected judge set</span>
+      {% elif components and components > 1 %}
+        <span class="status-badge status-not-started">{{ components }} disconnected components</span>
+      {% endif %}
+    </div>
+    <dl class="row mb-0 form-hint">
+      <dt class="col-sm-4">&lambda; (shrinkage)</dt>
+      <dd class="col-sm-8">
+        <span class="mono">{{ preview.lam|floatformat:4 }}</span>
+        {% if preview.params.lambda_source == 'auto' %}
+          &mdash; chosen by 5-fold cross-validation at preview time
+        {% else %}
+          &mdash; pre-declared for this event
+        {% endif %}
+      </dd>
+      <dt class="col-sm-4">Rubric version</dt>
+      <dd class="col-sm-8"><span class="mono">{{ preview.params.rubric_version }}</span></dd>
+      <dt class="col-sm-4">Reviews in / out</dt>
+      <dd class="col-sm-8"><span class="mono">{{ preview.n_included }}</span> included, <span class="mono">{{ preview.n_excluded }}</span> excluded</dd>
+      <dt class="col-sm-4">Locked</dt>
+      <dd class="col-sm-8">
+        {% if event.scoring_locked_at %}
+          <time datetime="{{ event.scoring_locked_at|date:'c' }}">{{ event.scoring_locked_at|utc }}</time>
+        {% else %}not yet &mdash; scoring locks at the first submitted review{% endif %}
+      </dd>
+      <dt class="col-sm-4">Input digest</dt>
+      <dd class="col-sm-8">
+        <span class="mono">{{ preview.input_digest|slice:":16" }}</span>
+        <button class="btn btn-sm btn-outline-secondary" type="button"
+                data-copy="#digest-full">Copy digest</button>
+        <span id="digest-full" class="d-none" hidden>{{ preview.input_digest }}</span>
+      </dd>
+    </dl>
+  </section>
+
+  <ul class="nav nav-tabs mb-3" role="tablist">
+    <li class="nav-item" role="presentation">
+      <button class="nav-link active" id="ranking-tab" data-bs-toggle="tab"
+              data-bs-target="#ranking-pane" type="button" role="tab" aria-controls="ranking-pane" aria-selected="true">Ranking</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="judges-tab" data-bs-toggle="tab"
+              data-bs-target="#judges-pane" type="button" role="tab" aria-controls="judges-pane" aria-selected="false">Judges</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="robustness-tab" data-bs-toggle="tab"
+              data-bs-target="#robustness-pane" type="button" role="tab" aria-controls="robustness-pane" aria-selected="false">Robustness</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="explain-tab" data-bs-toggle="tab"
+              data-bs-target="#explain-pane" type="button" role="tab" aria-controls="explain-pane" aria-selected="false">Explain</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="issues-tab" data-bs-toggle="tab"
+              data-bs-target="#issues-pane" type="button" role="tab" aria-controls="issues-pane" aria-selected="false">
+        Data issues{% if issue_count %} <span class="tag-pill">{{ issue_count }}</span>{% endif %}
+      </button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="publish-tab" data-bs-toggle="tab"
+              data-bs-target="#publish-pane" type="button" role="tab" aria-controls="publish-pane" aria-selected="false">Publish</button>
+    </li>
+  </ul>
+
+  <div class="tab-content">
+
+    {# ---- Ranking ---- #}
+    <div class="tab-pane fade show active" id="ranking-pane" role="tabpanel" aria-labelledby="ranking-tab" tabindex="0">
+      <p class="form-hint">
+        &Delta; is the rank movement caused by removing judge offsets: a positive number
+        means the project gained places once judges were normalized against each other.
+      </p>
+      <div class="table-responsive">
+        <table class="data-table">
+          <caption class="visually-hidden">Official ranking with raw and normalized scores</caption>
+          <thead>
+            <tr>
+              <th scope="col" class="num">Rank</th>
+              <th scope="col" class="num">&Delta; vs raw</th>
+              <th scope="col">Project</th>
+              <th scope="col">Track</th>
+              <th scope="col" class="num">n</th>
+              <th scope="col" class="num">Raw</th>
+              <th scope="col" class="num">Normalized</th>
+              <th scope="col" class="num">Derived BT</th>
+              <th scope="col">Flags</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in rows %}
+              <tr>
+                <td class="num">{% if row.rank %}{{ row.rank }}{% else %}&mdash;{% endif %}</td>
+                <td class="num {{ row.delta_class }}">{{ row.delta_text|default:"0" }}</td>
+                <td>
+                  <a class="link-underline" href="/events/{{ event.slug }}/projects/{{ row.project_id }}">{{ row.title }}</a>
+                  <div class="form-hint">{{ row.team }}</div>
+                </td>
+                <td>{% if row.track %}<span class="track-badge">{{ row.track }}</span>{% else %}&mdash;{% endif %}</td>
+                <td class="num">{{ row.n_reviews }}</td>
+                <td class="num">{{ row.raw_mean|floatformat:2 }}</td>
+                <td class="num">{{ row.normalized|floatformat:2 }}</td>
+                <td class="num">{{ row.rank_bt|default:"&mdash;" }}</td>
+                <td>
+                  <span class="status-badge {{ row.status_badge }}">{{ row.status_label }}</span>
+                  {% if row.status_reason %}<div class="form-hint">{{ row.status_reason }}</div>{% endif %}
+                </td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="9" class="form-hint">No projects to rank yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    {# ---- Judges ---- #}
+    <div class="tab-pane fade" id="judges-pane" role="tabpanel" aria-labelledby="judges-tab" tabindex="0">
+      <p class="form-hint">
+        An offset is how much higher or lower than the field this judge scores. Under
+        &minus;5 is <em>harsh</em>, over +5 <em>generous</em>; the shrinkage penalty keeps
+        an offset small when a judge has only a few reviews.
+      </p>
+      <div class="table-responsive">
+        <table class="data-table">
+          <caption class="visually-hidden">Judge offsets, means and spread</caption>
+          <thead>
+            <tr>
+              <th scope="col">Judge</th>
+              <th scope="col" class="num">n</th>
+              <th scope="col" class="num">Mean given</th>
+              <th scope="col" class="num">Offset</th>
+              <th scope="col">Label</th>
+              <th scope="col" class="num">Spread</th>
+              <th scope="col">Warnings</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in judge_rows %}
+              <tr>
+                <td>
+                  {{ row.name }}
+                  <div class="form-hint"><code>{{ row.judge_id }}</code></div>
+                </td>
+                <td class="num">{{ row.n }}</td>
+                <td class="num">{{ row.mean|floatformat:2 }}</td>
+                <td class="num">{{ row.offset|floatformat:2 }}</td>
+                <td>{{ row.label }}</td>
+                <td class="num">{{ row.spread|floatformat:2 }}</td>
+                <td>
+                  {% for warning in row.warnings %}<div class="form-hint">{{ warning }}</div>{% empty %}<span class="form-hint">&mdash;</span>{% endfor %}
+                </td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="7" class="form-hint">No judge has a review yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    {# ---- Robustness ---- #}
+    <div class="tab-pane fade" id="robustness-pane" role="tabpanel" aria-labelledby="robustness-tab" tabindex="0">
+      <h3 class="h5">How hard is this winner to dislodge?</h3>
+      {% if certificate %}
+        <p class="lead">{{ certificate.summary }}</p>
+        <dl>
+          <dt>Leave one judge out</dt>
+          <dd>{{ certificate.judge_summary }}</dd>
+          <dt>Leave one review out</dt>
+          <dd>{{ certificate.review_summary }}</dd>
+          <dt>Push the winner down to the middle of the rubric</dt>
+          <dd>{{ certificate.flip_summary }}</dd>
+        </dl>
+        <p class="form-hint">
+          The certificate reuses the published &lambda; and refits from the same inputs;
+          it is deterministic, so the same data always produces the same sentence.
+        </p>
+      {% else %}
+        <p class="form-hint">
+          This preview carries no robustness certificate. The certificate needs enough
+          included reviews to refit the ranking without a judge, so it appears once
+          judging has produced them.
+        </p>
+      {% endif %}
+
+      <h3 class="h5 mt-4">Spread before and after</h3>
+      <p>
+        &sigma; of the per-judge mean scores:
+        <strong>{{ spread.before|floatformat:2 }}</strong> raw,
+        <strong>{{ spread.after|floatformat:2 }}</strong> after judge offsets are removed.
+        {% if spread.before %}
+          Normalization takes {{ spread.after|floatformat:2 }} of {{ spread.before|floatformat:2 }}:
+          judges really did score from different baselines.
+        {% endif %}
+      </p>
+
+      <h3 class="h5 mt-4">The judge who marks everything the same</h3>
+      <p class="form-hint">
+        A constant scorer adds no ordering information: every project they review moves the
+        same way. They are kept, because their level is absorbed by their offset, and their
+        reviews only pull their own projects toward a common value. Excluding one is an
+        organizer decision that needs a reason, and it is listed in the decision record.
+      </p>
+
+      <h3 class="h5 mt-4">Reviews far from consensus</h3>
+      {% if outliers %}
+        <p class="form-hint">
+          Residual larger than 2.5&times; the residual spread, for projects with at least
+          three reviews. Flagged, never excluded automatically: a high residual is a
+          signal, not proof.
+        </p>
+        <div class="table-responsive">
+          <table class="data-table">
+            <caption class="visually-hidden">Outlier reviews</caption>
+            <thead>
+              <tr>
+                <th scope="col">Review</th>
+                <th scope="col">Judge</th>
+                <th scope="col">Project</th>
+                <th scope="col" class="num">Score</th>
+                <th scope="col" class="num">Residual</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in outliers %}
+                <tr>
+                  <td class="mono">{{ row.review_id }}</td>
+                  <td><code>{{ row.judge_id }}</code></td>
+                  <td>{{ row.project_id }}</td>
+                  <td class="num">{{ row.score|floatformat:2 }}</td>
+                  <td class="num">{{ row.residual|floatformat:2 }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="form-hint">No review is more than 2.5 residual spreads from consensus.</p>
+      {% endif %}
+    </div>
+
+    {# ---- Explain ---- #}
+    <div class="tab-pane fade" id="explain-pane" role="tabpanel" aria-labelledby="explain-tab" tabindex="0">
+      <p class="form-hint">
+        One project at a time: every review that counted, the judge's offset, and the
+        adjusted score the ranking actually used.
+      </p>
+      <form class="row g-2 align-items-end mb-3" method="get"
+            action="/manage/{{ event.slug }}/results#explain-pane">
+        <div class="col-12 col-md-6">
+          <label class="form-label" for="id_explain_project">Project</label>
+          <select class="form-select" id="id_explain_project" name="project">
+            <option value="">Choose a project</option>
+            {% for row in rows %}
+              <option value="{{ row.project_id }}"{% if explain_project and row.project_id == explain_project.public_id %} selected{% endif %}>
+                {{ row.title }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-12 col-md-3">
+          <button class="btn btn-outline-secondary" type="submit">Show breakdown</button>
+        </div>
+      </form>
+
+      {% if explain_project %}
+        <h3 class="h5">{{ explain_project.title }}</h3>
+        <div class="table-responsive">
+          <table class="data-table">
+            <caption class="visually-hidden">Review breakdown for {{ explain_project.title }}</caption>
+            <thead>
+              <tr>
+                <th scope="col">Judge</th>
+                <th scope="col" class="num">Review score</th>
+                <th scope="col" class="num">Judge offset</th>
+                <th scope="col" class="num">Adjusted</th>
+                <th scope="col">Comment (private to organizers)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in explanation %}
+                <tr>
+                  <td>{{ row.name }}</td>
+                  <td class="num">{{ row.score|floatformat:2 }}</td>
+                  <td class="num">{{ row.offset|floatformat:2 }}</td>
+                  <td class="num">{{ row.adjusted|floatformat:2 }}</td>
+                  <td>{% if row.comment %}{{ row.comment }}{% else %}<span class="form-hint">no comment</span>{% endif %}</td>
+                </tr>
+              {% empty %}
+                <tr><td colspan="5" class="form-hint">No included review for this project yet.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="form-hint">Pick a project to see its per-review breakdown.</p>
+      {% endif %}
+    </div>
+
+    {# ---- Data issues ---- #}
+    <div class="tab-pane fade" id="issues-pane" role="tabpanel" aria-labelledby="issues-tab" tabindex="0">
+      <h3 class="h5">Under-reviewed projects</h3>
+      {% if under_reviewed %}
+        <p class="form-hint">
+          Fewer than {{ event.reviews_per_project }} submitted reviews. The published ranking
+          still counts them, with a flag.
+        </p>
+        <ul>
+          {% for project_id in under_reviewed %}
+            <li>
+              <a class="link-underline" href="/events/{{ event.slug }}/projects/{{ project_id }}">{{ project_id.title }}</a>
+            </li>
+          {% endfor %}
+        </ul>
+        <a class="btn btn-outline-primary" href="/manage/{{ event.slug }}/assignments?fill=gaps">Fill the gaps</a>
+      {% else %}
+        <p class="form-hint">Every submitted project has {{ event.reviews_per_project }} reviews.</p>
+      {% endif %}
+
+      <h3 class="h5 mt-4">Excluded reviews</h3>
+      <p class="form-hint">
+        An excluded review is kept, shown and left out of the numbers. Every exclusion is
+        in the decision record with its reason.
+      </p>
+      {% if excluded_reviews %}
+        <div class="table-responsive">
+          <table class="data-table">
+            <caption class="visually-hidden">Excluded reviews</caption>
+            <thead>
+              <tr>
+                <th scope="col">Review</th>
+                <th scope="col">Judge</th>
+                <th scope="col">Project</th>
+                <th scope="col">Reason</th>
+                <th scope="col"><span class="visually-hidden">Actions</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in excluded_reviews %}
+                <tr>
+                  <td class="mono">{{ row.review_id }}</td>
+                  <td><code>{{ row.judge_id }}</code></td>
+                  <td>{{ row.project_id }}</td>
+                  <td>{{ row.reason }}</td>
+                  <td class="text-end">
+                    <button class="btn btn-sm btn-outline-secondary" type="button"
+                            data-api-method="DELETE"
+                            data-api-url="/api/v1/events/{{ event.slug }}/reviews/{{ row.review_id }}/exclusion"
+                            data-success="reload"
+                            data-confirm="Put this review back into the results? The ranking may change.">
+                      Include again
+                    </button>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="form-hint">No review is excluded.</p>
+      {% endif %}
+
+      <h3 class="h5 mt-4">Projects that cannot be ranked</h3>
+      {% if ineligible_projects %}
+        <div class="table-responsive">
+          <table class="data-table">
+            <caption class="visually-hidden">Withdrawn, disqualified and superseded projects</caption>
+            <thead>
+              <tr>
+                <th scope="col">Project</th>
+                <th scope="col">Status</th>
+                <th scope="col">Reason</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in ineligible_projects %}
+                <tr>
+                  <td>{{ row.title }}</td>
+                  <td><span class="status-badge status-closed">{{ row.status }}</span></td>
+                  <td>{{ row.reason }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="form-hint">Every project is submitted and eligible.</p>
+      {% endif %}
+    </div>
+
+    {# ---- Publish ---- #}
+    <div class="tab-pane fade" id="publish-pane" role="tabpanel" aria-labelledby="publish-tab" tabindex="0">
+      {% if judging_open %}
+        <div class="alert alert-info" role="alert">
+          <h3 class="h5 alert-heading">Judging is still open</h3>
+          <p>
+            Results cannot be published while judges can still submit. Closing judging
+            ends every open review for good, so the button asks twice.
+          </p>
+          <button class="btn btn-warning" type="button" data-api-method="POST"
+                  data-api-url="{{ close_judging_api }}" data-success="reload"
+                  data-confirm="Close judging now? No new review will be accepted after this.">
+            Close judging now
+          </button>
+        </div>
+      {% endif %}
+
+      <form data-api-method="POST" data-api-url="{{ publish_api }}" data-success="reload"
+            class="card-verdict p-3" data-publish-form>
+        <div data-form-errors class="mb-3"></div>
+        <div class="mb-3">
+          <label class="form-label" for="id_publish_note">
+            Note{% if publications %} (required){% endif %}
+          </label>
+          <textarea class="form-control" id="id_publish_note" name="note" rows="2"
+                    maxlength="300" placeholder="Why this version, what changed, what to look at."></textarea>
+          <div class="form-text">
+            {% if publications %}
+              Re-publishing supersedes the previous version, and the note is mandatory.
+            {% else %}
+              The note is stored on the publication and shown on the decision record.
+            {% endif %}
+          </div>
+        </div>
+
+        {% if unranked %}
+          <div class="alert alert-warning" role="alert">
+            <h3 class="h5 alert-heading">{{ unranked|length }} eligible project{{ unranked|length|pluralize }} will be unranked</h3>
+            <p class="mb-2">
+              Unranked is a status, not a zero: they appear on the public page with their
+              status and no score. Tick the box to publish anyway.
+            </p>
+            <ul class="mb-2">
+              {% for row in unranked %}<li>{{ row.title }}</li>{% endfor %}
+            </ul>
+            <div class="form-check" data-publish-ack>
+              <input class="form-check-input" id="id_acknowledge_unranked" name="acknowledge_unranked"
+                     type="checkbox" data-type="bool">
+              <label class="form-check-label" for="id_acknowledge_unranked">
+                I have read this list and want to publish with these projects unranked
+              </label>
+            </div>
+          </div>
+        {% endif %}
+
+        <button class="btn btn-primary" type="submit" data-publish-submit>Publish results</button>
+      </form>
+
+      <h3 class="h5 mt-4">Publication history</h3>
+      {% if publications %}
+        <div class="table-responsive">
+          <table class="data-table">
+            <caption class="visually-hidden">Every publication of {{ event.name }}</caption>
+            <thead>
+              <tr>
+                <th scope="col">Publication</th>
+                <th scope="col">Published</th>
+                <th scope="col">Method</th>
+                <th scope="col">Input digest</th>
+                <th scope="col">Note</th>
+                <th scope="col">Feedback</th>
+                <th scope="col"><span class="visually-hidden">Actions</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for publication in publications %}
+                <tr>
+                  <td>
+                    <a class="link-underline mono"
+                       href="/manage/{{ event.slug }}/results/publications/{{ publication.public_id }}">{{ publication.public_id }}</a>
+                    {% if publication.supersedes_id %}<div class="form-hint">supersedes {{ publication.supersedes.public_id }}</div>{% endif %}
+                  </td>
+                  <td><time datetime="{{ publication.published_at|date:'c' }}">{{ publication.published_at|utc }}</time></td>
+                  <td>{{ publication.method }}</td>
+                  <td class="mono">{{ publication.input_digest|slice:":16" }}</td>
+                  <td>{% if publication.note %}{{ publication.note }}{% else %}<span class="form-hint">&mdash;</span>{% endif %}</td>
+                  <td>
+                    {% if publication.feedback_released_at %}
+                      <span class="status-badge status-done">Released</span>
+                    {% else %}
+                      <span class="status-badge status-not-started">Withheld</span>
+                    {% endif %}
+                  </td>
+                  <td class="text-end">
+                    <a class="btn btn-sm btn-outline-primary"
+                       href="/manage/{{ event.slug }}/results/publications/{{ publication.public_id }}">Decision record</a>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        {% if latest_publication.feedback_released_at %}
+          <form data-api-method="DELETE" data-api-url="{{ feedback_api }}" data-success="reload"
+                class="mt-3">
+            <button class="btn btn-outline-secondary" type="button"
+                    data-confirm="Retract team feedback? Teams lose access to their scores and comments again.">
+              Retract team feedback
+            </button>
+          </form>
+        {% else %}
+          <form data-api-method="POST" data-api-url="{{ feedback_api }}" data-success="reload"
+                class="mt-3">
+            <button class="btn btn-outline-primary" type="button"
+                    data-confirm="Release feedback to every team? Each team then sees its own weighted score, per-criterion averages and de-attributed comments.">
+              Release feedback to teams
+            </button>
+          </form>
+        {% endif %}
+        <p class="form-hint">
+          Feedback is de-attributed: a team sees its own score, rank and shuffled comments,
+          never a judge name or id.
+        </p>
+      {% else %}
+        <p class="form-hint">Nothing published yet. The public page says so until you publish.</p>
+      {% endif %}
+    </div>
+
+  </div>
+{% else %}
+  <div class="empty-state">
+    <h2>Nothing to rank yet</h2>
+    <p class="mb-3">{{ preview_error|default:"Add a rubric and collect reviews, and the preview appears here." }}</p>
+    <a class="btn btn-outline-primary" href="/manage/{{ event.slug }}/rubric">Set up the rubric</a>
+  </div>
+{% endif %}
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/results.js' %}"></script>
+{% endblock %}

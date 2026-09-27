@@ -1,0 +1,209 @@
+{% extends "base.html" %}
+{% load static %}
+{% load portal_tags %}
+{% comment %}
+The live dashboard. Everything here is server-rendered so the page is useful
+with scripting off; progress.js re-reads the progress API every 15 s and patches
+the numbers in place. If a judge or project appears that the page does not know
+about yet, it reloads instead of showing a half-truth.
+{% endcomment %}
+{% block title %}Progress &middot; {{ event.name }}{% endblock %}
+{% block heading %}Judging progress{% endblock %}
+{% block lead %}
+  How far judging has got, per judge, per project and per track. Submitted
+  reviews are the evidence: an assigned project nobody has opened yet is not
+  progress.
+{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="Breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/events/">Events</a></li>
+    <li class="breadcrumb-item"><a href="/manage/{{ event.slug }}/">{{ event.name }}</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Progress</li>
+  </ol>
+</nav>
+{% endblock %}
+
+{% block page_actions %}
+<button class="btn btn-outline-secondary" type="button" data-progress-refresh>Refresh now</button>
+<a class="btn btn-outline-secondary" href="/manage/{{ event.slug }}/assignments">Assignments</a>
+<a class="btn btn-primary" href="/manage/{{ event.slug }}/results">Results</a>
+{% endblock %}
+
+{% block content %}
+
+<div data-progress-api="{{ progress_api }}" data-progress-interval="15000">
+
+<div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+  {% if judging_open %}
+    <span class="status-badge status-judging">Judging open</span>
+  {% else %}
+    <span class="status-badge status-closed">Judging closed</span>
+  {% endif %}
+  {% if event.judging_close_at %}
+    <span class="form-hint">
+      closes
+      <time datetime="{{ event.judging_close_at|date:'c' }}" data-countdown
+            data-countdown-label="judging closes">{{ event.judging_close_at|utc }}</time>
+    </span>
+  {% else %}
+    <span class="form-hint">no judging deadline: judging stays open until the organizer closes it</span>
+  {% endif %}
+  <span class="form-hint ms-auto" data-progress-stamp>updated {{ totals.submitted }} of {{ totals.target }} reviews</span>
+</div>
+
+<section class="mb-4">
+  <div class="stat-grid">
+    <div class="stat-tile">
+      <div class="stat-label">Coverage</div>
+      <div class="stat-value" data-progress-total>{{ totals.coverage_percent }}%</div>
+      <div class="stat-sub"><span data-progress-submitted>{{ totals.submitted }}</span> of <span data-progress-target>{{ totals.target }}</span> reviews</div>
+    </div>
+    <div class="stat-tile">
+      <div class="stat-label">Judges done</div>
+      <div class="stat-value" data-progress-judges-done>{{ totals.judges_done }}</div>
+      <div class="stat-sub">of <span data-progress-judges>{{ totals.judges }}</span> judges</div>
+    </div>
+    <div class="stat-tile">
+      <div class="stat-label">Projects</div>
+      <div class="stat-value" data-progress-projects>{{ totals.projects }}</div>
+      <div class="stat-sub">submitted and eligible</div>
+    </div>
+    <div class="stat-tile">
+      <div class="stat-label">Under-covered</div>
+      <div class="stat-value" data-progress-under>{{ totals.under_covered }}</div>
+      <div class="stat-sub">below {{ event.reviews_per_project }} reviews</div>
+    </div>
+  </div>
+</section>
+
+<section class="mb-4">
+  <h2 class="h4">Judges</h2>
+  {% if judge_rows %}
+    <div class="table-responsive">
+      <table class="data-table">
+        <caption class="visually-hidden">Judging load per judge, least progress first</caption>
+        <thead>
+          <tr>
+            <th scope="col">Judge</th>
+            <th scope="col">Tracks</th>
+            <th scope="col" class="num">Assigned</th>
+            <th scope="col" class="num">Submitted</th>
+            <th scope="col" class="num">Drafts</th>
+            <th scope="col" class="num">Remaining</th>
+            <th scope="col">Last activity</th>
+            <th scope="col">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in judge_rows %}
+            <tr data-progress-judge="{{ row.judge }}">
+              <td>{{ row.name }}</td>
+              <td>
+                {% for track in row.tracks %}<span class="tag-pill">{{ track }}</span>{% empty %}<span class="form-hint">no track</span>{% endfor %}
+              </td>
+              <td class="num" data-field="assigned">{{ row.assigned }}</td>
+              <td class="num" data-field="submitted">{{ row.submitted }}</td>
+              <td class="num" data-field="drafts">{{ row.drafts }}</td>
+              <td class="num" data-field="remaining">{{ row.remaining }}</td>
+              <td>
+                {% if row.last_activity %}
+                  <time datetime="{{ row.last_activity|date:'c' }}">{{ row.last_activity|utc }}</time>
+                {% else %}&mdash;{% endif %}
+              </td>
+              <td>
+                <span class="status-badge {{ row.status_badge }}"
+                      data-progress-judge-status>{{ row.status_label }}</span>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="empty-state">
+      <h2>No judges yet</h2>
+      <p class="mb-3">Add judges and assign projects, and this dashboard fills up.</p>
+      <a class="btn btn-outline-primary" href="/manage/{{ event.slug }}/judges">Add judges</a>
+    </div>
+  {% endif %}
+</section>
+
+<section class="mb-4">
+  <h2 class="h4">Projects</h2>
+  <div class="table-responsive">
+    <table class="data-table">
+      <caption class="visually-hidden">Submitted reviews per project</caption>
+      <thead>
+        <tr>
+          <th scope="col">Project</th>
+          <th scope="col">Track</th>
+          <th scope="col" class="num">Submitted</th>
+          <th scope="col" class="num">Target</th>
+          <th scope="col">Coverage</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in progress.projects %}
+          <tr data-progress-project="{{ row.project }}">
+            <td>
+              <a class="link-underline" href="/events/{{ event.slug }}/projects/{{ row.project }}">{{ row.title }}</a>
+            </td>
+            <td>{{ row.track_name|default:"&mdash;" }}</td>
+            <td class="num" data-field="submitted">{{ row.submitted }}</td>
+            <td class="num" data-field="target">{{ row.target }}</td>
+            <td>
+              <div class="progress" role="progressbar" aria-label="Reviews submitted for {{ row.title }}"
+                   aria-valuenow="{{ row.submitted }}" aria-valuemin="0" aria-valuemax="{{ row.target }}"
+                   data-progress-bar>
+                <div class="progress-bar" style="width: {% widthratio row.submitted row.target 100 %}%"></div>
+              </div>
+            </td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="5" class="form-hint">No submitted projects yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="mb-4">
+  <h2 class="h4">Per track</h2>
+  <div class="table-responsive">
+    <table class="data-table">
+      <caption class="visually-hidden">Coverage per track</caption>
+      <thead>
+        <tr>
+          <th scope="col">Track</th>
+          <th scope="col" class="num">Projects</th>
+          <th scope="col" class="num">Submitted</th>
+          <th scope="col" class="num">Target</th>
+          <th scope="col" class="num">Coverage</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in progress.tracks %}
+          <tr>
+            <td>{{ row.name }}</td>
+            <td class="num">{{ row.projects }}</td>
+            <td class="num">{{ row.submitted }}</td>
+            <td class="num">{{ row.target }}</td>
+            <td class="num">{{ row.coverage_percent }}%</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="5" class="form-hint">No tracks configured.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/progress.js' %}"></script>
+{% endblock %}

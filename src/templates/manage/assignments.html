@@ -1,0 +1,253 @@
+{% extends "base.html" %}
+{% load static %}
+{% comment %}
+Assignment workbench. Three ways in, all of them API writes:
+batch assign (POST /assignments), auto-assign previewed and applied
+(POST /assignments/auto with dry_run true/false) and per-row removal
+(DELETE /assignments/{id}). The preview table is rendered by manage-forms.js
+from the API response, so what is shown is exactly what would be created.
+{% endcomment %}
+{% block title %}Assignments &middot; {{ event.name }}{% endblock %}
+{% block heading %}Assignments{% endblock %}
+{% block lead %}
+  Who reviews which project. The service refuses any pair that breaks a rule:
+  a judge without the project's track, a declared conflict, a project that is
+  not submitted, or a pair that is already assigned.
+{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="Breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/events/">Events</a></li>
+    <li class="breadcrumb-item"><a href="/manage/{{ event.slug }}/">{{ event.name }}</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Assignments</li>
+  </ol>
+</nav>
+{% endblock %}
+
+{% block page_actions %}
+<a class="btn btn-outline-secondary" href="/manage/{{ event.slug }}/judges">Judges</a>
+<a class="btn btn-outline-secondary" href="/manage/{{ event.slug }}/progress">Progress</a>
+{% endblock %}
+
+{% block content %}
+
+{% if fill_gaps %}
+  <div class="alert alert-info" role="alert">
+    <strong>Filling gaps.</strong> The preview below fills only what is still missing;
+    existing assignments are left alone. Apply it only when the table looks right.
+  </div>
+{% endif %}
+
+<div class="row g-4 mb-4">
+  {# ---- Batch assign ---- #}
+  <div class="col-lg-6">
+    <section class="h-100">
+      <h2 class="h4">Batch assign</h2>
+      <p class="form-hint">
+        Pick the judges and the projects. Every combination that is legal is
+        created; illegal ones come back in the &ldquo;skipped&rdquo; list with the reason.
+      </p>
+      <form data-api-method="POST" data-api-url="{{ assignments_api }}" data-success="reload"
+            class="card-verdict p-3">
+        <div data-form-errors class="mb-3"></div>
+        <div class="mb-3">
+          <label class="form-label" for="id_batch_judges">Judges</label>
+          <select class="form-select" id="id_batch_judges" name="judges" multiple size="4" required>
+            {% for judge in judges %}
+              <option value="{{ judge.public_id }}">
+                {{ judge.name }}{% if judge.tracks %} &mdash; {{ judge.tracks|join:", " }}{% endif %}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="id_batch_projects">Projects{% if track_filter %} &middot; {{ track_filter }}{% endif %}</label>
+          <select class="form-select" id="id_batch_projects" name="projects" multiple size="6" required>
+            {% for project in projects %}
+              <option value="{{ project.public_id }}">
+                {{ project.title }}{% if project.track %} &mdash; {{ project.track.name }}{% endif %}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+        <button class="btn btn-primary" type="submit">Assign selected</button>
+      </form>
+    </section>
+  </div>
+
+  {# ---- Auto assign ---- #}
+  <div class="col-lg-6">
+    <section class="h-100">
+      <h2 class="h4">Auto-assign</h2>
+      <p class="form-hint">
+        Most-constrained project first, then the eligible judge with the lowest
+        load, spreading overlap so the judge&ndash;project graph stays connected.
+        Preview first: nothing is written until you press Apply.
+      </p>
+      <form id="auto-assign-form" data-auto-preview="{{ auto_api }}"
+            data-preview-target="#auto-preview" class="card-verdict p-3">
+        <div class="row g-2 mb-3">
+          <div class="col-6">
+            <label class="form-label" for="id_auto_target">Target reviews per project</label>
+            <input class="form-control" id="id_auto_target" name="target" type="number" min="1"
+                   data-type="int" value="{{ event.reviews_per_project }}">
+          </div>
+          <div class="col-6">
+            <label class="form-label" for="id_auto_max_load">Max load per judge</label>
+            <input class="form-control" id="id_auto_max_load" name="max_load" type="number" min="1"
+                   data-type="int" placeholder="balanced">
+          </div>
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+          <button class="btn btn-outline-primary" type="button" id="auto-preview-button">
+            Preview
+          </button>
+          <button class="btn btn-primary" type="button"
+                  data-api-method="POST" data-api-url="{{ auto_api }}"
+                  data-form="#auto-assign-form" data-body='{"dry_run": false}'
+                  data-success="reload"
+                  data-confirm="Apply this automatic assignment? It writes the rows the preview showed.">
+            Apply
+          </button>
+        </div>
+      </form>
+      <div id="auto-preview" class="mt-3"></div>
+    </section>
+  </div>
+</div>
+
+{# ---- Current assignments ---- #}
+<section class="mb-4">
+  <div class="d-flex flex-wrap justify-content-between align-items-baseline gap-2 mb-2">
+    <h2 class="h4 mb-0">Current assignments</h2>
+    <p class="mb-0 form-hint">{{ assignment_count }} row{{ assignment_count|pluralize }}</p>
+  </div>
+
+  <form class="card-verdict p-3 mb-3" method="get" action="/manage/{{ event.slug }}/assignments">
+    <div class="row g-2 align-items-end">
+      <div class="col-12 col-md-3">
+        <label class="form-label" for="id_filter_judge">Judge</label>
+        <select class="form-select" id="id_filter_judge" name="judge">
+          <option value="">Every judge</option>
+          {% for judge in judges %}
+            <option value="{{ judge.public_id }}"{% if judge_filter == judge.public_id %} selected{% endif %}>
+              {{ judge.name }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-12 col-md-3">
+        <label class="form-label" for="id_filter_track">Track</label>
+        <select class="form-select" id="id_filter_track" name="track">
+          <option value="">Every track</option>
+          {% for track in tracks %}
+            <option value="{{ track.public_id }}"{% if track_filter == track.public_id %} selected{% endif %}>
+              {{ track.name }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-12 col-md-4">
+        <label class="form-label" for="id_filter_project">Project id</label>
+        <input class="form-control mono" id="id_filter_project" name="project" type="text"
+               value="{{ project_filter }}" placeholder="prj_…">
+      </div>
+      <div class="col-12 col-md-2">
+        <button class="btn btn-outline-secondary w-100" type="submit">Filter</button>
+      </div>
+    </div>
+  </form>
+
+  <div class="table-responsive">
+    <table class="data-table">
+      <caption class="visually-hidden">Assignments in {{ event.name }}</caption>
+      <thead>
+        <tr>
+          <th scope="col">Judge</th>
+          <th scope="col">Project</th>
+          <th scope="col">Track</th>
+          <th scope="col">Review</th>
+          <th scope="col"><span class="visually-hidden">Actions</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in assignments %}
+          <tr>
+            <td>{{ row.judge.user.display_name|default:row.judge.public_id }}</td>
+            <td>
+              <a class="link-underline" href="/events/{{ event.slug }}/projects/{{ row.project.public_id }}">{{ row.project.title }}</a>
+              <div class="form-hint">{{ row.project.team.name }}</div>
+            </td>
+            <td>{% if row.project.track %}<span class="track-badge">{{ row.project.track.name }}</span>{% else %}&mdash;{% endif %}</td>
+            <td>
+              {% if row.review.status == 'submitted' %}
+                <span class="status-badge status-submitted">Submitted</span>
+              {% elif row.review.status == 'draft' %}
+                <span class="status-badge status-draft">Draft</span>
+              {% else %}
+                <span class="status-badge status-not-started">Not started</span>
+              {% endif %}
+            </td>
+            <td class="text-end">
+              <button class="btn btn-sm btn-outline-danger" type="button"
+                      data-api-method="DELETE" data-api-url="{{ assignments_api }}/{{ row.public_id }}"
+                      data-success="reload"
+                      data-confirm="Remove this assignment? The review, if any, is deleted with it.">
+                Remove
+              </button>
+            </td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="5" class="form-hint">No assignments match this filter.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{# ---- Coverage ---- #}
+<section class="mb-4">
+  <h2 class="h4">Coverage per project</h2>
+  <div class="table-responsive">
+    <table class="data-table">
+      <caption class="visually-hidden">Submitted reviews per project against the target</caption>
+      <thead>
+        <tr>
+          <th scope="col">Project</th>
+          <th scope="col">Track</th>
+          <th scope="col" class="num">Submitted</th>
+          <th scope="col" class="num">Target</th>
+          <th scope="col">Coverage</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in coverage %}
+          <tr{% if row.under_covered %} class="table-warning"{% endif %}>
+            <td>
+              <a class="link-underline" href="/manage/{{ event.slug }}/assignments?project={{ row.project }}">{{ row.title }}</a>
+            </td>
+            <td>{{ row.track_name|default:"&mdash;" }}</td>
+            <td class="num">{{ row.submitted }}</td>
+            <td class="num">{{ row.target }}</td>
+            <td>
+              <div class="progress" role="progressbar"
+                   aria-label="Reviews submitted for {{ row.title }}"
+                   aria-valuenow="{{ row.submitted }}" aria-valuemin="0" aria-valuemax="{{ row.target }}">
+                <div class="progress-bar" style="width: {% widthratio row.submitted row.target 100 %}%"></div>
+              </div>
+            </td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="5" class="form-hint">No submitted projects yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/manage-forms.js' %}"></script>
+{% endblock %}

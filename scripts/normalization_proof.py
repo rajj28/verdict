@@ -521,6 +521,79 @@ def main():
         "entirely; its broad agreement with the additive ranking is "
         "independent evidence that the offsets removed are level, not order.")
     add("")
+    add(f"### Robustness of the fixture result (adaptive lambda = {auto.value:g})")
+    add("")
+    rb = base.robustness
+    assert rb is not None and rb.winner is not None
+    gap = base.normalized[rb.winner] - base.normalized[rb.top_k[1]]
+    add(f"Winner `{rb.winner}` ({titles[rb.winner]}); top-{rb.k}: " +
+        ", ".join(f"`{p}` ({titles[p]})" for p in rb.top_k) + ". "
+        f"The winner leads the runner-up by {gap:.2f} normalized points. "
+        "Every refit below reuses the already-chosen "
+        f"`lambda = {rb.lam:g}` (no lambda re-selection: the certificate is "
+        "about the published ranking) and warm-starts from the full-data "
+        "fit; iteration is in sorted-id order, so the certificate is "
+        "deterministic.")
+    add("")
+    add(f"Leave-one-judge-out ({rb.n_judges} judges with included reviews): "
+        f"1st place holds in {rb.judge_holds} of {rb.n_judges} removals; "
+        f"the top-{rb.k} set holds in {rb.topk_holds} of {rb.n_judges}. "
+        f"{len(rb.judges_flip)} removal(s) change the winner:")
+    add("")
+    if rb.judges_flip:
+        for j in rb.judges_flip:
+            new_top = ", ".join(f"`{p}`" for p in rb.judge_topk[j])
+            add(f"- without `{j}` ({names.get(j, '?')}): 1st goes to "
+                f"`{rb.judge_winner[j]}` ({titles.get(rb.judge_winner[j], '?')}); "
+                f"new top-{rb.k}: {new_top}")
+    else:
+        add("None: every single-judge removal keeps the winner.")
+    add("")
+    add(f"Leave-one-review-out ({rb.n_reviews} included reviews): 1st place "
+        f"holds in {rb.review_holds} of {rb.n_reviews} removals "
+        f"({len(rb.reviews_flip)} flip it):")
+    add("")
+    if rb.reviews_flip:
+        for rid in rb.reviews_flip:
+            judge, _, proj = rid.partition("__")
+            add(f"- without `{rid}` ({names.get(judge, '?')} on "
+                f"`{proj}` ({titles.get(proj, '?')})): 1st goes to "
+                f"`{rb.review_winner[rid]}` ({titles.get(rb.review_winner[rid], '?')})")
+    else:
+        add("None: every single-review removal keeps the winner.")
+    add("")
+    if rb.flip_margin is None:
+        tried = min(rb.flip_cap, sum(1 for r in reviews if r.project_id == rb.winner))
+        add(f"Flip margin: 1st place holds even when {tried} of its reviews "
+            f"move to the rubric midpoint (score {rb.flip_midpoint:g}); "
+            f"flip margin > {rb.flip_cap}.")
+    elif rb.flip_margin == 1:
+        add(f"Flip margin: moving 1 review of `{rb.winner}` "
+            f"to the rubric midpoint (score {rb.flip_midpoint:g}) flips 1st "
+            f"place: `{rb.flip_reviews[0]}`.")
+    else:
+        add(f"Flip margin: moving {rb.flip_margin} reviews of `{rb.winner}` "
+            f"to the rubric midpoint (score {rb.flip_midpoint:g}) flips 1st "
+            "place: " + ", ".join(f"`{r}`" for r in rb.flip_reviews) + ".")
+    add("")
+    add(f"In plain language: {rb.summary}")
+    add("")
+    if rb.flip_margin == 1:
+        frag = ("moving its single most favourable review to the midpoint "
+                "is enough")
+    elif rb.flip_margin is None:
+        frag = (f"even moving {rb.flip_cap} of its reviews to the midpoint "
+                "is not enough")
+    else:
+        frag = (f"moving {rb.flip_margin} of its reviews to the midpoint "
+                "is enough")
+    add(f"Reading: with a {gap:.2f}-point lead the fixture winner is fragile "
+        f"\u2014 {len(rb.judges_flip)} judges and {len(rb.reviews_flip)} "
+        f"single reviews can each flip it, and {frag}. That is the honest "
+        "consequence of a near-tie at the top, not a flaw in the fit: the "
+        "certificate reuses the published lambda and shows exactly where "
+        "the result could break.")
+    add("")
     add("## Properties")
     add("")
     add("Shift invariance: adding +1 to every criterion value of one judge "

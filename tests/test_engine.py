@@ -9,11 +9,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from results.engine import (  # noqa: E402
     DEFAULT_LAMBDA_GRID,
+    FLIP_CAP,
     Comparison,
     Criterion,
     Fit,
     LambdaChoice,
     ReviewInput,
+    Robustness,
     ScoredReview,
     bradley_terry,
     bradley_terry_raw,
@@ -33,6 +35,7 @@ from results.engine import (  # noqa: E402
     rank_agreement,
     raw_scores,
     review_score,
+    robustness,
     score_reviews,
     select_lambda,
     spearman,
@@ -537,6 +540,107 @@ class AgreementTests(unittest.TestCase):
             spearman([1.0], [1.0, 2.0])
         with self.assertRaises(ValueError):
             kendall_tau([], [])
+
+
+class RobustnessTests(unittest.TestCase):
+    def test_dominant_winner_is_robust(self):
+        # W leads by 60 points on a complete 3x3 design: no single judge
+        # or review removal can touch it, and even moving all three of
+        # its reviews to the midpoint leaves it ahead (margin beyond cap).
+        reviews = [
+            scored(j, p, v)
+            for j in ("J1", "J2", "J3")
+            for p, v in (("W", 100), ("M", 40), ("L", 30))
+        ]
+        r = robustness(reviews, CRIT_0_100, 2.0)
+        self.assertIsInstance(r, Robustness)
+        self.assertEqual(r.winner, "W")
+        self.assertEqual(r.top_k, ("W", "M", "L"))
+        self.assertEqual(r.n_judges, 3)
+        self.assertEqual(r.judge_holds, 3)
+        self.assertEqual(r.judges_flip, ())
+        self.assertEqual(r.topk_holds, 3)
+        self.assertEqual(r.n_reviews, 9)
+        self.assertEqual(r.review_holds, 9)
+        self.assertEqual(r.reviews_flip, ())
+        self.assertIsNone(r.flip_margin)
+        self.assertEqual(r.flip_reviews, ())
+        self.assertIn("> 5", r.flip_summary)
+        self.assertIn("holds in 3 of 3 single-judge removals", r.judge_summary)
+        self.assertIn("holds in 9 of 9 single-review removals", r.review_summary)
+
+    def test_tie_edge_winner_flips_without_best_judge(self):
+        # A only leads because generous G scores it 90; without G, B wins.
+        reviews = [
+            scored("G", "A", 90),
+            scored("G", "B", 50),
+            scored("H", "A", 55),
+            scored("H", "B", 60),
+        ]
+        r = robustness(reviews, CRIT_0_100, 2.0)
+        self.assertEqual(r.winner, "A")
+        self.assertEqual(r.judges_flip, ("G",))
+        self.assertEqual(r.judge_winner, {"G": "B", "H": "A"})
+        self.assertEqual(r.judge_holds, 1)
+        self.assertIn("without G 1st goes to B", r.judge_summary)
+
+    def test_flip_margin_counts(self):
+        # W (100, 100, 70, 70) vs R (70 x 4): moving the single best
+        # review to the midpoint is not enough, moving the best two is.
+        reviews = [
+            scored("J1", "W", 100),
+            scored("J2", "W", 100),
+            scored("J3", "W", 70),
+            scored("J4", "W", 70),
+        ] + [scored(j, "R", 70) for j in ("J1", "J2", "J3", "J4")]
+        r = robustness(reviews, CRIT_0_100, 2.0)
+        self.assertEqual(r.winner, "W")
+        self.assertEqual(r.flip_margin, 2)
+        self.assertEqual(r.flip_reviews, ("J1:W", "J2:W"))
+        self.assertIn("reviews: J1:W, J2:W", r.flip_summary)
+        # The margin is real: verify both prefixes directly against the fit.
+        s = score_reviews(reviews, CRIT_0_100)
+
+        def winner_with_moved(*rids):
+            moved = set(rids)
+            altered = [
+                ScoredReview(
+                    x.review_id, x.judge_id, x.project_id,
+                    50.0 if x.review_id in moved else x.score,
+                )
+                for x in s
+            ]
+            mu = fit_additive(altered, 2.0).mu
+            return min(mu, key=lambda p: (-mu[p], p))
+
+        self.assertEqual(winner_with_moved("J1:W"), "W")
+        self.assertEqual(winner_with_moved("J1:W", "J2:W"), "R")
+
+    def test_deterministic_and_included_in_evaluate(self):
+        reviews, _, _ = complete_design()
+        first = robustness(reviews, CRIT_0_100, 2.0)
+        # Reversed input order must give the identical certificate.
+        second = robustness(list(reversed(reviews)), CRIT_0_100, 2.0)
+        self.assertEqual(first, second)
+        # Already-scored input (no criteria) agrees on the winner/summary.
+        third = robustness(score_reviews(reviews, CRIT_0_100), None, 2.0)
+        self.assertEqual(third.winner, first.winner)
+        self.assertEqual(third.summary, first.summary)
+        # evaluate bundles the certificate at the official lambda.
+        res = evaluate(reviews, CRIT_0_100, lam=2.0)
+        self.assertIsNotNone(res.robustness)
+        self.assertEqual(res.robustness.winner, "A")
+        self.assertEqual(res.robustness.lam, 2.0)
+        # Empty input is vacuous but well-formed.
+        empty = robustness([], None, 2.0)
+        self.assertIsNone(empty.winner)
+        self.assertIsNone(empty.flip_margin)
+        # Bad inputs fail loudly.
+        with self.assertRaises(ValueError):
+            robustness(reviews, CRIT_0_100, 2.0, top_k=0)
+        with self.assertRaises(ValueError):
+            robustness(reviews, None, 2.0)
+        self.assertEqual(FLIP_CAP, 5)
 
 
 if __name__ == "__main__":

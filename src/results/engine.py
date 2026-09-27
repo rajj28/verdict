@@ -175,6 +175,7 @@ class Result:
     spread_after: float = 0.0
     strengths: dict[str, float | None] = field(default_factory=dict)
     components: list[set[str]] = field(default_factory=list)
+    robustness: Robustness | None = None
 
 
 def review_score(
@@ -958,6 +959,245 @@ def select_lambda(
     )
 
 
+#: Score a review takes when moved to the rubric midpoint in the
+#: flip-margin probe. Every criterion at its scale midpoint contributes
+#: half its weight, so the 0-100 score is exactly 50 whatever the weights.
+FLIP_MIDPOINT = 50.0
+
+#: Max winner reviews moved in the flip-margin probe; a winner that still
+#: holds after that is reported as needing more than the cap (``"> 5"``).
+FLIP_CAP = 5
+
+
+@dataclass(frozen=True)
+class Robustness:
+    """Winner-robustness certificate for one fitted ranking (see :func:`robustness`)."""
+
+    winner: str | None  # official 1st place (None when there are no reviews)
+    top_k: tuple[str, ...]  # official top-k, best first
+    lam: float  # the reused official lambda (never re-selected here)
+    k: int
+    n_judges: int  # judges with included reviews
+    judge_holds: int  # single-judge removals where 1st place holds
+    judges_flip: tuple[str, ...]  # judges whose removal changes the winner
+    topk_holds: int  # single-judge removals where the top-k set is unchanged
+    judge_winner: dict[str, str | None]  # judge id -> new winner
+    judge_topk: dict[str, tuple[str, ...]]  # judge id -> new top-k, best first
+    n_reviews: int
+    review_holds: int  # single-review removals where 1st place holds
+    reviews_flip: tuple[str, ...]  # review ids whose removal changes the winner
+    review_winner: dict[str, str | None]  # review id -> new winner
+    flip_margin: int | None  # smallest flipping prefix; None means > flip_cap
+    flip_cap: int
+    flip_reviews: tuple[str, ...]  # winner reviews moved at the margin
+    flip_midpoint: float
+    summary: str
+    judge_summary: str
+    review_summary: str
+    flip_summary: str
+
+
+def _ordered(mu: Mapping[str, float]) -> list[str]:
+    """Best-first project order; ties break by project id (deterministic)."""
+    return sorted(mu, key=lambda p: (-mu[p], p))
+
+
+def robustness(
+    reviews: Sequence[ReviewInput | ScoredReview],
+    criteria: Sequence[Criterion] | None,
+    lam: float,
+    top_k: int = 3,
+    flip_cap: int = FLIP_CAP,
+) -> Robustness:
+    """Certify how hard the fitted winner is to dislodge.
+
+    Three probes, all refits reusing the official ``lam`` (no lambda
+    re-selection: the certificate is about the published ranking, and it
+    keeps the fixture cost to ~150 warm-started fits) and warm-starting
+    from the full-data fit. Iteration is in sorted-id order throughout,
+    so the certificate is deterministic.
+
+    - Leave-one-judge-out: drop each judge's reviews, refit, record the
+      new winner and top-k.
+    - Leave-one-review-out: same per review.
+    - Flip margin: move the winner's reviews to the rubric midpoint
+      (0-100 score 50, whatever the weights) greedily, most favourable
+      first; the margin is the smallest prefix that drops the winner
+      from 1st place, capped at ``flip_cap`` (``None`` means more than
+      the cap is needed).
+
+    ``reviews`` may be :class:`ReviewInput` (then ``criteria`` is
+    required to score them) or already-scored :class:`ScoredReview`
+    (then ``criteria`` is unused). ``top_k`` must be at least 1.
+    """
+    if top_k < 1:
+        raise ValueError("top_k must be at least 1")
+    if flip_cap < 1:
+        raise ValueError("flip_cap must be at least 1")
+    items = list(reviews)
+    if items and isinstance(items[0], ReviewInput):
+        if criteria is None:
+            raise ValueError("criteria are required to score ReviewInput reviews")
+        scored = score_reviews(items, criteria)
+    elif items and isinstance(items[0], ScoredReview):
+        scored = list(items)
+    else:
+        scored = []
+    if lam < 0:
+        raise ValueError("lam must be non-negative")
+
+    midpoint = FLIP_MIDPOINT
+    base = fit_additive(scored, lam)
+    ordered = _ordered(base.mu)
+    winner = ordered[0] if ordered else None
+    topk = tuple(ordered[:top_k])
+    topk_set = set(topk)
+
+    def empty(summary: str, part: str) -> Robustness:
+        return Robustness(
+            winner=None,
+            top_k=(),
+            lam=float(lam),
+            k=top_k,
+            n_judges=0,
+            judge_holds=0,
+            judges_flip=(),
+            topk_holds=0,
+            judge_winner={},
+            judge_topk={},
+            n_reviews=0,
+            review_holds=0,
+            reviews_flip=(),
+            review_winner={},
+            flip_margin=None,
+            flip_cap=flip_cap,
+            flip_reviews=(),
+            flip_midpoint=midpoint,
+            summary=summary,
+            judge_summary=part,
+            review_summary=part,
+            flip_summary=part,
+        )
+
+    if winner is None:
+        return empty(
+            "No included reviews, so there is no winner to defend.",
+            "No included reviews.",
+        )
+
+    judges = sorted({r.judge_id for r in scored})
+    judge_winner: dict[str, str | None] = {}
+    judge_topk: dict[str, tuple[str, ...]] = {}
+    for j in judges:
+        refit = fit_additive(
+            [r for r in scored if r.judge_id != j], lam, init=base
+        )
+        sub = _ordered(refit.mu)
+        judge_winner[j] = sub[0] if sub else None
+        judge_topk[j] = tuple(sub[:top_k])
+    judges_flip = tuple(j for j in judges if judge_winner[j] != winner)
+    judge_holds = len(judges) - len(judges_flip)
+    topk_holds = sum(
+        1 for j in judges if set(judge_topk[j]) == topk_set
+    )
+
+    rids = sorted(r.review_id for r in scored)
+    review_winner: dict[str, str | None] = {}
+    for rid in rids:
+        refit = fit_additive(
+            [r for r in scored if r.review_id != rid], lam, init=base
+        )
+        sub = _ordered(refit.mu)
+        review_winner[rid] = sub[0] if sub else None
+    reviews_flip = tuple(rid for rid in rids if review_winner[rid] != winner)
+    review_holds = len(rids) - len(reviews_flip)
+
+    flip_margin: int | None = None
+    flip_reviews: tuple[str, ...] = ()
+    won = sorted(
+        (r for r in scored if r.project_id == winner),
+        key=lambda r: (-r.score, r.review_id),
+    )
+    tried = min(flip_cap, len(won))
+    for m in range(1, tried + 1):
+        moved = {r.review_id for r in won[:m]}
+        altered = [
+            ScoredReview(r.review_id, r.judge_id, r.project_id,
+                         midpoint if r.review_id in moved else r.score)
+            for r in scored
+        ]
+        refit = fit_additive(altered, lam, init=base)
+        sub = _ordered(refit.mu)
+        if not sub or sub[0] != winner:
+            flip_margin = m
+            flip_reviews = tuple(r.review_id for r in won[:m])
+            break
+
+    if judges_flip:
+        detail = "; " + "; ".join(
+            f"without {j} 1st goes to {judge_winner[j]}" for j in judges_flip
+        )
+    else:
+        detail = "; no single-judge removal changes the winner"
+    judge_summary = (
+        f"1st place ({winner}) holds in {judge_holds} of {len(judges)} "
+        f"single-judge removals; the top-{top_k} set holds in "
+        f"{topk_holds} of {len(judges)}{detail}."
+    )
+    if reviews_flip:
+        rdetail = "; flipping removals: " + ", ".join(
+            f"{rid} -> {review_winner[rid]}" for rid in reviews_flip
+        )
+    else:
+        rdetail = "; no single-review removal changes the winner"
+    review_summary = (
+        f"1st place ({winner}) holds in {review_holds} of {len(rids)} "
+        f"single-review removals{rdetail}."
+    )
+    if flip_margin is None:
+        flip_summary = (
+            f"1st place ({winner}) holds even when {tried} of its reviews "
+            f"move to the rubric midpoint ({midpoint:g}); "
+            f"flip margin > {flip_cap}."
+        )
+    elif flip_margin == 1:
+        flip_summary = (
+            f"Moving 1 review of {winner} to the rubric midpoint "
+            f"({midpoint:g}) flips 1st place (review: {flip_reviews[0]})."
+        )
+    else:
+        flip_summary = (
+            f"Moving {flip_margin} reviews of {winner} to the rubric "
+            f"midpoint ({midpoint:g}) flips 1st place "
+            f"(reviews: {', '.join(flip_reviews)})."
+        )
+    summary = f"{judge_summary} {review_summary} {flip_summary}"
+    return Robustness(
+        winner=winner,
+        top_k=topk,
+        lam=float(lam),
+        k=top_k,
+        n_judges=len(judges),
+        judge_holds=judge_holds,
+        judges_flip=judges_flip,
+        topk_holds=topk_holds,
+        judge_winner=judge_winner,
+        judge_topk=judge_topk,
+        n_reviews=len(rids),
+        review_holds=review_holds,
+        reviews_flip=reviews_flip,
+        review_winner=review_winner,
+        flip_margin=flip_margin,
+        flip_cap=flip_cap,
+        flip_reviews=flip_reviews,
+        flip_midpoint=midpoint,
+        summary=summary,
+        judge_summary=judge_summary,
+        review_summary=review_summary,
+        flip_summary=flip_summary,
+    )
+
+
 def evaluate(
     reviews: Sequence[ReviewInput],
     criteria: Sequence[Criterion],
@@ -973,6 +1213,8 @@ def evaluate(
     ``lam`` is a shrinkage penalty or ``"auto"`` for the predeclared
     :func:`select_lambda` procedure; the chosen value is stored on
     ``Result.lam`` and the full choice on ``Result.lambda_choice``.
+    ``Result.robustness`` always carries the :func:`robustness`
+    certificate for the fitted (normalized) ranking at that lambda.
     """
     if method not in _OFFICIAL_METHODS:
         raise ValueError(f"method must be one of {_OFFICIAL_METHODS}")
@@ -1008,6 +1250,7 @@ def evaluate(
     judges = judge_table(scored, fit)
     diag = diagnostics(reviews, target, known)
     sp = spread(scored, fit)
+    rob = robustness(reviews, criteria, lam_value)
     return Result(
         method=method,
         lam=lam_value,
@@ -1029,4 +1272,5 @@ def evaluate(
         spread_after=sp.after,
         strengths=strengths,
         components=components(scored),
+        robustness=rob,
     )

@@ -250,6 +250,33 @@ Spearman ρ = 0.8509, Kendall τ = 0.6684 over the 40 projects ranked by both me
 
 The Bradley–Terry cross-check uses only within-judge orderings (derived pairwise comparisons), so judge levels cancel out of it entirely; its broad agreement with the additive ranking is independent evidence that the offsets removed are level, not order.
 
+### Robustness of the fixture result (adaptive lambda = 100)
+
+Winner `prj_34` (Iron Switch); top-3: `prj_34` (Iron Switch), `prj_11` (Salt Ledger), `prj_10` (Still Beacon). The winner leads the runner-up by 0.09 normalized points. Every refit below reuses the already-chosen `lambda = 100` (no lambda re-selection: the certificate is about the published ranking) and warm-starts from the full-data fit; iteration is in sorted-id order, so the certificate is deterministic.
+
+Leave-one-judge-out (29 judges with included reviews): 1st place holds in 24 of 29 removals; the top-3 set holds in 22 of 29. 5 removal(s) change the winner:
+
+- without `jdg_04` (Noor Haddad): 1st goes to `prj_37` (Salt Loom); new top-3: `prj_37`, `prj_34`, `prj_11`
+- without `jdg_15` (Yuki Sato): 1st goes to `prj_11` (Salt Ledger); new top-3: `prj_11`, `prj_25`, `prj_37`
+- without `jdg_24` (Diego Herrera): 1st goes to `prj_18` (Open Kiln); new top-3: `prj_18`, `prj_34`, `prj_11`
+- without `jdg_25` (Thandi Dlamini): 1st goes to `prj_11` (Salt Ledger); new top-3: `prj_11`, `prj_25`, `prj_34`
+- without `jdg_29` (Ines Rocha): 1st goes to `prj_10` (Still Beacon); new top-3: `prj_10`, `prj_34`, `prj_11`
+
+Leave-one-review-out (121 included reviews): 1st place holds in 115 of 121 removals (6 flip it):
+
+- without `jdg_04__prj_37` (Noor Haddad on `prj_37` (Salt Loom)): 1st goes to `prj_37` (Salt Loom)
+- without `jdg_15__prj_34` (Yuki Sato on `prj_34` (Iron Switch)): 1st goes to `prj_11` (Salt Ledger)
+- without `jdg_24__prj_18` (Diego Herrera on `prj_18` (Open Kiln)): 1st goes to `prj_18` (Open Kiln)
+- without `jdg_25__prj_11` (Thandi Dlamini on `prj_11` (Salt Ledger)): 1st goes to `prj_11` (Salt Ledger)
+- without `jdg_25__prj_25` (Thandi Dlamini on `prj_25` (Dry Relay)): 1st goes to `prj_25` (Dry Relay)
+- without `jdg_29__prj_10` (Ines Rocha on `prj_10` (Still Beacon)): 1st goes to `prj_10` (Still Beacon)
+
+Flip margin: moving 1 review of `prj_34` to the rubric midpoint (score 50) flips 1st place: `jdg_15__prj_34`.
+
+In plain language: 1st place (prj_34) holds in 24 of 29 single-judge removals; the top-3 set holds in 22 of 29; without jdg_04 1st goes to prj_37; without jdg_15 1st goes to prj_11; without jdg_24 1st goes to prj_18; without jdg_25 1st goes to prj_11; without jdg_29 1st goes to prj_10. 1st place (prj_34) holds in 115 of 121 single-review removals; flipping removals: jdg_04__prj_37 -> prj_37, jdg_15__prj_34 -> prj_11, jdg_24__prj_18 -> prj_18, jdg_25__prj_11 -> prj_11, jdg_25__prj_25 -> prj_25, jdg_29__prj_10 -> prj_10. Moving 1 review of prj_34 to the rubric midpoint (50) flips 1st place (review: jdg_15__prj_34).
+
+Reading: with a 0.09-point lead the fixture winner is fragile — 5 judges and 6 single reviews can each flip it, and moving its single most favourable review to the midpoint is enough. That is the honest consequence of a near-tie at the top, not a flaw in the fit: the certificate reuses the published lambda and shows exactly where the result could break.
+
 ## Properties
 
 Shift invariance: adding +1 to every criterion value of one judge (`jdg_07`, chosen because 4+1 needs no clipping) moves the raw ranking but leaves the additive (λ=0) ranking exactly unchanged — the shift is absorbed by that judge's offset:

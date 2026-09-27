@@ -133,6 +133,8 @@
             <th scope="col">Name</th>
             <th scope="col">Value</th>
             <th scope="col">Track</th>
+            <th scope="col">Places</th>
+            <th scope="col">Eligibility note</th>
             <th scope="col"><span class="visually-hidden">Actions</span></th>
           </tr>
         </thead>
@@ -143,6 +145,8 @@
               <td>{{ prize.name }}</td>
               <td>{{ prize.value }}</td>
               <td>{{ prize.track.name|default:"&mdash;" }}</td>
+              <td>{{ prize.places }}</td>
+              <td>{{ prize.eligibility_note|default:"&mdash;" }}</td>
               <td class="text-end">
                 <button class="btn btn-sm btn-outline-secondary"
                         data-edit-target="#prize-form-{{ prize.public_id }}">Edit</button>
@@ -156,7 +160,7 @@
               </td>
             </tr>
             <tr id="prize-form-{{ prize.public_id }}" class="d-none">
-              <td colspan="5">
+              <td colspan="7">
                 <form class="row g-2 p-2"
                       data-api-method="PATCH"
                       data-api-url="/api/v1/events/{{ event.slug }}/prizes/{{ prize.public_id }}"
@@ -167,13 +171,13 @@
                            name="position" type="number" min="0" data-type="int"
                            value="{{ prize.position }}" placeholder="Pos">
                   </div>
-                  <div class="col-md-3">
+                  <div class="col-md-2">
                     <label class="form-label visually-hidden" for="prz_name_{{ prize.public_id }}">Name</label>
                     <input class="form-control form-control-sm" id="prz_name_{{ prize.public_id }}"
                            name="name" type="text" maxlength="160" required
                            value="{{ prize.name }}" placeholder="Prize name">
                   </div>
-                  <div class="col-md-2">
+                  <div class="col-md-1">
                     <label class="form-label visually-hidden" for="prz_val_{{ prize.public_id }}">Value</label>
                     <input class="form-control form-control-sm" id="prz_val_{{ prize.public_id }}"
                            name="value" type="text" maxlength="120"
@@ -192,7 +196,19 @@
                       {% endfor %}
                     </select>
                   </div>
+                  <div class="col-md-1">
+                    <label class="form-label visually-hidden" for="prz_places_{{ prize.public_id }}">Places</label>
+                    <input class="form-control form-control-sm" id="prz_places_{{ prize.public_id }}"
+                           name="places" type="number" min="1" data-type="int"
+                           value="{{ prize.places }}" placeholder="Places">
+                  </div>
                   <div class="col-md-2">
+                    <label class="form-label visually-hidden" for="prz_elig_{{ prize.public_id }}">Eligibility note</label>
+                    <input class="form-control form-control-sm" id="prz_elig_{{ prize.public_id }}"
+                           name="eligibility_note" type="text" maxlength="300"
+                           value="{{ prize.eligibility_note }}" placeholder="Eligibility note (optional)">
+                  </div>
+                  <div class="col-md-1">
                     <label class="form-label visually-hidden" for="prz_desc_{{ prize.public_id }}">Description</label>
                     <input class="form-control form-control-sm" id="prz_desc_{{ prize.public_id }}"
                            name="description" type="text"
@@ -224,12 +240,12 @@
       <input class="form-control form-control-sm" id="new_prz_pos" name="position"
              type="number" min="0" value="0" data-type="int" placeholder="Pos">
     </div>
-    <div class="col-md-3">
+    <div class="col-md-2">
       <label class="form-label visually-hidden" for="new_prz_name">Name</label>
       <input class="form-control form-control-sm" id="new_prz_name" name="name"
              type="text" maxlength="160" required placeholder="Prize name">
     </div>
-    <div class="col-md-2">
+    <div class="col-md-1">
       <label class="form-label visually-hidden" for="new_prz_val">Value</label>
       <input class="form-control form-control-sm" id="new_prz_val" name="value"
              type="text" maxlength="120" placeholder="e.g. $500">
@@ -243,7 +259,17 @@
         {% endfor %}
       </select>
     </div>
+    <div class="col-md-1">
+      <label class="form-label visually-hidden" for="new_prz_places">Places</label>
+      <input class="form-control form-control-sm" id="new_prz_places" name="places"
+             type="number" min="1" value="1" data-type="int" placeholder="Places">
+    </div>
     <div class="col-md-2">
+      <label class="form-label visually-hidden" for="new_prz_elig">Eligibility note</label>
+      <input class="form-control form-control-sm" id="new_prz_elig" name="eligibility_note"
+             type="text" maxlength="300" placeholder="Eligibility note (optional)">
+    </div>
+    <div class="col-md-1">
       <label class="form-label visually-hidden" for="new_prz_desc">Description</label>
       <input class="form-control form-control-sm" id="new_prz_desc" name="description"
              type="text" placeholder="Description (optional)">

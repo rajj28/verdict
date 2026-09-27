@@ -148,6 +148,17 @@
         </div>
       </div>
 
+      <div class="mb-3">
+        <div class="form-check">
+          <input class="form-check-input" id="id_one_prize_per_team" name="one_prize_per_team"
+                 type="checkbox" data-type="bool"
+                 {% if event.one_prize_per_team %}checked{% endif %}>
+          <label class="form-check-label" for="id_one_prize_per_team">
+            One prize per team (a team already awarded a higher prize is skipped for lower ones)
+          </label>
+        </div>
+      </div>
+
       <h2 class="h5 mb-3 mt-4">Scoring</h2>
 
       <div class="row g-3 mb-3">

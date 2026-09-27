@@ -53,6 +53,7 @@ class EventWriteSerializer(serializers.Serializer):
     ranking_method = serializers.ChoiceField(choices=RankingMethod.choices, required=False)
     shrinkage_lambda = serializers.DecimalField(max_digits=5, decimal_places=2, required=False)
     gallery_public = serializers.BooleanField(required=False)
+    one_prize_per_team = serializers.BooleanField(required=False)
 
 
 class EventPatchSerializer(EventWriteSerializer):
@@ -77,7 +78,10 @@ class PrizeSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Prize
-        fields = ["public_id", "name", "description", "value", "track", "position"]
+        fields = [
+            "public_id", "name", "description", "value", "track", "position",
+            "scope", "places", "eligibility_note",
+        ]
 
 
 class PrizeWriteSerializer(serializers.Serializer):
@@ -86,6 +90,8 @@ class PrizeWriteSerializer(serializers.Serializer):
     value = serializers.CharField(required=False, allow_blank=True, max_length=120)
     track = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     position = serializers.IntegerField(required=False, min_value=0)
+    places = serializers.IntegerField(required=False, min_value=1)
+    eligibility_note = serializers.CharField(required=False, allow_blank=True, max_length=300)
 
 
 class QuestionSerializer(serializers.ModelSerializer):

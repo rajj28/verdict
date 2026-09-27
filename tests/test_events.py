@@ -508,6 +508,15 @@ class PrizeTests(TestCase):
         )
         self.assertEqual(prize.track, self.track)
 
+    def test_create_track_prize_with_places(self):
+        """A track prize created with places=2 stores that value and sets scope=track."""
+        prize = services.create_prize(
+            self.host, self.event,
+            {"name": "Runner-up", "track": self.track.public_id, "places": 2}
+        )
+        self.assertEqual(prize.places, 2)
+        self.assertEqual(prize.scope, "track")
+
     def test_cross_event_track_is_400(self):
         other_host = _make_user("other@example.org", is_host=True)
         other_event = _make_event(other_host)
@@ -530,6 +539,46 @@ class PrizeTests(TestCase):
         with self.assertRaises(ApiError) as ctx:
             services.create_prize(plain, self.event, {"name": "Nope"})
         self.assertEqual(ctx.exception.status_code, 403)
+
+
+# ---------------------------------------------------------------------------
+# New-field tests: places, one_prize_per_team, cross-event track
+# ---------------------------------------------------------------------------
+
+class PrizeNewFieldsTests(TestCase):
+    """Covers the three new-field scenarios added with Prize.places /
+    eligibility_note and Event.one_prize_per_team."""
+
+    def setUp(self):
+        self.host = _make_user("host_nf@example.org", is_host=True)
+        self.event = _make_event(self.host)
+        self.track = _make_track(self.event, "AI")
+
+    def test_update_one_prize_per_team(self):
+        """Organizer can flip one_prize_per_team via update_event."""
+        original = self.event.one_prize_per_team
+        updated = services.update_event(
+            self.host, self.event, {"one_prize_per_team": not original}
+        )
+        self.assertEqual(updated.one_prize_per_team, not original)
+        # Flip back for symmetry
+        updated2 = services.update_event(
+            self.host, updated, {"one_prize_per_team": original}
+        )
+        self.assertEqual(updated2.one_prize_per_team, original)
+
+    def test_cross_event_track_still_rejected(self):
+        """A track belonging to a different event is always rejected (400 cross_event)."""
+        other_host = _make_user("other_nf@example.org", is_host=True)
+        other_event = _make_event(other_host)
+        other_track = _make_track(other_event, "Foreign")
+        with self.assertRaises(ApiError) as ctx:
+            services.create_prize(
+                self.host, self.event,
+                {"name": "Stolen Prize", "track": other_track.public_id, "places": 1},
+            )
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertEqual(ctx.exception.code, "cross_event")
 
 
 # ---------------------------------------------------------------------------

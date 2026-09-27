@@ -17,6 +17,7 @@ EVENT_FIELDS = {
     "name", "tagline", "description", "submissions_open_at", "submissions_close_at",
     "judging_open_at", "judging_close_at", "max_team_size", "reviews_per_project",
     "judging_mode", "ranking_method", "shrinkage_lambda", "gallery_public",
+    "one_prize_per_team",
 }
 WINDOW_FIELDS = {"submissions_open_at", "submissions_close_at", "judging_open_at", "judging_close_at"}
 LOCKED_FIELDS = {"ranking_method", "shrinkage_lambda"}
@@ -272,6 +273,8 @@ def create_prize(actor, event: Event, data: dict) -> Prize:
         value=data.get("value", ""),
         track=_track_for_event(event, data.get("track")),
         position=data.get("position", 0),
+        places=data.get("places", 1),
+        eligibility_note=data.get("eligibility_note", ""),
     )
     audit.services.record(actor, "event.prize_created", event=event, target=prize,
                           summary=f"Created prize {prize.name} in {event.name}.")
@@ -283,7 +286,7 @@ def update_prize(actor, event: Event, prize: Prize, data: dict) -> Prize:
     _require_manager(actor, event)
     locked = Prize.objects.select_for_update().get(pk=prize.pk, event=event)
     changed = []
-    for field in ("name", "description", "value", "position"):
+    for field in ("name", "description", "value", "position", "places", "eligibility_note"):
         if field in data and getattr(locked, field) != data[field]:
             setattr(locked, field, data[field])
             changed.append(field)

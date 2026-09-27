@@ -1,6 +1,8 @@
-"""Append-only audit log.
+"""Audit JSON API routes under /api/v1/."""
+from django.urls import path
 
-JSON API routes under /api/v1/.
-"""
+from audit.api import AuditListView
 
-urlpatterns: list = []
+urlpatterns = [
+    path("events/<slug:slug>/audit", AuditListView.as_view(), name="audit-list"),
+]

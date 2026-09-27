@@ -1,6 +1,4 @@
 """Events: the container every other record hangs off, plus its configuration."""
-from decimal import Decimal
-
 from django.conf import settings
 from django.db import models
 
@@ -65,7 +63,10 @@ class Event(models.Model):
                                     default=JudgingMode.RUBRIC)
     ranking_method = models.CharField(max_length=16, choices=RankingMethod.choices,
                                       default=RankingMethod.NORMALIZED)
-    shrinkage_lambda = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("2.00"))
+    shrinkage_lambda = models.DecimalField(
+        max_digits=5, decimal_places=2, null=True, blank=True, default=None,
+        help_text="Shrinkage penalty λ; null = auto (5-fold CV, BUILD-SPEC 19).",
+    )
     scoring_locked_at = models.DateTimeField(null=True, blank=True)
     gallery_public = models.BooleanField(default=True)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT,

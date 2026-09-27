@@ -6,13 +6,14 @@ from pathlib import Path
 from django.conf import settings
 from django.db import connection
 from django.db.models import Count
-from django.http import FileResponse, Http404, HttpResponse, JsonResponse
+from django.http import FileResponse, Http404, HttpResponse, HttpResponseForbidden, JsonResponse
 from django.shortcuts import render
 from django.template.loader import render_to_string
 
 from core.clock import now
-from events.models import EventRole, Role
-from events.policy import judging_window_open, submission_window_open, visible_events
+from core.policy import visible_probe_runs
+from events.models import Event, EventRole, Role
+from events.policy import is_organizer, judging_window_open, submission_window_open, visible_events
 from judging.models import Review, ReviewStatus
 from projects.models import Project, ProjectStatus
 from projects.policy import visible_projects
@@ -121,3 +122,37 @@ def media(request, path: str):
         raise Http404("No such file.")
     content_type = mimetypes.guess_type(full_path.name)[0] or "application/octet-stream"
     return FileResponse(full_path.open("rb"), content_type=content_type)
+
+
+def _integrity_report(request, event=None):
+    """Show the most recent persisted run for this administrator or event."""
+    if not request.user.is_authenticated:
+        return HttpResponseForbidden()
+    if event is not None and not is_organizer(request.user, event):
+        return HttpResponseForbidden()
+    if event is None and not getattr(request.user, "is_admin", False):
+        return HttpResponseForbidden()
+    latest = visible_probe_runs(request.user, event).first()
+    cases = latest.data.get("cases", []) if latest else []
+    endpoint = "/api/v1/integrity/probe"
+    payload = {"cases": cases, "event": event, "has_report": latest is not None}
+    return render(request, "core/integrity.html", {
+        **payload,
+        "endpoint": endpoint,
+        "event_slug": event.slug if event else "",
+        "report_summary": latest.summary if latest else "No probe has been run yet.",
+        "extensions": ("voting", "publication"),
+    })
+
+
+def integrity_admin(request):
+    """Platform administrators can view and run every probe case."""
+    return _integrity_report(request)
+
+
+def integrity_event(request, slug: str):
+    """Event organizers see runs scoped to the event they manage."""
+    event = visible_events(request.user).filter(slug=slug).first()
+    if event is None:
+        return HttpResponse(status=404)
+    return _integrity_report(request, event)

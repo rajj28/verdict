@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Integrity probe · {{ PORTAL_NAME }}{% endblock %}
+{% block heading %}Integrity probe{% endblock %}
+{% block lead %}Disposable adversarial requests run through the live URL routing and middleware; their probe data is rolled back.{% endblock %}
+{% block page_actions %}
+  <form method="post" data-api-method="POST" data-api-url="{{ endpoint }}" data-success="reload">
+    {% if event_slug %}<input type="hidden" name="event" value="{{ event_slug }}">{% endif %}
+    <button class="btn btn-primary" type="submit">Run probe</button>
+  </form>
+{% endblock %}
+{% block content %}
+  <p class="text-muted-verdict">{{ report_summary }}</p>
+  {% if has_report %}
+    <div class="table-responsive">
+      <table class="table data-table align-middle">
+        <thead>
+          <tr><th scope="col">Request</th><th scope="col">Actor</th><th scope="col">Expected</th><th scope="col">Actual</th><th scope="col">Reason</th></tr>
+        </thead>
+        <tbody>
+          {% for case in cases %}
+            <tr>
+              <td><span class="status-badge">{{ case.method }}</span> <code>{{ case.path }}</code><br>{{ case.description }}</td>
+              <td>{{ case.actor }}</td>
+              <td>{{ case.expected }}</td>
+              <td><span class="status-badge">{% if case.passed %}REFUSED{% else %}LEAKED{% endif %}</span> {{ case.actual }}</td>
+              <td>{{ case.reason }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="card-verdict">No probe results have been recorded yet.</div>
+  {% endif %}
+  <p class="text-muted-verdict">Registered extension areas: {{ extensions|join:", " }}.</p>
+{% endblock %}

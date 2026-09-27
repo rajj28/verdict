@@ -1,6 +1,8 @@
-"""Result publication and the pure scoring engine.
+"""Results HTML routes."""
+from django.urls import path
 
-HTML routes (server-rendered pages).
-"""
+from results.views import results_public
 
-urlpatterns: list = []
+urlpatterns = [
+    path("events/<slug:slug>/results", results_public, name="results-page"),
+]

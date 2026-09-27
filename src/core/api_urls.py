@@ -1,6 +1,2 @@
-"""Shared infrastructure: clock, ids, errors, csv, security headers.
-
-JSON API routes under /api/v1/.
-"""
-
-urlpatterns: list = []
+"""Shared infrastructure: clock, ids, errors, csv, security headers."""
+from core.integrity_api_urls import urlpatterns

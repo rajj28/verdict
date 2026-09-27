@@ -4,7 +4,7 @@ page_actions, extra_js. No inline <script> and no on* attributes anywhere: the C
 in core.middleware forbids both, so behaviour comes from the three vendored/local
 scripts at the bottom of the body.
 {% endcomment %}{% load static %}<!DOCTYPE html>
-<html lang="en" data-bs-theme="light">
+<html lang="en" data-bs-theme="{% block theme %}light{% endblock %}"{% block html_attrs %}{% endblock %}>
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -13,6 +13,7 @@ scripts at the bottom of the body.
     <meta name="description" content="{% block description %}VERDICT is a self-hostable hackathon portal where deadlines, judge isolation and score normalization are enforced in the backend.{% endblock %}">
     <link rel="stylesheet" href="{% static 'vendor/bootstrap/bootstrap.min.css' %}">
     <link rel="stylesheet" href="{% static 'css/app.css' %}">
+    {% block extra_css %}{% endblock %}
     {# Runs before the body paints so the correct theme is set with no flash. #}
     <script src="{% static 'js/theme.js' %}"></script>
   </head>

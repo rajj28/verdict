@@ -1,211 +1,230 @@
 {% extends "base.html" %}
+{% load static %}
 {% comment %}
-Landing page. Every number on it is read from this instance's database by
-core.views.home; nothing here is sample data.
+Landing page (dark-first, see static/css/landing.css). Live numbers and event
+cards come from core.views.home. The product window is a labelled
+illustration of the results screen with generic example rows; it never shows
+this instance's unpublished rankings.
 {% endcomment %}
 {% block title %}{{ PORTAL_NAME }} · Hackathon judging you can defend{% endblock %}
+{% block theme %}dark{% endblock %}
+{% block html_attrs %} data-theme-lock="dark"{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="{% static 'css/landing.css' %}">{% endblock %}
 {% block main_class %}landing{% endblock %}
 {% block breadcrumbs %}{% endblock %}
 {% block page_header %}{% endblock %}
 
 {% block content %}
-<section class="hero">
+<section class="l-hero">
+  <div class="aurora" aria-hidden="true"><span class="a1"></span><span class="a2"></span><span class="a3"></span></div>
+  <div class="grid" aria-hidden="true"></div>
   <div class="container">
-    <div class="hero-grid">
-      <div>
-        <span class="eyebrow">Self-hosted hackathon platform &middot; MIT</span>
-        <h1 class="hero-title">Hackathon judging<br>you can <em>defend.</em></h1>
-        <p class="hero-sub">
-          Submissions, teams, judging and results in one portal you run yourself.
-          Deadlines hold on the server, judges never see each other's scores,
-          and every published ranking can be recomputed and verified.
-        </p>
-        <div class="hero-actions">
-          <a class="btn btn-primary btn-lg" href="{% url 'gallery' %}">Explore the gallery <span class="arrow" aria-hidden="true">&rarr;</span></a>
-          {% if user.is_authenticated %}
-            <a class="btn btn-outline-primary btn-lg" href="{% url 'me' %}">Go to your dashboard</a>
-          {% elif DEMO_MODE %}
-            <a class="btn btn-outline-primary btn-lg" href="{% url 'login' %}">Try every role in one click</a>
-          {% else %}
-            <a class="btn btn-outline-primary btn-lg" href="{% url 'login' %}">Sign in</a>
-          {% endif %}
-        </div>
-        <p class="hero-note">
-          <span class="terminal-inline">docker compose up</span>
-          <span>One command, fully offline, seeded and ready.</span>
-        </p>
-      </div>
+    <div class="reveal"><span class="l-chip"><b>Open source</b> Self-hosted · offline · one command</span></div>
+    <h1 class="l-title reveal d1">Judging you can <span class="l-serif l-grad">defend.</span></h1>
+    <p class="l-sub reveal d2">
+      The hackathon platform that enforces its own rules. Deadlines hold on the server,
+      judges never see each other's scores, harsh and generous judges are calibrated,
+      and every published ranking can be recomputed to the last digit.
+    </p>
+    <div class="l-actions reveal d3">
+      <a class="l-btn l-btn-primary" href="{% url 'gallery' %}">Explore the gallery <span class="arrow" aria-hidden="true">&rarr;</span></a>
+      {% if user.is_authenticated %}
+        <a class="l-btn l-btn-ghost" href="{% url 'me' %}">Open your dashboard</a>
+      {% elif DEMO_MODE %}
+        <a class="l-btn l-btn-ghost" href="{% url 'login' %}">Try every role <kbd>1 click</kbd></a>
+      {% else %}
+        <a class="l-btn l-btn-ghost" href="{% url 'login' %}">Sign in</a>
+      {% endif %}
+    </div>
+    <div class="l-trust reveal d4"><span>No cloud account</span><span>No trackers or CDNs</span><span>Every action in the documented API</span></div>
 
-      <aside class="ledger" aria-label="Live numbers from this instance">
-        <div class="ledger-head">
-          <span class="live-dot">Live from this instance</span>
-          <span class="ledger-stamp" aria-hidden="true">VERIFIED</span>
+    <div class="l-stage">
+      <div class="l-window">
+        <div class="l-chrome"><i></i><i></i><i></i><span class="l-url">localhost:8080/manage/your-event/results</span><span class="l-illus">Illustration</span></div>
+        <div class="l-app">
+          <aside class="l-rail">
+            <div class="ev">Your Hackathon 2026</div>
+            <a href="#" tabindex="-1">Overview <small>live</small></a>
+            <a href="#" tabindex="-1">Judges <small>30</small></a>
+            <a href="#" tabindex="-1">Assignments <small>3/project</small></a>
+            <a href="#" tabindex="-1">Progress <small>94%</small></a>
+            <a href="#" tabindex="-1" class="on">Results <small>preview</small></a>
+            <a href="#" tabindex="-1">Exports <small>csv</small></a>
+            <a href="#" tabindex="-1">Audit log</a>
+          </aside>
+          <div class="l-main">
+            <div class="l-main-head">
+              <h4>Ranking &middot; normalized</h4>
+              <div class="d-flex gap-2"><span class="l-pill">&lambda; by 5-fold CV</span><span class="l-pill red">locked at first review</span></div>
+            </div>
+            <table class="l-table">
+              <thead><tr><th>#</th><th>Project</th><th class="r">Raw</th><th class="r">Normalized</th><th>Confidence</th><th class="r">&Delta;</th></tr></thead>
+              <tbody>
+                <tr><td>01</td><td class="t">Northwind Relay</td><td class="r">81.2</td><td class="r">84.6</td><td><div class="l-bar"><i style="width:88%"></i></div></td><td class="r up">&#9650; 2</td></tr>
+                <tr><td>02</td><td class="t">Paper Lantern</td><td class="r">83.9</td><td class="r">82.1</td><td><div class="l-bar"><i style="width:80%"></i></div></td><td class="r down">&#9660; 1</td></tr>
+                <tr><td>03</td><td class="t">Quiet Harbor</td><td class="r">79.4</td><td class="r">80.8</td><td><div class="l-bar"><i style="width:74%"></i></div></td><td class="r up">&#9650; 3</td></tr>
+                <tr><td>04</td><td class="t">Signal Garden</td><td class="r">82.0</td><td class="r">79.9</td><td><div class="l-bar"><i style="width:70%"></i></div></td><td class="r down">&#9660; 2</td></tr>
+                <tr><td>05</td><td class="t">Copper Atlas</td><td class="r">77.1</td><td class="r">78.3</td><td><div class="l-bar"><i style="width:63%"></i></div></td><td class="r">&mdash;</td></tr>
+              </tbody>
+            </table>
+          </div>
         </div>
-        <div class="ledger-row">
-          <span class="k">Projects in the gallery<small>Drafts and superseded duplicates excluded</small></span>
-          <span class="v">{{ stats.projects }}</span>
-        </div>
-        <div class="ledger-row">
-          <span class="k">Judges<small>Each sees only their own assignments</small></span>
-          <span class="v">{{ stats.judges }}</span>
-        </div>
-        <div class="ledger-row">
-          <span class="k">Submitted reviews<small>Normalized for harsh and generous judges</small></span>
-          <span class="v">{{ stats.reviews }}</span>
-        </div>
-        <div class="ledger-row">
-          <span class="k">Events<small>Each with its own windows, tracks and rubric</small></span>
-          <span class="v">{{ stats.events }}</span>
-        </div>
-      </aside>
+      </div>
+      <div class="l-toast" aria-hidden="true"><span class="ok">&#10003;</span><div>Publication verified<small>sha256 inputs identical</small></div></div>
+      <div class="l-toast two" aria-hidden="true"><span class="ok">&#10005;</span><div>Peer scores refused<small>403 forbidden &middot; backend</small></div></div>
     </div>
   </div>
 </section>
 
-<section>
+<section class="l-numbers-wrap">
   <div class="container">
-    <div class="section-head">
-      <div>
-        <span class="eyebrow">What the platform guarantees</span>
-        <h2>Rules enforced where <em>curl</em> arrives, not where buttons hide.</h2>
-      </div>
-      <p>Every guarantee below is checked on the server for the web interface and the public API alike, and each one has tests behind it.</p>
+    <div class="l-numbers reveal">
+      <div><div class="live">Live from this instance</div><div class="n" data-count="{{ stats.projects }}">{{ stats.projects }}</div><div class="k">projects in the public gallery</div></div>
+      <div><div class="live">&nbsp;</div><div class="n" data-count="{{ stats.judges }}">{{ stats.judges }}</div><div class="k">judges, each isolated to their own work</div></div>
+      <div><div class="live">&nbsp;</div><div class="n" data-count="{{ stats.reviews }}">{{ stats.reviews }}</div><div class="k">submitted reviews, calibrated</div></div>
+      <div><div class="live">&nbsp;</div><div class="n" data-count="{{ stats.events }}">{{ stats.events }}</div><div class="k">events with their own rules</div></div>
     </div>
-    <div class="promise-grid">
-      <div class="promise">
-        <span class="idx">01</span>
-        <h3>Deadlines that hold</h3>
-        <p>Windows are checked on server time after the row is locked. A late edit is refused with a reason, whichever door it comes through.</p>
-        <span class="proof">403 window_closed</span>
+  </div>
+</section>
+
+<section class="l-section">
+  <div class="container">
+    <div class="l-head reveal">
+      <div>
+        <div class="l-eyebrow">// guarantees, not settings</div>
+        <h2 class="l-h2">Rules enforced where <span class="l-serif">curl</span> arrives.</h2>
       </div>
-      <div class="promise">
-        <span class="idx">02</span>
+      <p class="l-lead">Hiding a button is not a permission system. Every guarantee below is checked on the server for the interface and the API alike, and each one is covered by tests you can run.</p>
+    </div>
+    <div class="l-bento">
+      <div class="l-card wide reveal">
+        <h3>Scores that are calibrated, not just averaged</h3>
+        <p>Harsh and generous judges are separated from project quality with a documented additive model. How strongly to correct is chosen by cross-validation, and the choice is recorded with every result.</p>
+        <div class="viz">
+          <svg class="l-chart" viewBox="0 0 600 150" role="img" aria-label="Illustration: two judges' score ranges aligned after offset removal">
+            <defs><linearGradient id="lg" x1="0" x2="1"><stop offset="0" stop-color="#ff5a36"/><stop offset="1" stop-color="#ffb25e"/></linearGradient></defs>
+            <text x="0" y="14" fill="#7d7f89" font-size="11" font-family="Geist Mono, monospace">BEFORE</text>
+            <rect x="60" y="24" width="210" height="14" rx="7" fill="rgba(255,255,255,0.08)"/>
+            <rect x="120" y="24" width="120" height="14" rx="7" fill="#7d7f89"/>
+            <rect x="60" y="46" width="210" height="14" rx="7" fill="rgba(255,255,255,0.08)"/>
+            <rect x="170" y="46" width="95" height="14" rx="7" fill="#b9bac2"/>
+            <text x="0" y="35" fill="#b9bac2" font-size="11" font-family="Geist, sans-serif">harsh</text>
+            <text x="0" y="57" fill="#b9bac2" font-size="11" font-family="Geist, sans-serif">generous</text>
+            <path d="M285 42 H 320" stroke="#ff5a36" stroke-width="2" marker-end="url(#ah)"/>
+            <defs><marker id="ah" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#ff5a36"/></marker></defs>
+            <text x="340" y="14" fill="#7d7f89" font-size="11" font-family="Geist Mono, monospace">AFTER OFFSET REMOVAL</text>
+            <rect x="340" y="24" width="250" height="14" rx="7" fill="rgba(255,255,255,0.08)"/>
+            <rect x="405" y="24" width="120" height="14" rx="7" fill="url(#lg)"/>
+            <rect x="340" y="46" width="250" height="14" rx="7" fill="rgba(255,255,255,0.08)"/>
+            <rect x="415" y="46" width="100" height="14" rx="7" fill="url(#lg)" opacity="0.8"/>
+            <text x="0" y="100" fill="#7d7f89" font-size="11" font-family="Geist Mono, monospace">score = project quality + judge offset + noise</text>
+            <text x="0" y="122" fill="#b9bac2" font-size="11" font-family="Geist Mono, monospace">&#955; = argmin 5-fold CV error &middot; ties go to the more conservative value</text>
+          </svg>
+        </div>
+      </div>
+      <div class="l-card reveal d1">
         <h3>Judges who can't peek</h3>
-        <p>A judge reads their own scores and their own in-track assignments. Another judge's ballot is refused by the backend, not hidden by a template.</p>
-        <span class="proof">403 forbidden &middot; tested per role</span>
+        <p>Isolation lives in the backend policy layer, so a logged-in judge typing another judge's URL gets a 403.</p>
+        <div class="viz">
+          <div class="l-matrix">
+            <div class="h"></div><div class="h">own</div><div class="h">peer</div><div class="h">track</div><div class="h">audit</div>
+            <div class="r">Judge</div><div class="y">&#10003;</div><div class="n">&#10005;</div><div class="n">&#10005;</div><div class="n">&#10005;</div>
+            <div class="r">Participant</div><div class="n">&#10005;</div><div class="n">&#10005;</div><div class="n">&#10005;</div><div class="n">&#10005;</div>
+            <div class="r">Organizer</div><div class="y">&#10003;</div><div class="y">&#10003;</div><div class="y">&#10003;</div><div class="y">&#10003;</div>
+          </div>
+        </div>
       </div>
-      <div class="promise">
-        <span class="idx">03</span>
-        <h3>Scores that are calibrated</h3>
-        <p>Harsh and generous judges are corrected with a documented additive model, with its strength chosen by cross-validation, not by taste.</p>
-        <span class="proof">see JUDGING.md</span>
+      <div class="l-card reveal">
+        <h3>Deadlines that hold</h3>
+        <p>Windows are checked on server time after the row is locked. Late edits are refused through every door.</p>
+        <div class="viz">
+          <div class="l-timeline" aria-hidden="true"><div class="track"><div class="open"></div><div class="closed"></div></div><div class="cut"></div></div>
+          <div class="l-code mt-2"><span class="m">POST</span> /api/v1/events/…/projects
+<span class="s">403</span> window_closed</div>
+        </div>
       </div>
-      <div class="promise">
-        <span class="idx">04</span>
+      <div class="l-card reveal d1">
         <h3>Results you can verify</h3>
-        <p>Each publication stores its exact inputs and a digest. One click recomputes the ranking and proves nothing changed after the fact.</p>
-        <span class="proof">sha256 input digest</span>
+        <p>Each publication stores its exact inputs and their digest. Verify recomputes everything and compares.</p>
+        <div class="viz">
+          <div class="l-digest">sha256 · 3f9a0c2e7b41d86a55e0f1c9a3b7d2e48c61f0a9…<div class="v">&#10003; Recomputed ranking is identical</div></div>
+        </div>
+      </div>
+      <div class="l-card reveal d2">
+        <h3>An API for every action</h3>
+        <p>The interface writes only through the public API, so anything you can click, you can script. OpenAPI included.</p>
+        <div class="viz">
+<div class="l-code"><span class="c"># your own scores, as a judge</span>
+<span class="m">curl</span> -H <span class="g">"Authorization: Bearer …"</span> \
+  localhost:8080/api/v1/judge/scores</div>
+        </div>
       </div>
     </div>
   </div>
 </section>
 
-<section>
+<section class="l-section pt-0">
   <div class="container">
-    <div class="section-head">
+    <div class="l-head reveal">
       <div>
-        <span class="eyebrow">One event, start to finish</span>
-        <h2>From open call to <em>published verdict.</em></h2>
+        <div class="l-eyebrow">// one event, start to finish</div>
+        <h2 class="l-h2">From open call to <span class="l-serif l-grad">published verdict.</span></h2>
       </div>
-      <p>The same five stages every organizer runs, with the awkward cases handled: duplicate submissions, unfinished review batches, the judge who scores everything the same.</p>
+      <p class="l-lead">Built against a real event's data, including the awkward parts: a duplicate submission, unfinished review batches and the judge who gives everything the same score.</p>
     </div>
-    <ol class="lifecycle">
-      <li><h3>Open</h3><p>Dates, tracks, prizes and custom questions, configured by the organizer.</p></li>
-      <li><h3>Submit</h3><p>Teams form by invite link and edit drafts until the deadline, with a receipt for every revision.</p></li>
-      <li><h3>Assign</h3><p>Judges are matched by track and conflicts, algorithmically or in batches, with a preview first.</p></li>
-      <li><h3>Judge</h3><p>A keyboard-first console with autosave, and a live progress board for the organizer.</p></li>
-      <li><h3>Publish</h3><p>Raw and normalized rankings side by side, then a verifiable publication and CSV exports.</p></li>
-    </ol>
+    <div class="l-steps">
+      <div class="l-step reveal"><h4>Open</h4><p>Dates, tracks, prizes and custom questions, set by the organizer.</p></div>
+      <div class="l-step reveal d1"><h4>Submit</h4><p>Teams by invite link, drafts until the deadline, a receipt per revision.</p></div>
+      <div class="l-step reveal d2"><h4>Assign</h4><p>Judges matched by track and conflicts, previewed before applying.</p></div>
+      <div class="l-step reveal d3"><h4>Judge</h4><p>Keyboard-first console with autosave and a live progress board.</p></div>
+      <div class="l-step reveal d4"><h4>Publish</h4><p>Raw and normalized side by side, then a verifiable publication.</p></div>
+    </div>
   </div>
 </section>
 
-<section>
+<section class="l-section pt-0">
   <div class="container">
-    <div class="section-head">
+    <div class="l-head reveal">
       <div>
-        <span class="eyebrow">Events on this instance</span>
-        <h2>Browse what's running.</h2>
+        <div class="l-eyebrow">// running on this instance</div>
+        <h2 class="l-h2">Browse the events.</h2>
       </div>
-      <a class="btn btn-outline-primary" href="/events/">All events <span class="arrow" aria-hidden="true">&rarr;</span></a>
+      <a class="l-btn l-btn-ghost" href="/events/">All events <span class="arrow" aria-hidden="true">&rarr;</span></a>
     </div>
     {% if cards %}
-      <div class="event-cards">
+      <div class="l-events">
         {% for card in cards %}
-          <a class="event-card" href="/events/{{ card.event.slug }}/">
-            <span class="status-badge {{ card.phase.0 }}">{{ card.phase.1 }}</span>
+          <a class="l-event reveal{% if forloop.counter0 %} d{{ forloop.counter0|add:0 }}{% endif %}" href="/events/{{ card.event.slug }}/">
+            <span class="l-phase {{ card.phase.0 }}">{{ card.phase.1 }}</span>
             <h3>{{ card.event.name }}</h3>
             {% if card.event.tagline %}<p>{{ card.event.tagline }}</p>{% elif card.event.description %}<p>{{ card.event.description|truncatewords:22 }}</p>{% endif %}
             <div class="meta">
-              <span><strong class="num">{{ card.projects }}</strong> submitted project{{ card.projects|pluralize }}</span>
-              <span>Deadline <time datetime="{{ card.event.submissions_close_at|date:'c' }}" data-countdown>{{ card.event.submissions_close_at|date:"j M Y, H:i" }} UTC</time></span>
+              <span><strong>{{ card.projects }}</strong> submitted project{{ card.projects|pluralize }}</span>
+              <span>Deadline <time datetime="{{ card.event.submissions_close_at|date:'c' }}">{{ card.event.submissions_close_at|date:"j M Y" }}</time></span>
             </div>
           </a>
         {% endfor %}
       </div>
     {% else %}
-      <div class="empty-state">
-        <h3>No events yet</h3>
-        <p>Hosts can create the first event from their dashboard.</p>
-      </div>
+      <p class="l-lead">No events yet. Hosts can create the first one from their dashboard.</p>
     {% endif %}
   </div>
 </section>
 
-<section>
+<section class="l-section pt-0">
   <div class="container">
-    <div class="section-head">
-      <div>
-        <span class="eyebrow">Built for every seat at the table</span>
-        <h2>One portal, <em>four</em> kinds of user.</h2>
+    <div class="l-final reveal">
+      <div class="l-eyebrow">// yours to run</div>
+      <h2 class="mt-3">Your event. Your server. <span class="l-serif l-grad">Your data.</span></h2>
+      <p>No hosted database, no auth provider, no network calls at runtime. Bring it up with one command, and leave with one export whenever you like.</p>
+      <div class="l-actions">
+        <a class="l-btn l-btn-primary" href="/api/docs/">Read the API <span class="arrow" aria-hidden="true">&rarr;</span></a>
+        <a class="l-btn l-btn-ghost" href="{% url 'gallery' %}">Open the gallery</a>
       </div>
-      <p>Roles are scoped to each event, and a person holds exactly one role per event, so nobody judges a contest they compete in or run.</p>
-    </div>
-    <div class="role-grid">
-      <div class="role-card">
-        <span class="role-pill role-organizer">Organizers</span>
-        <ul>
-          <li>Weighted rubrics that lock at the first submitted review</li>
-          <li>Live progress: who hasn't started, which projects lack reviews</li>
-          <li>CSV at every stage, and a full JSON export to leave any time</li>
-        </ul>
-      </div>
-      <div class="role-card">
-        <span class="role-pill role-judge">Judges</span>
-        <ul>
-          <li>Evidence beside the rubric, number keys to score</li>
-          <li>Autosaved drafts and an explicit submit</li>
-          <li>Only your own assignments, only your own tracks</li>
-        </ul>
-      </div>
-      <div class="role-card">
-        <span class="role-pill role-participant">Participants</span>
-        <ul>
-          <li>Teams by invite link, drafts until the deadline</li>
-          <li>A receipt for every submitted revision</li>
-          <li>Feedback released after results are published</li>
-        </ul>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section>
-  <div class="container">
-    <div class="closing">
-      <div>
-        <h2>Your event, your server, <em>your data.</em></h2>
-        <p>No cloud account, no hosted database, no trackers. Every action in the interface is also a documented API call, and an organizer can leave with a single export.</p>
-        <div class="hero-actions mt-4">
-          <a class="btn btn-accent" href="/api/docs/">Read the API <span class="arrow" aria-hidden="true">&rarr;</span></a>
-          <a class="btn btn-outline-primary" style="--bs-btn-color:var(--vd-paper);--bs-btn-border-color:rgba(255,255,255,.3)" href="{% url 'gallery' %}">Open the gallery</a>
-        </div>
-      </div>
-<pre><span class="c"># clone, then</span>
-<span class="p">$</span> docker compose up
-<span class="c"># seeded with the fixture event, demo logins printed</span>
-<span class="p">$</span> python3 run.py .dogfood.toml
-<span class="c"># T1 and T2 verified by the organizers' checker</span></pre>
+      <div class="l-term" aria-label="Start command"><span class="p">$</span> docker compose up <span class="cur" aria-hidden="true"></span></div>
     </div>
   </div>
 </section>
 {% endblock %}
+
+{% block extra_js %}<script src="{% static 'js/landing.js' %}"></script>{% endblock %}

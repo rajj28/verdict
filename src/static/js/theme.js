@@ -10,6 +10,7 @@
   "use strict";
 
   var STORAGE_KEY = "verdict-theme";
+  document.documentElement.classList.add("js");
 
   function stored() {
     try {
@@ -21,6 +22,10 @@
   }
 
   function preferred() {
+    var locked = document.documentElement.getAttribute("data-theme-lock");
+    if (locked === "light" || locked === "dark") {
+      return locked;
+    }
     var saved = stored();
     if (saved) {
       return saved;

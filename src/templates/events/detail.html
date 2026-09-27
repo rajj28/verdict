@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block title %}{{ event.name }}{% endblock %}
+
+{% block content %}
+<nav aria-label="Breadcrumb"><a href="/events/">Events</a> / {{ event.name }}</nav>
+<header class="page-header">
+  <h1>{{ event.name }}</h1>
+  <p class="lead">{{ event.tagline }}</p>
+  <div class="page-actions">
+    <a class="btn btn-outline-primary" href="/projects?event={{ event.slug }}">View gallery</a>
+    {% if has_results %}<a class="btn btn-outline-primary" href="/events/{{ event.slug }}/results">Results</a>{% endif %}
+    {% if role == "admin" or role == "organizer" %}<a class="btn btn-primary" href="/manage/{{ event.slug }}/">Manage</a>{% endif %}
+  </div>
+</header>
+
+<section class="mb-4">
+  <h2 class="h4">About</h2>
+  <p>{{ event.description|linebreaksbr }}</p>
+</section>
+
+<section class="mb-4">
+  <h2 class="h4">Timeline</h2>
+  <dl class="row">
+    <dt class="col-sm-3">Submissions open</dt>
+    <dd class="col-sm-9">{% if event.submissions_open_at %}<time datetime="{{ event.submissions_open_at|date:'c' }}" data-countdown>{{ event.submissions_open_at }}</time>{% else %}Already open{% endif %}</dd>
+    <dt class="col-sm-3">Submissions close</dt>
+    <dd class="col-sm-9"><time class="countdown" datetime="{{ event.submissions_close_at|date:'c' }}" data-countdown>{{ event.submissions_close_at }}</time></dd>
+    <dt class="col-sm-3">Judging opens</dt>
+    <dd class="col-sm-9">{% firstof event.judging_open_at event.submissions_close_at %}</dd>
+    <dt class="col-sm-3">Judging closes</dt>
+    <dd class="col-sm-9">{% if event.judging_close_at %}<time datetime="{{ event.judging_close_at|date:'c' }}" data-countdown>{{ event.judging_close_at }}</time>{% else %}Organizer controlled{% endif %}</dd>
+  </dl>
+</section>
+
+<section class="mb-4">
+  <h2 class="h4">Tracks</h2>
+  {% if event.tracks.all %}
+    <div class="row g-3">
+      {% for track in event.tracks.all %}
+        <article class="col-md-4"><div class="card h-100"><div class="card-body"><h3 class="h5">{{ track.name }}</h3><p>{{ track.description }}</p></div></div></article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="empty-state"><p>No tracks yet.</p></div>
+  {% endif %}
+</section>
+
+<section class="mb-4">
+  <h2 class="h4">Prizes</h2>
+  {% if event.prizes.all %}
+    <div class="row g-3">
+      {% for prize in event.prizes.all %}
+        <article class="col-md-4"><div class="card h-100"><div class="card-body"><h3 class="h5">{{ prize.name }}</h3><p>{{ prize.description }}</p><p><strong>{{ prize.value }}</strong>{% if prize.track %} · {{ prize.track.name }}{% endif %}</p></div></div></article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="empty-state"><p>No prizes yet.</p></div>
+  {% endif %}
+</section>
+
+<section class="mb-4">
+  <h2 class="h4">Next action</h2>
+  {% if not user.is_authenticated %}
+    <a class="btn btn-primary" href="/login?next=/events/{{ event.slug }}/">Sign in to register</a>
+  {% elif role == "participant" %}
+    {% if submission_window_open %}
+      <a class="btn btn-primary" href="/events/{{ event.slug }}/team">Create or join a team</a>
+      <a class="btn btn-outline-primary" href="/events/{{ event.slug }}/submission">Edit submission</a>
+    {% else %}
+      <p>Submissions are closed.</p>
+    {% endif %}
+  {% elif role == "judge" %}
+    <a class="btn btn-primary" href="/judge">Open judge console</a>
+  {% elif role == "organizer" or role == "admin" %}
+    <a class="btn btn-primary" href="/manage/{{ event.slug }}/">Manage this event</a>
+  {% elif submission_window_open %}
+    <button class="btn btn-primary" data-api-method="POST" data-api-url="/api/v1/events/{{ event.slug }}/register" data-success="reload">Register for this event</button>
+  {% else %}
+    <p>Registration is closed.</p>
+  {% endif %}
+</section>
+{% endblock %}

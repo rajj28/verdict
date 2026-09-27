@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Settings &mdash; {{ event.name }}{% endblock %}
+{% block heading %}Event settings{% endblock %}
+{% block lead %}Edit name, tagline, windows, team size, judging mode and scoring settings.{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="Breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/events/">Events</a></li>
+    <li class="breadcrumb-item"><a href="/manage/{{ event.slug }}/">{{ event.name }}</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Settings</li>
+  </ol>
+</nav>
+{% endblock %}
+
+{% block page_actions %}
+{% if submission_window_open %}
+  <button class="btn btn-warning"
+          data-api-method="POST"
+          data-api-url="/api/v1/events/{{ event.slug }}/close-submissions"
+          data-success="reload"
+          data-confirm="Close submissions now? Judging will open immediately.">
+    Close submissions now
+  </button>
+{% endif %}
+<button class="btn btn-danger"
+        data-api-method="POST"
+        data-api-url="/api/v1/events/{{ event.slug }}/close-judging"
+        data-success="reload"
+        data-confirm="Close judging now? No new reviews will be accepted after this.">
+  Close judging now
+</button>
+{% endblock %}
+
+{% block content %}
+
+{% if scoring_locked %}
+<div class="alert alert-warning" role="alert">
+  <strong>Scoring is locked.</strong> The first review has been submitted, so the submission windows,
+  ranking method and shrinkage &lambda; cannot be changed. Other fields can still be edited.
+</div>
+{% endif %}
+
+<div class="row justify-content-center">
+  <div class="col-lg-7">
+    <form data-api-method="PATCH"
+          data-api-url="/api/v1/events/{{ event.slug }}"
+          data-success="reload">
+
+      <div data-form-errors class="mb-3"></div>
+
+      <h2 class="h5 mb-3">Identity</h2>
+
+      <div class="mb-3">
+        <label class="form-label" for="id_name">Event name <span aria-hidden="true">*</span></label>
+        <input class="form-control" id="id_name" name="name" type="text"
+               maxlength="160" required value="{{ event.name }}">
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label" for="id_tagline">Tagline</label>
+        <input class="form-control" id="id_tagline" name="tagline" type="text"
+               maxlength="200" value="{{ event.tagline }}">
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label" for="id_description">Description</label>
+        <textarea class="form-control" id="id_description" name="description"
+                  rows="6">{{ event.description }}</textarea>
+      </div>
+
+      <h2 class="h5 mb-3 mt-4">Deadlines</h2>
+
+      <div class="row g-3 mb-3">
+        <div class="col-md-6">
+          <label class="form-label" for="id_submissions_open_at">Submissions open</label>
+          <input class="form-control" id="id_submissions_open_at" name="submissions_open_at"
+                 type="datetime-local"
+                 {% if scoring_locked %}disabled{% endif %}
+                 value="{{ event.submissions_open_at|date:'Y-m-d\TH:i' }}">
+          {% if scoring_locked %}
+            <div class="form-text text-warning">Locked &mdash; scoring has started.</div>
+          {% endif %}
+        </div>
+        <div class="col-md-6">
+          <label class="form-label" for="id_submissions_close_at">Submissions close <span aria-hidden="true">*</span></label>
+          <input class="form-control" id="id_submissions_close_at" name="submissions_close_at"
+                 type="datetime-local" required
+                 {% if scoring_locked %}disabled{% endif %}
+                 value="{{ event.submissions_close_at|date:'Y-m-d\TH:i' }}">
+          {% if scoring_locked %}
+            <div class="form-text text-warning">Locked &mdash; scoring has started.</div>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="row g-3 mb-3">
+        <div class="col-md-6">
+          <label class="form-label" for="id_judging_open_at">Judging opens</label>
+          <input class="form-control" id="id_judging_open_at" name="judging_open_at"
+                 type="datetime-local"
+                 value="{{ event.judging_open_at|date:'Y-m-d\TH:i' }}">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label" for="id_judging_close_at">Judging closes</label>
+          <input class="form-control" id="id_judging_close_at" name="judging_close_at"
+                 type="datetime-local"
+                 value="{{ event.judging_close_at|date:'Y-m-d\TH:i' }}">
+          <div class="form-text">Leave blank to close manually.</div>
+        </div>
+      </div>
+
+      <h2 class="h5 mb-3 mt-4">Participation</h2>
+
+      <div class="row g-3 mb-3">
+        <div class="col-md-4">
+          <label class="form-label" for="id_max_team_size">Max team size</label>
+          <input class="form-control" id="id_max_team_size" name="max_team_size"
+                 type="number" min="1" max="10" data-type="int"
+                 value="{{ event.max_team_size }}">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label" for="id_reviews_per_project">Reviews per project</label>
+          <input class="form-control" id="id_reviews_per_project" name="reviews_per_project"
+                 type="number" min="1" data-type="int"
+                 value="{{ event.reviews_per_project }}">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label" for="id_judging_mode">Judging mode</label>
+          <select class="form-select" id="id_judging_mode" name="judging_mode">
+            <option value="rubric" {% if event.judging_mode == "rubric" %}selected{% endif %}>Rubric</option>
+            <option value="pairwise" {% if event.judging_mode == "pairwise" %}selected{% endif %}>Pairwise</option>
+            <option value="both" {% if event.judging_mode == "both" %}selected{% endif %}>Both</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="mb-3">
+        <div class="form-check">
+          <input class="form-check-input" id="id_gallery_public" name="gallery_public"
+                 type="checkbox" data-type="bool"
+                 {% if event.gallery_public %}checked{% endif %}>
+          <label class="form-check-label" for="id_gallery_public">
+            Make the project gallery public
+          </label>
+        </div>
+      </div>
+
+      <h2 class="h5 mb-3 mt-4">Scoring</h2>
+
+      <div class="row g-3 mb-3">
+        <div class="col-md-6">
+          <label class="form-label" for="id_ranking_method">Ranking method</label>
+          <select class="form-select" id="id_ranking_method" name="ranking_method"
+                  {% if scoring_locked %}disabled{% endif %}>
+            <option value="normalized" {% if event.ranking_method == "normalized" %}selected{% endif %}>Normalized (judge offsets)</option>
+            <option value="raw" {% if event.ranking_method == "raw" %}selected{% endif %}>Raw mean</option>
+            <option value="pairwise" {% if event.ranking_method == "pairwise" %}selected{% endif %}>Pairwise (Bradley-Terry)</option>
+          </select>
+          {% if scoring_locked %}
+            <div class="form-text text-warning">Locked &mdash; scoring has started.</div>
+          {% endif %}
+        </div>
+        <div class="col-md-6">
+          <label class="form-label" for="id_shrinkage_lambda">Shrinkage &lambda;</label>
+          <input class="form-control" id="id_shrinkage_lambda" name="shrinkage_lambda"
+                 type="number" step="0.01" min="0" data-type="float"
+                 {% if scoring_locked %}disabled{% endif %}
+                 value="{{ event.shrinkage_lambda }}">
+          {% if scoring_locked %}
+            <div class="form-text text-warning">Locked &mdash; scoring has started.</div>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="d-flex gap-2 mt-4">
+        <button class="btn btn-primary" type="submit">Save settings</button>
+        <a class="btn btn-outline-secondary" href="/manage/{{ event.slug }}/">Back to overview</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% endblock %}

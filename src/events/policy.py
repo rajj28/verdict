@@ -2,7 +2,7 @@
 
 Read scoping and permission predicates. Every queryset in a view starts here.
 """
-from django.db.models import Q, QuerySet
+from django.db.models import QuerySet
 
 from core.clock import now
 from events.models import Event, EventRole, Role
@@ -80,11 +80,12 @@ def judging_window_open(event: Event, at=None) -> bool:
 
 
 def visible_events(user=None) -> QuerySet[Event]:
-    """Events the caller may browse: every event with a public gallery or a role."""
-    public = Q(gallery_public=True)
-    if user is None or not getattr(user, "is_authenticated", False):
-        return Event.objects.filter(public)
-    return Event.objects.filter(public | Q(roles__user=user) | Q(created_by=user)).distinct()
+    """Events are browseable by every role and visitor."""
+    return Event.objects.all()
+
+
+def can_manage(user, event: Event) -> bool:
+    return is_organizer(user, event)
 
 
 def get_event_by_slug(slug: str) -> Event | None:

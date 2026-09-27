@@ -1,0 +1,433 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Tracks, prizes &amp; questions &mdash; {{ event.name }}{% endblock %}
+{% block heading %}Tracks, prizes &amp; questions{% endblock %}
+{% block lead %}Configure competition categories, awards and custom submission fields.{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="Breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/events/">Events</a></li>
+    <li class="breadcrumb-item"><a href="/manage/{{ event.slug }}/">{{ event.name }}</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Setup</li>
+  </ol>
+</nav>
+{% endblock %}
+
+{% block content %}
+
+{# ======== TRACKS ======== #}
+<section class="mb-5" aria-labelledby="tracks-heading">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="h4 mb-0" id="tracks-heading">Tracks</h2>
+  </div>
+
+  {% if tracks %}
+    <div class="data-table table-responsive mb-3">
+      <table class="table table-sm align-middle">
+        <thead>
+          <tr>
+            <th scope="col">Position</th>
+            <th scope="col">Name</th>
+            <th scope="col">Description</th>
+            <th scope="col"><span class="visually-hidden">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for track in tracks %}
+            <tr id="track-row-{{ track.public_id }}">
+              <td>{{ track.position }}</td>
+              <td>{{ track.name }}</td>
+              <td>{{ track.description|truncatechars:80 }}</td>
+              <td class="text-end">
+                <button class="btn btn-sm btn-outline-secondary"
+                        data-edit-target="#track-form-{{ track.public_id }}">Edit</button>
+                <button class="btn btn-sm btn-outline-danger"
+                        data-api-method="DELETE"
+                        data-api-url="/api/v1/events/{{ event.slug }}/tracks/{{ track.public_id }}"
+                        data-success="reload"
+                        data-confirm="Delete track &ldquo;{{ track.name }}&rdquo;? Any projects using it will block deletion.">
+                  Delete
+                </button>
+              </td>
+            </tr>
+            <tr id="track-form-{{ track.public_id }}" class="d-none">
+              <td colspan="4">
+                <form class="row g-2 p-2"
+                      data-api-method="PATCH"
+                      data-api-url="/api/v1/events/{{ event.slug }}/tracks/{{ track.public_id }}"
+                      data-success="reload">
+                  <div class="col-md-2">
+                    <label class="form-label visually-hidden" for="trk_pos_{{ track.public_id }}">Position</label>
+                    <input class="form-control form-control-sm" id="trk_pos_{{ track.public_id }}"
+                           name="position" type="number" min="0" data-type="int"
+                           value="{{ track.position }}" placeholder="Position">
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label visually-hidden" for="trk_name_{{ track.public_id }}">Name</label>
+                    <input class="form-control form-control-sm" id="trk_name_{{ track.public_id }}"
+                           name="name" type="text" maxlength="120" required
+                           value="{{ track.name }}" placeholder="Name">
+                  </div>
+                  <div class="col-md-5">
+                    <label class="form-label visually-hidden" for="trk_desc_{{ track.public_id }}">Description</label>
+                    <input class="form-control form-control-sm" id="trk_desc_{{ track.public_id }}"
+                           name="description" type="text"
+                           value="{{ track.description }}" placeholder="Description">
+                  </div>
+                  <div class="col-md-2 d-flex gap-1">
+                    <button class="btn btn-sm btn-primary" type="submit">Save</button>
+                    <button class="btn btn-sm btn-outline-secondary" type="button"
+                            data-edit-cancel="#track-form-{{ track.public_id }}">Cancel</button>
+                  </div>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="empty-state mb-3"><p>No tracks yet. Add one below.</p></div>
+  {% endif %}
+
+  <h3 class="h6">Add track</h3>
+  <form class="row g-2"
+        data-api-method="POST"
+        data-api-url="/api/v1/events/{{ event.slug }}/tracks"
+        data-success="reload">
+    <div class="col-md-2">
+      <label class="form-label visually-hidden" for="new_trk_pos">Position</label>
+      <input class="form-control form-control-sm" id="new_trk_pos" name="position"
+             type="number" min="0" value="0" data-type="int" placeholder="Position">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label visually-hidden" for="new_trk_name">Name</label>
+      <input class="form-control form-control-sm" id="new_trk_name" name="name"
+             type="text" maxlength="120" required placeholder="Track name">
+    </div>
+    <div class="col-md-5">
+      <label class="form-label visually-hidden" for="new_trk_desc">Description</label>
+      <input class="form-control form-control-sm" id="new_trk_desc" name="description"
+             type="text" placeholder="Short description (optional)">
+    </div>
+    <div class="col-md-2">
+      <button class="btn btn-sm btn-primary" type="submit">Add track</button>
+    </div>
+  </form>
+</section>
+
+{# ======== PRIZES ======== #}
+<section class="mb-5" aria-labelledby="prizes-heading">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="h4 mb-0" id="prizes-heading">Prizes</h2>
+  </div>
+
+  {% if prizes %}
+    <div class="data-table table-responsive mb-3">
+      <table class="table table-sm align-middle">
+        <thead>
+          <tr>
+            <th scope="col">Pos</th>
+            <th scope="col">Name</th>
+            <th scope="col">Value</th>
+            <th scope="col">Track</th>
+            <th scope="col"><span class="visually-hidden">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for prize in prizes %}
+            <tr id="prize-row-{{ prize.public_id }}">
+              <td>{{ prize.position }}</td>
+              <td>{{ prize.name }}</td>
+              <td>{{ prize.value }}</td>
+              <td>{{ prize.track.name|default:"&mdash;" }}</td>
+              <td class="text-end">
+                <button class="btn btn-sm btn-outline-secondary"
+                        data-edit-target="#prize-form-{{ prize.public_id }}">Edit</button>
+                <button class="btn btn-sm btn-outline-danger"
+                        data-api-method="DELETE"
+                        data-api-url="/api/v1/events/{{ event.slug }}/prizes/{{ prize.public_id }}"
+                        data-success="reload"
+                        data-confirm="Delete prize &ldquo;{{ prize.name }}&rdquo;?">
+                  Delete
+                </button>
+              </td>
+            </tr>
+            <tr id="prize-form-{{ prize.public_id }}" class="d-none">
+              <td colspan="5">
+                <form class="row g-2 p-2"
+                      data-api-method="PATCH"
+                      data-api-url="/api/v1/events/{{ event.slug }}/prizes/{{ prize.public_id }}"
+                      data-success="reload">
+                  <div class="col-md-1">
+                    <label class="form-label visually-hidden" for="prz_pos_{{ prize.public_id }}">Position</label>
+                    <input class="form-control form-control-sm" id="prz_pos_{{ prize.public_id }}"
+                           name="position" type="number" min="0" data-type="int"
+                           value="{{ prize.position }}" placeholder="Pos">
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label visually-hidden" for="prz_name_{{ prize.public_id }}">Name</label>
+                    <input class="form-control form-control-sm" id="prz_name_{{ prize.public_id }}"
+                           name="name" type="text" maxlength="160" required
+                           value="{{ prize.name }}" placeholder="Prize name">
+                  </div>
+                  <div class="col-md-2">
+                    <label class="form-label visually-hidden" for="prz_val_{{ prize.public_id }}">Value</label>
+                    <input class="form-control form-control-sm" id="prz_val_{{ prize.public_id }}"
+                           name="value" type="text" maxlength="120"
+                           value="{{ prize.value }}" placeholder="e.g. $500">
+                  </div>
+                  <div class="col-md-2">
+                    <label class="form-label visually-hidden" for="prz_track_{{ prize.public_id }}">Track</label>
+                    <select class="form-select form-select-sm" id="prz_track_{{ prize.public_id }}"
+                            name="track">
+                      <option value="">Any track</option>
+                      {% for track in tracks %}
+                        <option value="{{ track.public_id }}"
+                                {% if prize.track_id == track.id %}selected{% endif %}>
+                          {{ track.name }}
+                        </option>
+                      {% endfor %}
+                    </select>
+                  </div>
+                  <div class="col-md-2">
+                    <label class="form-label visually-hidden" for="prz_desc_{{ prize.public_id }}">Description</label>
+                    <input class="form-control form-control-sm" id="prz_desc_{{ prize.public_id }}"
+                           name="description" type="text"
+                           value="{{ prize.description }}" placeholder="Description">
+                  </div>
+                  <div class="col-md-2 d-flex gap-1">
+                    <button class="btn btn-sm btn-primary" type="submit">Save</button>
+                    <button class="btn btn-sm btn-outline-secondary" type="button"
+                            data-edit-cancel="#prize-form-{{ prize.public_id }}">Cancel</button>
+                  </div>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="empty-state mb-3"><p>No prizes yet. Add one below.</p></div>
+  {% endif %}
+
+  <h3 class="h6">Add prize</h3>
+  <form class="row g-2"
+        data-api-method="POST"
+        data-api-url="/api/v1/events/{{ event.slug }}/prizes"
+        data-success="reload">
+    <div class="col-md-1">
+      <label class="form-label visually-hidden" for="new_prz_pos">Position</label>
+      <input class="form-control form-control-sm" id="new_prz_pos" name="position"
+             type="number" min="0" value="0" data-type="int" placeholder="Pos">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label visually-hidden" for="new_prz_name">Name</label>
+      <input class="form-control form-control-sm" id="new_prz_name" name="name"
+             type="text" maxlength="160" required placeholder="Prize name">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label visually-hidden" for="new_prz_val">Value</label>
+      <input class="form-control form-control-sm" id="new_prz_val" name="value"
+             type="text" maxlength="120" placeholder="e.g. $500">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label visually-hidden" for="new_prz_track">Track</label>
+      <select class="form-select form-select-sm" id="new_prz_track" name="track">
+        <option value="">Any track</option>
+        {% for track in tracks %}
+          <option value="{{ track.public_id }}">{{ track.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label visually-hidden" for="new_prz_desc">Description</label>
+      <input class="form-control form-control-sm" id="new_prz_desc" name="description"
+             type="text" placeholder="Description (optional)">
+    </div>
+    <div class="col-md-2">
+      <button class="btn btn-sm btn-primary" type="submit">Add prize</button>
+    </div>
+  </form>
+</section>
+
+{# ======== CUSTOM QUESTIONS ======== #}
+<section class="mb-5" aria-labelledby="questions-heading">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="h4 mb-0" id="questions-heading">Custom questions</h2>
+  </div>
+  <p class="text-body-secondary">These appear on the submission form. Questions with answers cannot be deleted; use the <em>active</em> toggle to hide them from new submissions.</p>
+
+  {% if questions %}
+    <div class="data-table table-responsive mb-3">
+      <table class="table table-sm align-middle">
+        <thead>
+          <tr>
+            <th scope="col">Pos</th>
+            <th scope="col">Prompt</th>
+            <th scope="col">Kind</th>
+            <th scope="col">Required</th>
+            <th scope="col">Public</th>
+            <th scope="col">Active</th>
+            <th scope="col"><span class="visually-hidden">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for q in questions %}
+            <tr id="q-row-{{ q.public_id }}">
+              <td>{{ q.position }}</td>
+              <td>{{ q.prompt|truncatechars:60 }}</td>
+              <td>{{ q.get_kind_display }}</td>
+              <td>{% if q.required %}Yes{% else %}No{% endif %}</td>
+              <td>{% if q.is_public %}Yes{% else %}No{% endif %}</td>
+              <td>
+                <span class="status-badge {% if q.is_active %}status-open{% else %}status-closed{% endif %}">
+                  {% if q.is_active %}Active{% else %}Inactive{% endif %}
+                </span>
+              </td>
+              <td class="text-end">
+                <button class="btn btn-sm btn-outline-secondary"
+                        data-edit-target="#q-form-{{ q.public_id }}">Edit</button>
+                {% if q.is_active %}
+                  <button class="btn btn-sm btn-outline-warning"
+                          data-api-method="PATCH"
+                          data-api-url="/api/v1/events/{{ event.slug }}/questions/{{ q.public_id }}"
+                          data-success="reload"
+                          data-body='{"is_active": false}'
+                          data-confirm="Deactivate this question? It will be hidden from new submissions but existing answers are kept.">
+                    Deactivate
+                  </button>
+                {% else %}
+                  <button class="btn btn-sm btn-outline-success"
+                          data-api-method="PATCH"
+                          data-api-url="/api/v1/events/{{ event.slug }}/questions/{{ q.public_id }}"
+                          data-success="reload"
+                          data-body='{"is_active": true}'>
+                    Activate
+                  </button>
+                {% endif %}
+                <button class="btn btn-sm btn-outline-danger"
+                        data-api-method="DELETE"
+                        data-api-url="/api/v1/events/{{ event.slug }}/questions/{{ q.public_id }}"
+                        data-success="reload"
+                        data-confirm="Delete question &ldquo;{{ q.prompt|truncatechars:40 }}&rdquo;? This will fail if any answers exist.">
+                  Delete
+                </button>
+              </td>
+            </tr>
+            <tr id="q-form-{{ q.public_id }}" class="d-none">
+              <td colspan="7">
+                <form class="row g-2 p-2"
+                      data-api-method="PATCH"
+                      data-api-url="/api/v1/events/{{ event.slug }}/questions/{{ q.public_id }}"
+                      data-success="reload">
+                  <div class="col-md-1">
+                    <label class="form-label visually-hidden" for="q_pos_{{ q.public_id }}">Position</label>
+                    <input class="form-control form-control-sm" id="q_pos_{{ q.public_id }}"
+                           name="position" type="number" min="0" data-type="int"
+                           value="{{ q.position }}" placeholder="Pos">
+                  </div>
+                  <div class="col-md-4">
+                    <label class="form-label visually-hidden" for="q_prompt_{{ q.public_id }}">Prompt</label>
+                    <input class="form-control form-control-sm" id="q_prompt_{{ q.public_id }}"
+                           name="prompt" type="text" maxlength="300" required
+                           value="{{ q.prompt }}">
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label visually-hidden" for="q_help_{{ q.public_id }}">Help text</label>
+                    <input class="form-control form-control-sm" id="q_help_{{ q.public_id }}"
+                           name="help_text" type="text" maxlength="300"
+                           value="{{ q.help_text }}" placeholder="Help text (optional)">
+                  </div>
+                  <div class="col-md-2">
+                    <label class="form-label visually-hidden" for="q_kind_{{ q.public_id }}">Kind</label>
+                    <select class="form-select form-select-sm" id="q_kind_{{ q.public_id }}"
+                            name="kind">
+                      <option value="short_text" {% if q.kind == "short_text" %}selected{% endif %}>Short text</option>
+                      <option value="long_text" {% if q.kind == "long_text" %}selected{% endif %}>Long text</option>
+                      <option value="url" {% if q.kind == "url" %}selected{% endif %}>URL</option>
+                      <option value="choice" {% if q.kind == "choice" %}selected{% endif %}>Choice</option>
+                      <option value="yes_no" {% if q.kind == "yes_no" %}selected{% endif %}>Yes / no</option>
+                    </select>
+                  </div>
+                  <div class="col-md-2 d-flex flex-wrap gap-2 align-items-center">
+                    <div class="form-check form-check-inline">
+                      <input class="form-check-input" type="checkbox" id="q_req_{{ q.public_id }}"
+                             name="required" data-type="bool"
+                             {% if q.required %}checked{% endif %}>
+                      <label class="form-check-label" for="q_req_{{ q.public_id }}">Req</label>
+                    </div>
+                    <div class="form-check form-check-inline">
+                      <input class="form-check-input" type="checkbox" id="q_pub_{{ q.public_id }}"
+                             name="is_public" data-type="bool"
+                             {% if q.is_public %}checked{% endif %}>
+                      <label class="form-check-label" for="q_pub_{{ q.public_id }}">Public</label>
+                    </div>
+                  </div>
+                  <div class="col-12 d-flex gap-1">
+                    <button class="btn btn-sm btn-primary" type="submit">Save</button>
+                    <button class="btn btn-sm btn-outline-secondary" type="button"
+                            data-edit-cancel="#q-form-{{ q.public_id }}">Cancel</button>
+                  </div>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="empty-state mb-3"><p>No custom questions yet. Add one below.</p></div>
+  {% endif %}
+
+  <h3 class="h6">Add question</h3>
+  <form class="row g-2"
+        data-api-method="POST"
+        data-api-url="/api/v1/events/{{ event.slug }}/questions"
+        data-success="reload">
+    <div class="col-md-1">
+      <label class="form-label visually-hidden" for="new_q_pos">Position</label>
+      <input class="form-control form-control-sm" id="new_q_pos" name="position"
+             type="number" min="0" value="0" data-type="int" placeholder="Pos">
+    </div>
+    <div class="col-md-4">
+      <label class="form-label visually-hidden" for="new_q_prompt">Prompt</label>
+      <input class="form-control form-control-sm" id="new_q_prompt" name="prompt"
+             type="text" maxlength="300" required placeholder="Question text">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label visually-hidden" for="new_q_help">Help text</label>
+      <input class="form-control form-control-sm" id="new_q_help" name="help_text"
+             type="text" maxlength="300" placeholder="Help text (optional)">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label visually-hidden" for="new_q_kind">Kind</label>
+      <select class="form-select form-select-sm" id="new_q_kind" name="kind">
+        <option value="short_text" selected>Short text</option>
+        <option value="long_text">Long text</option>
+        <option value="url">URL</option>
+        <option value="choice">Choice</option>
+        <option value="yes_no">Yes / no</option>
+      </select>
+    </div>
+    <div class="col-md-2 d-flex flex-wrap gap-2 align-items-center">
+      <div class="form-check form-check-inline">
+        <input class="form-check-input" type="checkbox" id="new_q_req" name="required" data-type="bool">
+        <label class="form-check-label" for="new_q_req">Required</label>
+      </div>
+      <div class="form-check form-check-inline">
+        <input class="form-check-input" type="checkbox" id="new_q_pub" name="is_public"
+               data-type="bool" checked>
+        <label class="form-check-label" for="new_q_pub">Public</label>
+      </div>
+    </div>
+    <div class="col-md-1">
+      <button class="btn btn-sm btn-primary" type="submit">Add</button>
+    </div>
+  </form>
+</section>
+
+{% endblock %}

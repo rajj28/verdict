@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Manage {{ event.name }}{% endblock %}
+{% block heading %}{{ event.name }}{% endblock %}
+{% block lead %}Organizer overview &mdash; phase checklist, stats and data issues.{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="Breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/events/">Events</a></li>
+    <li class="breadcrumb-item"><a href="/events/{{ event.slug }}/">{{ event.name }}</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Manage</li>
+  </ol>
+</nav>
+{% endblock %}
+
+{% block page_actions %}
+<a class="btn btn-outline-secondary" href="/events/{{ event.slug }}/">Public page</a>
+{% if submission_window_open %}
+  <button class="btn btn-warning"
+          data-api-method="POST"
+          data-api-url="/api/v1/events/{{ event.slug }}/close-submissions"
+          data-success="reload"
+          data-confirm="Close submissions now? Judging will open immediately and this cannot be undone while scoring is in progress.">
+    Close submissions now
+  </button>
+{% endif %}
+<button class="btn btn-danger"
+        data-api-method="POST"
+        data-api-url="/api/v1/events/{{ event.slug }}/close-judging"
+        data-success="reload"
+        data-confirm="Close judging now? No new reviews will be accepted after this.">
+  Close judging now
+</button>
+{% endblock %}
+
+{% block content %}
+
+{# ---- Phase checklist ---- #}
+<section class="mb-4">
+  <h2 class="h4">Phase checklist</h2>
+  <ul class="list-group">
+    {% for label, done in checklist %}
+      <li class="list-group-item d-flex align-items-center gap-2">
+        {% if done %}
+          <span class="status-badge status-done" aria-label="Done">&#10003;</span>
+        {% else %}
+          <span class="status-badge status-not-started" aria-label="Pending">&#9675;</span>
+        {% endif %}
+        {{ label }}
+      </li>
+    {% endfor %}
+  </ul>
+</section>
+
+{# ---- Stat tiles ---- #}
+<section class="mb-4">
+  <h2 class="h4">Numbers</h2>
+  <div class="stat-grid">
+    <div class="stat-tile">
+      <div class="stat-label">Participants</div>
+      <div class="stat-value">{{ stats.participants }}</div>
+    </div>
+    <div class="stat-tile">
+      <div class="stat-label">Teams</div>
+      <div class="stat-value">{{ stats.teams }}</div>
+    </div>
+    <div class="stat-tile">
+      <div class="stat-label">Submitted projects</div>
+      <div class="stat-value">{{ stats.submitted_projects }}</div>
+    </div>
+    <div class="stat-tile">
+      <div class="stat-label">Drafts</div>
+      <div class="stat-value">{{ stats.drafts }}</div>
+    </div>
+    <div class="stat-tile">
+      <div class="stat-label">Judges</div>
+      <div class="stat-value">{{ stats.judges }}</div>
+    </div>
+    <div class="stat-tile">
+      <div class="stat-label">Reviews submitted</div>
+      <div class="stat-value">{{ stats.reviews_submitted }}</div>
+    </div>
+  </div>
+</section>
+
+{# ---- Data issues ---- #}
+{% if issues.superseded or issues.under_reviewed or issues.import_reports %}
+<section class="mb-4">
+  <h2 class="h4">Data issues</h2>
+
+  {% if issues.superseded %}
+    <div class="alert alert-warning" role="alert">
+      <h3 class="h5 alert-heading">Superseded projects ({{ issues.superseded|length }})</h3>
+      <p class="mb-2">These projects were superseded by a later submission from the same team with the same title.</p>
+      <ul class="mb-0">
+        {% for project in issues.superseded %}
+          <li><a href="/events/{{ event.slug }}/projects/{{ project.public_id }}">{{ project.title }}</a>
+            &mdash; {{ project.team.name }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+
+  {% if issues.under_reviewed %}
+    <div class="alert alert-info" role="alert">
+      <h3 class="h5 alert-heading">Under-reviewed projects ({{ issues.under_reviewed|length }})</h3>
+      <p class="mb-2">These projects have fewer than {{ event.reviews_per_project }} submitted reviews.</p>
+      <ul class="mb-0">
+        {% for project in issues.under_reviewed %}
+          <li><a href="/events/{{ event.slug }}/projects/{{ project.public_id }}">{{ project.title }}</a>
+            &mdash; {{ project.review_count }} / {{ event.reviews_per_project }} reviews</li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+
+  {% if issues.import_reports %}
+    <div class="alert alert-secondary" role="alert">
+      <h3 class="h5 alert-heading">Import reports</h3>
+      {% for audit_row in issues.import_reports %}
+        <p class="mb-1"><strong>{{ audit_row.created_at }}</strong> &mdash; {{ audit_row.summary }}</p>
+      {% endfor %}
+    </div>
+  {% endif %}
+</section>
+{% endif %}
+
+{# ---- Quick links ---- #}
+<section class="mb-4">
+  <h2 class="h4">Quick links</h2>
+  <div class="list-group">
+    <a class="list-group-item list-group-item-action" href="/manage/{{ event.slug }}/settings">
+      Settings &mdash; name, windows, rubric settings
+    </a>
+    <a class="list-group-item list-group-item-action" href="/manage/{{ event.slug }}/setup">
+      Tracks, prizes &amp; questions
+    </a>
+    <a class="list-group-item list-group-item-action" href="/manage/{{ event.slug }}/rubric">
+      Rubric &mdash; scoring criteria
+    </a>
+    <a class="list-group-item list-group-item-action" href="/manage/{{ event.slug }}/judges">
+      Judges &amp; invitations
+    </a>
+    <a class="list-group-item list-group-item-action" href="/manage/{{ event.slug }}/assignments">
+      Assignments
+    </a>
+    <a class="list-group-item list-group-item-action" href="/manage/{{ event.slug }}/progress">
+      Judging progress
+    </a>
+    <a class="list-group-item list-group-item-action" href="/manage/{{ event.slug }}/results">
+      Results &amp; publication
+    </a>
+    <a class="list-group-item list-group-item-action" href="/manage/{{ event.slug }}/exports">
+      Exports (CSV / JSON)
+    </a>
+    <a class="list-group-item list-group-item-action" href="/manage/{{ event.slug }}/audit">
+      Audit log
+    </a>
+  </div>
+</section>
+
+{% endblock %}

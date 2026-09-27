@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Create event{% endblock %}
+{% block heading %}Create event{% endblock %}
+{% block lead %}Set up a new hackathon. You will be its first organizer.{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="Breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/events/">Events</a></li>
+    <li class="breadcrumb-item active" aria-current="page">New event</li>
+  </ol>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-7">
+    <form data-api-method="POST"
+          data-api-url="/api/v1/events"
+          data-success="redirect:/events/">
+
+      <div data-form-errors class="mb-3"></div>
+
+      <div class="mb-3">
+        <label class="form-label" for="id_name">Event name <span aria-hidden="true">*</span></label>
+        <input class="form-control" id="id_name" name="name" type="text" required
+               maxlength="160" placeholder="Sample Hack 2026">
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label" for="id_tagline">Tagline</label>
+        <input class="form-control" id="id_tagline" name="tagline" type="text"
+               maxlength="200" placeholder="Build, present, win.">
+        <div class="form-text">Short one-liner shown on the events list.</div>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label" for="id_description">Description</label>
+        <textarea class="form-control" id="id_description" name="description" rows="5"
+                  placeholder="What is this event about? What should participants build?"></textarea>
+      </div>
+
+      <div class="row g-3 mb-3">
+        <div class="col-md-6">
+          <label class="form-label" for="id_submissions_open_at">Submissions open</label>
+          <input class="form-control" id="id_submissions_open_at" name="submissions_open_at"
+                 type="datetime-local">
+          <div class="form-text">Leave blank to open immediately.</div>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label" for="id_submissions_close_at">Submissions close <span aria-hidden="true">*</span></label>
+          <input class="form-control" id="id_submissions_close_at" name="submissions_close_at"
+                 type="datetime-local" required>
+        </div>
+      </div>
+
+      <div class="row g-3 mb-3">
+        <div class="col-md-6">
+          <label class="form-label" for="id_judging_open_at">Judging opens</label>
+          <input class="form-control" id="id_judging_open_at" name="judging_open_at"
+                 type="datetime-local">
+          <div class="form-text">Defaults to when submissions close.</div>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label" for="id_judging_close_at">Judging closes</label>
+          <input class="form-control" id="id_judging_close_at" name="judging_close_at"
+                 type="datetime-local">
+          <div class="form-text">Leave blank to close manually.</div>
+        </div>
+      </div>
+
+      <div class="row g-3 mb-3">
+        <div class="col-md-4">
+          <label class="form-label" for="id_max_team_size">Max team size</label>
+          <input class="form-control" id="id_max_team_size" name="max_team_size"
+                 type="number" min="1" max="10" value="4" data-type="int">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label" for="id_reviews_per_project">Reviews per project</label>
+          <input class="form-control" id="id_reviews_per_project" name="reviews_per_project"
+                 type="number" min="1" value="3" data-type="int">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label" for="id_judging_mode">Judging mode</label>
+          <select class="form-select" id="id_judging_mode" name="judging_mode">
+            <option value="rubric" selected>Rubric</option>
+            <option value="pairwise">Pairwise</option>
+            <option value="both">Both</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="row g-3 mb-3">
+        <div class="col-md-6">
+          <label class="form-label" for="id_ranking_method">Ranking method</label>
+          <select class="form-select" id="id_ranking_method" name="ranking_method">
+            <option value="normalized" selected>Normalized (judge offsets)</option>
+            <option value="raw">Raw mean</option>
+            <option value="pairwise">Pairwise (Bradley-Terry)</option>
+          </select>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label" for="id_shrinkage_lambda">Shrinkage &lambda;</label>
+          <input class="form-control" id="id_shrinkage_lambda" name="shrinkage_lambda"
+                 type="number" step="0.01" min="0" value="2.00" data-type="float">
+          <div class="form-text">Regularization for judge bias estimates. 2.0 is a good default.</div>
+        </div>
+      </div>
+
+      <div class="mb-4">
+        <div class="form-check">
+          <input class="form-check-input" id="id_gallery_public" name="gallery_public"
+                 type="checkbox" checked data-type="bool">
+          <label class="form-check-label" for="id_gallery_public">
+            Make the project gallery public
+          </label>
+          <div class="form-text">When unchecked, only participants, judges and organizers can browse submissions.</div>
+        </div>
+      </div>
+
+      <div class="d-flex gap-2">
+        <button class="btn btn-primary" type="submit">Create event</button>
+        <a class="btn btn-outline-secondary" href="/events/">Cancel</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

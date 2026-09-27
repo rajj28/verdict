@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}Events{% endblock %}
+
+{% block content %}
+<header class="page-header">
+  <h1>Events</h1>
+  <p class="lead">Browse hackathons, deadlines, tracks and published results.</p>
+  <div class="page-actions">
+    {% if user.is_authenticated and user.is_host or user.is_admin %}
+      <a class="btn btn-primary" href="/events/new">Create event</a>
+    {% endif %}
+  </div>
+</header>
+
+{% if event_rows %}
+  <div class="list-group">
+    {% for row in event_rows %}
+      <a class="list-group-item list-group-item-action" href="/events/{{ row.event.slug }}/">
+        <div class="d-flex justify-content-between gap-3">
+          <div>
+            <h2 class="h5 mb-1">{{ row.event.name }}</h2>
+            <p class="mb-1">{{ row.event.tagline|default:row.event.description|truncatechars:160 }}</p>
+            <small>{{ row.event.tracks.count }} tracks · {{ row.event.prizes.count }} prizes</small>
+          </div>
+          <div class="text-end">
+            <span class="status-badge {{ row.phase_class }}">{{ row.phase }}</span>
+            <div><time class="countdown" datetime="{{ row.event.submissions_close_at|date:'c' }}" data-countdown>{{ row.event.submissions_close_at }}</time></div>
+          </div>
+        </div>
+      </a>
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="empty-state">
+    <p>No events have been created yet.</p>
+  </div>
+{% endif %}
+{% endblock %}

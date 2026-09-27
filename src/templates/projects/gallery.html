@@ -1,55 +1,137 @@
 {% extends "base.html" %}
+{% load portal_tags %}
 {% comment %}
 The gallery the acceptance checker reads: server-rendered, anonymous, sorted by
-title, 48 to a page. The first three fixture titles must be in page one, so no
-"newest first" default here.
+title, 48 to a page. The first fixture titles must be in page one, so the default
+order here is never "newest first".
+
+The whole page is three queries (filter facets, count, page): the policy queryset
+carries event, team and track with select_related, and the facets come from the
+same rows the gallery shows.
 {% endcomment %}
 {% block title %}Projects &middot; {{ PORTAL_NAME }}{% endblock %}
 
-{% block content %}
-  <h1>Projects</h1>
-  <p>{{ result_count }} submitted project{{ result_count|pluralize }} from public events.</p>
+{% block heading %}Projects{% endblock %}
+{% block lead %}
+  {{ result_count }} submitted project{{ result_count|pluralize }} from public events. Drafts,
+  withdrawn and superseded entries are never listed here.
+{% endblock %}
 
-  <form method="get" action="/projects" role="search">
-    <label for="q">Search</label>
-    <input id="q" type="search" name="q" value="{{ q }}" placeholder="Title or summary">
-    <label for="track">Track</label>
-    <select id="track" name="track">
-      <option value="">All tracks</option>
-      {% for track_id, track_name in tracks %}
-        <option value="{{ track_id }}"{% if track_id == track %} selected{% endif %}>{{ track_name }}</option>
-      {% endfor %}
-    </select>
-    <button type="submit">Filter</button>
+{% block page_actions %}
+  <a class="btn btn-outline-primary" href="/events/">All events</a>
+{% endblock %}
+
+{% block content %}
+  <form class="card-verdict p-3 mb-4" method="get" action="{% if event %}/events/{{ event.slug }}/projects{% else %}/projects{% endif %}" role="search">
+    <div class="row g-3 align-items-end">
+      <div class="col-12 col-lg-4">
+        <label class="form-label" for="id_q">Search</label>
+        <input class="form-control" id="id_q" type="search" name="q" value="{{ q }}"
+               placeholder="Title, summary or write-up" maxlength="120">
+      </div>
+      {% if not event %}
+        <div class="col-12 col-sm-6 col-lg-3">
+          <label class="form-label" for="id_event">Event</label>
+          <select class="form-select" id="id_event" name="event">
+            <option value="">Every event</option>
+            {% for option in events %}
+              <option value="{{ option.slug }}"{% if event and option.slug == event.slug %} selected{% endif %}>{{ option.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      {% endif %}
+      <div class="col-12 col-sm-6 col-lg-2">
+        <label class="form-label" for="id_track">Track</label>
+        <select class="form-select" id="id_track" name="track">
+          <option value="">All tracks</option>
+          {% for track_id, track_name in tracks %}
+            <option value="{{ track_id }}"{% if track_id == track %} selected{% endif %}>{{ track_name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-12 col-sm-6 col-lg-2">
+        <label class="form-label" for="id_tag">Tag</label>
+        <input class="form-control" id="id_tag" name="tag" value="{{ tag }}"
+               placeholder="e.g. python" maxlength="24">
+      </div>
+      <div class="col-12 col-sm-6 col-lg-1">
+        <label class="form-label" for="id_sort">Sort</label>
+        <select class="form-select" id="id_sort" name="sort">
+          <option value="title"{% if sort != sort_newest %} selected{% endif %}>Title</option>
+          <option value="newest"{% if sort == sort_newest %} selected{% endif %}>Newest</option>
+        </select>
+      </div>
+      <div class="col-12 d-flex gap-2">
+        <button class="btn btn-primary" type="submit">Filter</button>
+        {% if q or track or tag %}
+          <a class="btn btn-outline-secondary"
+             href="{% if event %}/events/{{ event.slug }}/projects{% else %}/projects{% endif %}">Clear</a>
+        {% endif %}
+      </div>
+    </div>
   </form>
 
   {% if projects %}
     <ul class="project-list">
       {% for project in projects %}
         <li class="project-card">
-          <h2>{{ project.title }}</h2>
-          <p>{{ project.summary|default:"No summary yet." }}</p>
+          <a class="project-thumb" href="/events/{{ project.event.slug }}/projects/{{ project.public_id }}"
+             aria-label="{{ project.title }}">
+            {% if project.thumbnail %}
+              <img src="{{ project.thumbnail.url }}" alt="" loading="lazy">
+            {% else %}
+              {{ project.title|initials }}
+            {% endif %}
+          </a>
+          <h2 class="project-title">
+            <a class="text-decoration-none link-underline"
+               href="/events/{{ project.event.slug }}/projects/{{ project.public_id }}">{{ project.title }}</a>
+          </h2>
+          <p class="project-summary">{{ project.summary|default:"No summary yet."|short:160 }}</p>
+          {% if project.tech_tags %}
+            <p class="d-flex flex-wrap gap-1 mb-0">
+              {% for tag_name in project.tech_tags %}
+                <a class="tag-pill text-decoration-none"
+                   href="/projects?tag={{ tag_name|urlencode }}">{{ tag_name }}</a>
+              {% endfor %}
+            </p>
+          {% endif %}
           <p class="project-meta">
-            <span class="team">{{ project.team.name }}</span>
-            {% if project.track %}<span class="track">{{ project.track.name }}</span>{% endif %}
-            <span class="event">{{ project.event.name }}</span>
+            <span>{{ project.team.name }}</span>
+            {% if project.track %}<span class="track-badge">{{ project.track.name }}</span>{% endif %}
+            <span>{{ project.event.name }}</span>
           </p>
         </li>
       {% endfor %}
     </ul>
-  {% else %}
-    <p class="empty-state">No project matches this search.</p>
-  {% endif %}
 
-  {% if page_obj.paginator.num_pages > 1 %}
-    <nav class="pagination" aria-label="Project pages">
-      {% if page_obj.has_previous %}
-        <a href="?q={{ q }}&amp;track={{ track }}&amp;page={{ page_obj.previous_page_number }}">Previous</a>
-      {% endif %}
-      <span>Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
-      {% if page_obj.has_next %}
-        <a href="?q={{ q }}&amp;track={{ track }}&amp;page={{ page_obj.next_page_number }}">Next</a>
-      {% endif %}
-    </nav>
+    {% if page_obj.paginator.num_pages > 1 %}
+      <nav class="mt-4" aria-label="Project pages">
+        <ul class="pagination mb-0">
+          <li class="page-item{% if not page_obj.has_previous %} disabled{% endif %}">
+            <a class="page-link"
+               href="?{% if querystring %}{{ querystring }}&amp;{% endif %}page={% if page_obj.has_previous %}{{ page_obj.previous_page_number }}{% else %}1{% endif %}">Previous</a>
+          </li>
+          <li class="page-item disabled">
+            <span class="page-link">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+          </li>
+          <li class="page-item{% if not page_obj.has_next %} disabled{% endif %}">
+            <a class="page-link"
+               href="?{% if querystring %}{{ querystring }}&amp;{% endif %}page={% if page_obj.has_next %}{{ page_obj.next_page_number }}{% else %}{{ page_obj.paginator.num_pages }}{% endif %}">Next</a>
+          </li>
+        </ul>
+      </nav>
+    {% endif %}
+  {% else %}
+    <div class="empty-state">
+      <h2>No project matches these filters</h2>
+      <p class="mb-2">
+        {% if q %}Nothing matches &ldquo;{{ q }}&rdquo;.{% endif %}
+        {% if track %}Track filter applied.{% endif %}
+        {% if tag %}Tag filter applied.{% endif %}
+      </p>
+      <a class="btn btn-outline-primary"
+         href="{% if event %}/events/{{ event.slug }}/projects{% else %}/projects{% endif %}">Show every project</a>
+    </div>
   {% endif %}
 {% endblock %}

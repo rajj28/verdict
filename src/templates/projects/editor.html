@@ -1,0 +1,385 @@
+{% extends "base.html" %}
+{% load portal_tags static %}
+{% comment %}
+The submission editor. Read-only like every other page: each block below posts to
+one project endpoint through api-forms.js, so the rules the page shows (window,
+ownership, required fields) are the same rules the API enforces.
+
+base_updated_at rides along with every save: a second tab editing the same
+project gets 409 stale_edit instead of silently overwriting the first tab.
+{% endcomment %}
+{% block title %}Submission &middot; {{ event.name }}{% endblock %}
+
+{% block heading %}Your submission{% endblock %}
+{% block lead %}
+  {{ event.name }} &mdash; draft, submit, and keep editing until the window closes.
+{% endblock %}
+
+{% block page_actions %}
+  <a class="btn btn-outline-primary" href="/events/{{ event.slug }}/team">Team</a>
+  {% if project and project.is_active %}
+    <a class="btn btn-outline-secondary"
+       href="/events/{{ event.slug }}/projects/{{ project.public_id }}">View page</a>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+  {% if not team %}
+    <div class="empty-state">
+      <h2>You are not in a team yet</h2>
+      <p class="mb-3">A project belongs to a team, so form one (or join with an invite link) first.</p>
+      <a class="btn btn-primary" href="/events/{{ event.slug }}/team">Go to your team</a>
+    </div>
+  {% elif not project %}
+    <div class="card-verdict p-4">
+      <h2 class="section-title">Start your draft</h2>
+      <p class="text-muted-verdict">
+        A title is all you need to begin. Nothing is public until you submit, and a draft
+        never submitted stays a draft: it is excluded from the gallery and from judging.
+      </p>
+      <form method="post" action="/api/v1/events/{{ event.slug }}/projects"
+            data-api-method="POST" data-api-url="/api/v1/events/{{ event.slug }}/projects"
+            data-success="redirect:/events/{{ event.slug }}/submission" novalidate>
+        <div data-form-errors role="alert"></div>
+        <div class="mb-3">
+          <label class="form-label" for="id_new_title">Working title</label>
+          <input class="form-control" id="id_new_title" name="title" maxlength="120"
+                 placeholder="What are you building?" required>
+          <div class="form-hint">You can change everything later, including the title.</div>
+        </div>
+        <button class="btn btn-primary" type="submit">Create the draft</button>
+      </form>
+    </div>
+  {% else %}
+    {% if not window_open %}
+      <div class="alert alert-danger" role="alert">
+        <strong>Submissions closed at
+          <time datetime="{{ event.submissions_close_at|date:'c' }}">{{ event.submissions_close_at|utc }}</time>.</strong>
+        This project is read-only now. Ask an organizer if something has to change.
+      </div>
+    {% endif %}
+
+    <div class="row g-4">
+      <div class="col-12 col-lg-8">
+        <section class="card-verdict p-4 mb-4">
+          <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+            <span class="status-badge status-{{ project.status }}">{{ project.get_status_display }}</span>
+            {% if project.revision %}
+              <span class="form-hint">revision {{ project.revision }}</span>
+            {% endif %}
+            <span class="countdown">
+              {% if window_open %}
+                <time datetime="{{ event.submissions_close_at|date:'c' }}" data-countdown
+                      data-countdown-label="Submissions">{{ event.submissions_close_at|utc }}</time>
+              {% else %}
+                closed <time datetime="{{ event.submissions_close_at|date:'c' }}">{{ event.submissions_close_at|utc }}</time>
+              {% endif %}
+            </span>
+          </div>
+
+          {% if window_open %}
+            <form method="post" action="/api/v1/events/{{ event.slug }}/projects/{{ project.public_id }}"
+                  data-api-method="PATCH"
+                  data-api-url="/api/v1/events/{{ event.slug }}/projects/{{ project.public_id }}"
+                  data-success="reload" novalidate>
+              <input type="hidden" name="base_updated_at" value="{{ project.updated_at|date:'c' }}">
+              <div data-form-errors role="alert"></div>
+
+              <div class="mb-3">
+                <label class="form-label" for="id_title">Title</label>
+                <input class="form-control" id="id_title" name="title" value="{{ project.title }}"
+                       maxlength="120" data-check-source="title" required>
+              </div>
+
+              <div class="mb-3">
+                <label class="form-label" for="id_summary">One-line summary</label>
+                <input class="form-control" id="id_summary" name="summary" value="{{ project.summary }}"
+                       maxlength="200" data-check-source="summary" required>
+              </div>
+
+              <div class="mb-3">
+                <label class="form-label" for="id_track">Track</label>
+                <select class="form-select" id="id_track" name="track" data-check-source="track" required>
+                  <option value="">Pick a track</option>
+                  {% for option in tracks %}
+                    <option value="{{ option.public_id }}"{% if project.track_id == option.id %} selected{% endif %}>{{ option.name }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="mb-3">
+                <label class="form-label" for="id_description">Write-up</label>
+                <textarea class="form-control" id="id_description" name="description" rows="8"
+                          data-check-source="description" required>{{ project.description }}</textarea>
+                <div class="form-hint">Plain text. Line breaks are kept; no markup is interpreted.</div>
+              </div>
+
+              <div class="row g-3">
+                <div class="col-12 col-md-4">
+                  <label class="form-label" for="id_repo">Repository</label>
+                  <input class="form-control" id="id_repo" name="repo_url" value="{{ project.repo_url }}"
+                         type="url" maxlength="300" placeholder="https://github.com/…"
+                         data-check-source="repo_url" required>
+                </div>
+                <div class="col-12 col-md-4">
+                  <label class="form-label" for="id_live">Live demo</label>
+                  <input class="form-control" id="id_live" name="live_url" value="{{ project.live_url }}"
+                         type="url" maxlength="300" placeholder="https://…">
+                </div>
+                <div class="col-12 col-md-4">
+                  <label class="form-label" for="id_video">Demo video</label>
+                  <input class="form-control" id="id_video" name="demo_video_url"
+                         value="{{ project.demo_video_url }}" type="url" maxlength="300"
+                         placeholder="https://youtu.be/…">
+                </div>
+              </div>
+
+              <div class="mt-3">
+                <label class="form-label" for="id_tags">Tech tags</label>
+                <input class="form-control" id="id_tags" name="tech_tags" data-type="list"
+                       value="{{ project.tech_tags|join:',' }}" placeholder="python, postgres, react">
+                <div class="form-hint">Up to 10, lowercased, 24 characters each.</div>
+              </div>
+
+              <div class="mt-4">
+                <button class="btn btn-primary" type="submit">Save draft</button>
+                {% if project.status == "draft" %}
+                  <button class="btn btn-outline-primary" type="button"
+                          data-api-method="POST"
+                          data-api-url="/api/v1/events/{{ event.slug }}/projects/{{ project.public_id }}/submit"
+                          data-success="reload">Submit project</button>
+                {% endif %}
+              </div>
+            </form>
+          {% else %}
+            <dl class="row mb-0">
+              <dt class="col-sm-3">Title</dt><dd class="col-sm-9">{{ project.title }}</dd>
+              <dt class="col-sm-3">Summary</dt><dd class="col-sm-9">{{ project.summary|default:"&mdash;" }}</dd>
+              <dt class="col-sm-3">Track</dt>
+              <dd class="col-sm-9">{% if project.track %}{{ project.track.name }}{% else %}&mdash;{% endif %}</dd>
+              <dt class="col-sm-3">Write-up</dt>
+              <dd class="col-sm-9">{{ project.description|linebreaksbr|default:"&mdash;" }}</dd>
+              <dt class="col-sm-3">Links</dt>
+              <dd class="col-sm-9">
+                {% if project.repo_url %}<a href="{{ project.repo_url }}" rel="noopener noreferrer nofollow ugc">Repository</a>{% endif %}
+                {% if project.live_url %}<a href="{{ project.live_url }}" rel="noopener noreferrer nofollow ugc">Live demo</a>{% endif %}
+                {% if project.demo_video_url %}<a href="{{ project.demo_video_url }}" rel="noopener noreferrer nofollow ugc">Demo video</a>{% endif %}
+              </dd>
+              <dt class="col-sm-3">Tags</dt><dd class="col-sm-9">{{ project.tech_tags|join:", "|default:"&mdash;" }}</dd>
+            </dl>
+          {% endif %}
+        </section>
+
+        {% if question_rows %}
+          <section class="card-verdict p-4 mb-4">
+            <h2 class="section-title">Event questions</h2>
+            <p class="form-hint">
+              Some of these are only judges and organizers can read. The answer is stored
+              with the project, and every edit is part of the revision history.
+            </p>
+            {% if window_open %}
+              <form method="post"
+                    action="/api/v1/events/{{ event.slug }}/projects/{{ project.public_id }}/answers"
+                    data-api-method="PUT"
+                    data-api-url="/api/v1/events/{{ event.slug }}/projects/{{ project.public_id }}/answers"
+                    data-success="reload" novalidate>
+                <div data-form-errors role="alert"></div>
+                {% for row in question_rows %}
+                  <div class="mb-3">
+                    <label class="form-label" for="id_q_{{ row.public_id }}">
+                      {{ row.prompt }}{% if row.required %} <span aria-hidden="true">*</span>{% endif %}
+                    </label>
+                    {% if row.help_text %}<div class="form-hint">{{ row.help_text }}</div>{% endif %}
+                    {% if row.kind == "long_text" %}
+                      <textarea class="form-control" id="id_q_{{ row.public_id }}"
+                                name="{{ row.public_id }}" rows="4" maxlength="2000"
+                                {% if row.required %}data-check-source="answer_{{ row.public_id }}"{% endif %}>{{ row.value }}</textarea>
+                    {% elif row.kind == "choice" %}
+                      <select class="form-select" id="id_q_{{ row.public_id }}"
+                              name="{{ row.public_id }}"
+                              {% if row.required %}data-check-source="answer_{{ row.public_id }}"{% endif %}>
+                        <option value="">Choose&hellip;</option>
+                        {% for choice in row.choices %}
+                          <option value="{{ choice }}"{% if row.value == choice %} selected{% endif %}>{{ choice }}</option>
+                        {% endfor %}
+                      </select>
+                    {% elif row.kind == "yes_no" %}
+                      <select class="form-select" id="id_q_{{ row.public_id }}"
+                              name="{{ row.public_id }}"
+                              {% if row.required %}data-check-source="answer_{{ row.public_id }}"{% endif %}>
+                        <option value="">Choose&hellip;</option>
+                        <option value="Yes"{% if row.value == "Yes" %} selected{% endif %}>Yes</option>
+                        <option value="No"{% if row.value == "No" %} selected{% endif %}>No</option>
+                      </select>
+                    {% else %}
+                      <input class="form-control" id="id_q_{{ row.public_id }}"
+                             name="{{ row.public_id }}" maxlength="2000"
+                             type="{% if row.kind == 'url' %}url{% else %}text{% endif %}"
+                             value="{{ row.value }}"
+                             {% if row.required %}data-check-source="answer_{{ row.public_id }}"{% endif %}>
+                    {% endif %}
+                    <div class="form-hint">
+                      {% if row.is_public %}
+                        Visible on the project page.
+                      {% else %}
+                        Private: only judges assigned to this project and organizers can read it.
+                      {% endif %}
+                    </div>
+                  </div>
+                {% endfor %}
+                <button class="btn btn-primary" type="submit">Save answers</button>
+              </form>
+            {% else %}
+              <dl class="row mb-0">
+                {% for row in question_rows %}
+                  <dt class="col-sm-4">{{ row.prompt }}</dt>
+                  <dd class="col-sm-8">{{ row.value|default:"&mdash;" }}</dd>
+                {% endfor %}
+              </dl>
+            {% endif %}
+          </section>
+        {% endif %}
+
+        <section class="card-verdict p-4">
+          <h2 class="section-title">Images</h2>
+          {% if images %}
+            <div class="row g-3 mb-3">
+              {% for image in images %}
+                <div class="col-6 col-md-4">
+                  <figure class="mb-0">
+                    <img class="w-100 rounded border" src="{{ image.image.url }}"
+                         alt="{{ image.caption|default:project.title }}" loading="lazy">
+                    <figcaption class="form-hint">
+                      {{ image.position }}. {{ image.caption|default:"no caption" }}
+                      {% if window_open %}
+                        <button class="btn btn-sm btn-outline-danger ms-2" type="button"
+                                data-api-method="DELETE"
+                                data-api-url="/api/v1/events/{{ event.slug }}/projects/{{ project.public_id }}/images/{{ image.position }}"
+                                data-success="reload"
+                                data-confirm="Remove image {{ image.position }}?">Remove</button>
+                      {% endif %}
+                    </figcaption>
+                  </figure>
+                </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <p class="text-muted-verdict">No images yet. Up to six, 5 MB each.</p>
+          {% endif %}
+
+          {% if window_open %}
+            <form method="post"
+                  action="/api/v1/events/{{ event.slug }}/projects/{{ project.public_id }}/images"
+                  enctype="multipart/form-data"
+                  data-api-method="POST"
+                  data-api-url="/api/v1/events/{{ event.slug }}/projects/{{ project.public_id }}/images"
+                  data-success="reload" novalidate>
+              <div data-form-errors role="alert"></div>
+              <div class="row g-3 align-items-end">
+                <div class="col-12 col-md-6">
+                  <label class="form-label" for="id_image">Image file</label>
+                  <input class="form-control" id="id_image" name="image" type="file"
+                         accept="image/jpeg,image/png,image/webp,image/gif" required>
+                </div>
+                <div class="col-12 col-md-4">
+                  <label class="form-label" for="id_caption">Caption</label>
+                  <input class="form-control" id="id_caption" name="caption" maxlength="200">
+                </div>
+                <div class="col-12 col-md-2">
+                  <button class="btn btn-primary w-100" type="submit">Upload</button>
+                </div>
+              </div>
+            </form>
+          {% endif %}
+        </section>
+      </div>
+
+      <div class="col-12 col-lg-4">
+        <section class="card-verdict p-4 mb-3">
+          <h2 class="section-title">Before you submit</h2>
+          <ul class="list-unstyled mb-0" data-checklist>
+            <li class="d-flex justify-content-between gap-2 py-1" data-check="title">
+              <span>Title</span><span class="status-badge" data-check-badge>&nbsp;</span>
+            </li>
+            <li class="d-flex justify-content-between gap-2 py-1" data-check="summary">
+              <span>Summary</span><span class="status-badge" data-check-badge>&nbsp;</span>
+            </li>
+            <li class="d-flex justify-content-between gap-2 py-1" data-check="track">
+              <span>Track</span><span class="status-badge" data-check-badge>&nbsp;</span>
+            </li>
+            <li class="d-flex justify-content-between gap-2 py-1" data-check="description">
+              <span>Write-up</span><span class="status-badge" data-check-badge>&nbsp;</span>
+            </li>
+            <li class="d-flex justify-content-between gap-2 py-1" data-check="repo_url">
+              <span>Repository link</span><span class="status-badge" data-check-badge>&nbsp;</span>
+            </li>
+            {% for row in question_rows %}
+              {% if row.required %}
+                <li class="d-flex justify-content-between gap-2 py-1" data-check="answer_{{ row.public_id }}">
+                  <span>{{ row.prompt|short:40 }}</span>
+                  <span class="status-badge" data-check-badge>&nbsp;</span>
+                </li>
+              {% endif %}
+            {% endfor %}
+          </ul>
+          <p class="form-hint mt-2 mb-0">
+            The server checks the same list on submit, so a green row here is a promise the
+            backend keeps, not a client-side guess.
+          </p>
+        </section>
+
+        <section class="card-verdict p-4 mb-3">
+          <h2 class="section-title">Revisions</h2>
+          {% if revisions %}
+            <ul class="list-unstyled mb-0">
+              {% for revision in revisions %}
+                <li class="py-1 border-bottom">
+                  <div>
+                    {% if project.status == "submitted" %}
+                      Submitted &middot; revision {{ revision.number }} &middot;
+                    {% else %}
+                      Saved &middot; revision {{ revision.number }} &middot;
+                    {% endif %}
+                    <time datetime="{{ revision.created_at|date:'c' }}">{{ revision.created_at|utc }}</time>
+                  </div>
+                  <div class="form-hint mono">receipt {{ revision.digest|slice:":8" }}</div>
+                </li>
+              {% endfor %}
+            </ul>
+            <p class="form-hint mt-2 mb-0">
+              The receipt is the sha256 of that revision's snapshot, so the write-up a judge
+              read can be shown to be exactly this one.
+            </p>
+          {% else %}
+            <p class="text-muted-verdict mb-0">No revision yet. The first one is created on submit.</p>
+          {% endif %}
+        </section>
+
+        {% if window_open and project.is_active %}
+          <section class="card-verdict p-4">
+            <h2 class="section-title">Actions</h2>
+            {% if project.status == "draft" %}
+              <p class="form-hint">A draft is invisible to the gallery and to judges.</p>
+            {% else %}
+              <p class="form-hint">
+                Every save after submitting is a new revision, so judges always read a
+                complete, versioned write-up.
+              </p>
+              <button class="btn btn-outline-danger" type="button"
+                      data-api-method="POST"
+                      data-api-url="/api/v1/events/{{ event.slug }}/projects/{{ project.public_id }}/withdraw"
+                      data-success="redirect:/events/{{ event.slug }}/team"
+                      data-confirm="Withdraw {{ project.title }}? It leaves the gallery and judging.">
+                Withdraw submission
+              </button>
+            {% endif %}
+          </section>
+        {% endif %}
+      </div>
+    </div>
+  {% endif %}
+{% endblock %}
+
+{% block extra_js %}
+  <script src="{% static 'js/submission-editor.js' %}"></script>
+{% endblock %}

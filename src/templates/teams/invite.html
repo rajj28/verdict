@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% comment %}
+The invite landing page. It never changes anything by being read: the only write
+is the Join button, which posts to the invite endpoint through api-forms.js.
+The token arrives as ?token=... so it stays out of the access log path.
+{% endcomment %}
+{% block title %}Join a team &middot; {{ PORTAL_NAME }}{% endblock %}
+
+{% block heading %}
+  {% if team %}Join {{ team.name }}{% else %}This invite link{% endif %}
+{% endblock %}
+{% block lead %}
+  {% if team and event %}
+    {{ team.name }} in {{ event.name }} &mdash; {{ full }} of {{ size }} places taken.
+  {% else %}
+    A team invite for {{ PORTAL_NAME }}.
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+  <div class="row justify-content-center">
+    <div class="col-12 col-lg-7">
+      {% if problem %}
+        <div class="empty-state">
+          <h2>This link cannot be used</h2>
+          <p class="mb-3">{{ problem }}</p>
+          <a class="btn btn-outline-primary" href="/events/">Browse the events</a>
+        </div>
+      {% elif not signed_in %}
+        <div class="card-verdict p-4">
+          <h2 class="section-title">Sign in to join</h2>
+          <p class="text-muted-verdict">
+            You need an account before you can join a team. After signing in you come
+            straight back to this page.
+          </p>
+          <div class="d-flex flex-wrap gap-2">
+            <a class="btn btn-primary" href="{{ login_url }}">Sign in</a>
+            <a class="btn btn-outline-primary" href="{{ register_url }}">Create an account</a>
+          </div>
+        </div>
+      {% elif already_in %}
+        <div class="card-verdict p-4">
+          <h2 class="section-title">You are already in a team here</h2>
+          <p class="text-muted-verdict">
+            One person is in one team per event, so joining {{ team.name }} would mean
+            leaving the team you are in now.
+          </p>
+          <a class="btn btn-primary" href="{{ team_url }}">Go to your team</a>
+        </div>
+      {% else %}
+        <div class="card-verdict p-4">
+          <h2 class="section-title">Join {{ team.name }}</h2>
+          <p class="text-muted-verdict">
+            You will be added to {{ team.name }} in {{ event.name }} as a member, and
+            registered for the event as a participant in the same step.
+          </p>
+          <form method="post" action="/api/v1/invites/{{ token }}/accept"
+                data-api-method="POST" data-api-url="/api/v1/invites/{{ token }}/accept"
+                data-success="redirect:{{ team_url }}" novalidate>
+            <div data-form-errors role="alert"></div>
+            <button class="btn btn-primary" type="submit">Join {{ team.name }}</button>
+            <a class="btn btn-link" href="{{ team_url }}">Not now</a>
+          </form>
+          <p class="form-hint mt-3 mb-0">
+            A judge or an organizer of this event cannot join a team: one person holds one
+            role per event, so competing and judging the same event is impossible.
+          </p>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+{% endblock %}

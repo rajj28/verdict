@@ -1,0 +1,231 @@
+{% extends "base.html" %}
+{% load portal_tags %}
+{% comment %}
+One team: who is in it, the invite link they share, and the project's way in.
+Every control here is a data-api-* form or button, so the window, ownership and
+one-team-per-person rules are enforced in teams.services, not in this page.
+{% endcomment %}
+{% block title %}Team &middot; {{ event.name }}{% endblock %}
+
+{% block heading %}
+  {% if team %}{{ team.name }}{% else %}Your team{% endif %}
+{% endblock %}
+{% block lead %}
+  {{ event.name }} &mdash; up to {{ event.max_team_size }} members, and one team per person
+  per event.
+{% endblock %}
+
+{% block page_actions %}
+  <a class="btn btn-outline-primary" href="/events/{{ event.slug }}/submission">Submission editor</a>
+  <a class="btn btn-outline-secondary" href="/events/{{ event.slug }}/projects">Event projects</a>
+{% endblock %}
+
+{% block content %}
+  {% if not window_open %}
+    <div class="alert alert-warning" role="alert">
+      Submissions closed at
+      <time datetime="{{ event.submissions_close_at|date:'c' }}">{{ event.submissions_close_at|utc }}</time>.
+      Teams can no longer be created, joined or left.
+    </div>
+  {% endif %}
+
+  {% if not team %}
+    <div class="row g-4">
+      <div class="col-12 col-lg-6">
+        <section class="card-verdict p-4 h-100">
+          <h2 class="section-title">Start a team</h2>
+          <p class="text-muted-verdict">
+            You become its owner and can invite the rest. Team names are unique inside one
+            event, so pick something people will recognise.
+          </p>
+          {% if role %}
+            <p class="form-hint">
+              You already take part in this event as
+              <span class="role-pill role-{{ role }}">{{ role }}</span>.
+            </p>
+          {% elif not window_open %}
+            <p class="form-hint">Registration and team creation are closed.</p>
+          {% else %}
+            <form method="post" action="/api/v1/events/{{ event.slug }}/teams"
+                  data-api-method="POST" data-api-url="/api/v1/events/{{ event.slug }}/teams"
+                  data-success="reload" novalidate>
+              <div data-form-errors role="alert"></div>
+              <div class="mb-3">
+                <label class="form-label" for="id_team_name">Team name</label>
+                <input class="form-control" id="id_team_name" name="name" maxlength="120" required>
+              </div>
+              <button class="btn btn-primary" type="submit">Create the team</button>
+            </form>
+          {% endif %}
+        </section>
+      </div>
+      <div class="col-12 col-lg-6">
+        <section class="card-verdict p-4 h-100">
+          <h2 class="section-title">Join with a link</h2>
+          <p class="text-muted-verdict">
+            Ask the team you want to join for its invite link. Opening it shows you which
+            team and event it belongs to before you commit, and joining registers you as a
+            participant in the same step.
+          </p>
+          <ol class="text-muted-verdict small">
+            <li>Open the link they sent you.</li>
+            <li>Sign in if you have not already.</li>
+            <li>Press Join. The link stops being useful if the team rotates it.</li>
+          </ol>
+          <p class="form-hint mb-0">
+            Links carry their token in the query string, expire at the submissions deadline
+            at the latest, and can be replaced from this page.
+          </p>
+        </section>
+      </div>
+    </div>
+  {% else %}
+    <div class="row g-4">
+      <div class="col-12 col-lg-7">
+        <section class="card-verdict p-4 mb-4">
+          <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+            <span class="mono form-hint">{{ team.public_id }}</span>
+            <span class="status-badge status-open">{{ members|length }} / {{ event.max_team_size }} members</span>
+            {% if is_owner %}<span class="role-pill role-participant">you are the owner</span>{% endif %}
+          </div>
+          <h2 class="section-title">Members</h2>
+          <ul class="list-unstyled mb-0">
+            {% for member in members %}
+              <li class="d-flex justify-content-between align-items-center py-1 border-bottom">
+                <span>
+                  {{ member.user.display_name|default:member.user.email }}
+                  {% if member.user_id == user.pk %}<span class="form-hint">(you)</span>{% endif %}
+                </span>
+                <span class="d-flex gap-2 align-items-center">
+                  {% if member.is_owner %}<span class="role-pill role-organizer">owner</span>{% endif %}
+                  {% if is_owner and not member.is_owner %}
+                    <button class="btn btn-sm btn-outline-danger" type="button"
+                            data-api-method="DELETE"
+                            data-api-url="/api/v1/events/{{ event.slug }}/teams/{{ team.public_id }}/members/{{ member.user.public_id }}"
+                            data-success="reload"
+                            data-confirm="Remove this member from {{ team.name }}?">
+                      Remove
+                    </button>
+                  {% endif %}
+                </span>
+              </li>
+            {% endfor %}
+          </ul>
+          <p class="form-hint mt-2 mb-0">
+            Display names only: member email addresses are never shown on a team page.
+          </p>
+        </section>
+
+        <section class="card-verdict p-4">
+          <h2 class="section-title">Project</h2>
+          {% if project %}
+            <p class="mb-1">
+              <a href="/events/{{ event.slug }}/projects/{{ project.public_id }}">{{ project.title }}</a>
+              <span class="status-badge status-{{ project.status }}">{{ project.get_status_display }}</span>
+            </p>
+            <p class="form-hint mb-0">
+              {% if project.status == "draft" %}
+                Still a draft: invisible to the gallery and to judges until you submit.
+              {% else %}
+                Revision {{ project.revision }}, last submitted
+                <time datetime="{{ project.last_submitted_at|date:'c' }}">{{ project.last_submitted_at|utc }}</time>.
+              {% endif %}
+            </p>
+            <a class="btn btn-outline-primary mt-3" href="/events/{{ event.slug }}/submission">Open the editor</a>
+          {% else %}
+            <p class="text-muted-verdict">No project yet. A team may have one active project at a time.</p>
+            <a class="btn btn-primary" href="/events/{{ event.slug }}/submission">Start the draft</a>
+          {% endif %}
+        </section>
+      </div>
+
+      <div class="col-12 col-lg-5">
+        <section class="card-verdict p-4 mb-3">
+          <h2 class="section-title">Invite link</h2>
+          <label class="form-label" for="id_invite">Share this with the people you want in</label>
+          <div class="input-group">
+            {# A div, not an input: api-forms.js writes the new link with textContent. #}
+            <div class="form-control mono text-truncate" id="id_invite">{{ invite_url|default:"no active link" }}</div>
+            {% if invite_url %}
+              <button class="btn btn-outline-primary" type="button" data-copy="#id_invite">Copy</button>
+            {% endif %}
+          </div>
+          <p class="form-hint mt-2 mb-0">
+            {% if invite %}
+              Expires <time datetime="{{ invite.expires_at|date:'c' }}">{{ invite.expires_at|utc }}</time>
+              {% if invite.use_count %}&middot; used {{ invite.use_count }} time{{ invite.use_count|pluralize }}{% endif %}.
+            {% else %}
+              No active link. Creating one registers you as able to share it.
+            {% endif %}
+          </p>
+          {% if invite_url %}
+            <button class="btn btn-sm btn-outline-secondary mt-3" type="button"
+                    data-api-method="POST"
+                    data-api-url="/api/v1/events/{{ event.slug }}/teams/{{ team.public_id }}/invite"
+                    data-response-field="url" data-response-target="#id_invite"
+                    data-confirm="Rotate the invite link? The current one stops working immediately.">
+              Rotate the link
+            </button>
+          {% else %}
+            <button class="btn btn-primary mt-3" type="button"
+                    data-api-method="POST"
+                    data-api-url="/api/v1/events/{{ event.slug }}/teams/{{ team.public_id }}/invite"
+                    data-response-field="url" data-response-target="#id_invite">
+              Create an invite link
+            </button>
+          {% endif %}
+        </section>
+
+        <section class="card-verdict p-4">
+          <h2 class="section-title">Leave the team</h2>
+          <p class="text-muted-verdict">
+            {% if is_owner %}
+              Leaving passes ownership to the earliest remaining member. If you are the last
+              member out, the team is deleted unless it holds a submitted project.
+            {% else %}
+              You can leave any time the submission window is open.
+            {% endif %}
+          </p>
+          <button class="btn btn-outline-danger" type="button"
+                  data-api-method="POST"
+                  data-api-url="/api/v1/events/{{ event.slug }}/teams/{{ team.public_id }}/leave"
+                  data-success="reload"
+                  data-confirm="Leave {{ team.name }}?">
+            Leave {{ team.name }}
+          </button>
+        </section>
+      </div>
+    </div>
+
+    {% if other_teams %}
+      <section class="mt-4">
+        <h2 class="section-title">Every team in this event</h2>
+        <div class="table-responsive">
+          <table class="table data-table table-sm align-middle">
+            <thead>
+              <tr>
+                <th scope="col">Team</th>
+                <th scope="col">Id</th>
+                <th scope="col">Members</th>
+                <th scope="col"><span class="visually-hidden">Open</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for other in other_teams %}
+                <tr>
+                  <td>{{ other.name }}</td>
+                  <td class="mono">{{ other.public_id }}</td>
+                  <td>{{ other.member_count }}</td>
+                  <td class="text-end">
+                    <a class="btn btn-sm btn-outline-secondary"
+                       href="/events/{{ event.slug }}/team?team={{ other.public_id }}">Open</a>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    {% endif %}
+  {% endif %}
+{% endblock %}

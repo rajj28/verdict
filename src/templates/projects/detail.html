@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% load portal_tags %}
+{% comment %}
+One project. Team names are shown; member emails never are (rule 10). A draft
+only reaches this page for its own team and for organizers, because the view
+resolves the project through projects.policy.visible_project_by_id.
+{% endcomment %}
+{% block title %}{{ project.title }} &middot; {{ PORTAL_NAME }}{% endblock %}
+{% block description %}{{ project.summary|default:project.title }}{% endblock %}
+
+{% block page_actions %}
+  <a class="btn btn-outline-primary" href="/projects">Gallery</a>
+  <a class="btn btn-outline-secondary" href="/events/{{ event.slug }}/projects">All {{ event.name }} projects</a>
+{% endblock %}
+
+{% block content %}
+  <div class="row g-4">
+    <div class="col-12 col-lg-8">
+      <article class="card-verdict p-4">
+        <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+          <span class="status-badge status-{{ project.status }}">{{ project.get_status_display }}</span>
+          {% if project.track %}<span class="track-badge">{{ project.track.name }}</span>{% endif %}
+          {% if project.revision %}<span class="form-hint">revision {{ project.revision }}</span>{% endif %}
+        </div>
+
+        <h2 class="section-title">{{ project.title }}</h2>
+        <p class="lead">{{ project.summary }}</p>
+
+        {% if project.thumbnail %}
+          <img class="w-100 rounded mb-3" src="{{ project.thumbnail.url }}"
+               alt="Screenshot of {{ project.title }}">
+        {% endif %}
+
+        {% if project.description %}
+          <div class="mb-3">{{ project.description|linebreaksbr }}</div>
+        {% endif %}
+
+        <h3 class="section-title">Links</h3>
+        <ul class="list-unstyled d-flex flex-wrap gap-3 mb-3">
+          {% if project.repo_url %}
+            <li><a href="{{ project.repo_url }}" rel="noopener noreferrer nofollow ugc">Repository</a></li>
+          {% endif %}
+          {% if project.live_url %}
+            <li><a href="{{ project.live_url }}" rel="noopener noreferrer nofollow ugc">Live demo</a></li>
+          {% endif %}
+          {% if project.demo_video_url %}
+            <li><a href="{{ project.demo_video_url }}" rel="noopener noreferrer nofollow ugc">Demo video</a></li>
+          {% endif %}
+          {% if not project.repo_url and not project.live_url and not project.demo_video_url %}
+            <li class="form-hint">No links were added.</li>
+          {% endif %}
+        </ul>
+
+        {% if project.status_reason %}
+          <p class="text-muted-verdict"><strong>Note:</strong> {{ project.status_reason }}</p>
+        {% endif %}
+      </article>
+
+      {% if images %}
+        <h2 class="section-title mt-4">Gallery</h2>
+        <div class="row g-3">
+          {% for image in images %}
+            <div class="col-12 col-sm-6 col-lg-4">
+              <figure class="card-verdict p-2 mb-0 h-100">
+                <img class="w-100 rounded" src="{{ image.image.url }}" alt="{{ image.caption|default:project.title }}"
+                     loading="lazy">
+                {% if image.caption %}<figcaption class="form-hint mt-1">{{ image.caption }}</figcaption>{% endif %}
+              </figure>
+            </div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    </div>
+
+    <div class="col-12 col-lg-4">
+      <section class="card-verdict p-4 mb-3">
+        <h2 class="section-title">Team</h2>
+        <p class="mb-1"><strong>{{ project.team.name }}</strong>
+          <span class="mono form-hint">{{ project.team.public_id }}</span></p>
+        <ul class="list-unstyled mb-0">
+          {% for member in team_members %}
+            <li>{{ member.user.display_name|default:member.user.email }}</li>
+          {% empty %}
+            <li class="form-hint">No members recorded.</li>
+          {% endfor %}
+        </ul>
+      </section>
+
+      {% if project.tech_tags %}
+        <section class="card-verdict p-4 mb-3">
+          <h2 class="section-title">Built with</h2>
+          <p class="d-flex flex-wrap gap-1 mb-0">
+            {% for tag_name in project.tech_tags %}
+              <a class="tag-pill text-decoration-none" href="/projects?tag={{ tag_name|urlencode }}">{{ tag_name }}</a>
+            {% endfor %}
+          </p>
+        </section>
+      {% endif %}
+
+      {% if answers %}
+        <section class="card-verdict p-4 mb-3">
+          <h2 class="section-title">Answers</h2>
+          {% for answer in answers %}
+            <h3 class="form-label">{{ answer.question.prompt }}</h3>
+            {% if answer.value %}
+              <p class="mb-3">{{ answer.value|linebreaksbr }}</p>
+            {% else %}
+              <p class="form-hint mb-3">No answer given.</p>
+            {% endif %}
+          {% endfor %}
+        </section>
+      {% endif %}
+
+      <section class="card-verdict p-4">
+        <h2 class="section-title">Submission</h2>
+        <dl class="row mb-0 small">
+          <dt class="col-5">First submitted</dt>
+          <dd class="col-7">
+            {% if project.first_submitted_at %}
+              <time datetime="{{ project.first_submitted_at|date:'c' }}">{{ project.first_submitted_at|utc }}</time>
+            {% else %}&mdash;{% endif %}
+          </dd>
+          <dt class="col-5">Last submitted</dt>
+          <dd class="col-7">
+            {% if project.last_submitted_at %}
+              <time datetime="{{ project.last_submitted_at|date:'c' }}">{{ project.last_submitted_at|utc }}</time>
+            {% else %}&mdash;{% endif %}
+          </dd>
+          <dt class="col-5">Revision</dt>
+          <dd class="col-7">{{ project.revision }}</dd>
+        </dl>
+      </section>
+    </div>
+  </div>
+{% endblock %}

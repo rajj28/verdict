@@ -17,6 +17,7 @@ from django.test import Client
 
 import audit.services
 from accounts.tokens import issue_token, revoke_token
+from community.models import Ballot, VotingAccess, VotingConfig, VotingStyle
 from core.clock import now
 from events.models import CustomQuestion, Event, EventRole, Role, Track
 from judging.models import Assignment, Review, Rubric
@@ -25,7 +26,6 @@ from teams.models import Team, TeamInvite, TeamMember
 
 User = get_user_model()
 
-# T3 voting and T4 publication checks are registered when those feature suites land.
 EXTENSION_REGISTRY = ("voting", "publication")
 
 
@@ -71,6 +71,8 @@ def _event(slug: str, name: str, owner, at):
         judging_close_at=at - timedelta(minutes=1),
         shrinkage_lambda=2.0,
         created_by=owner,
+        voting_open_at=at - timedelta(minutes=1),
+        voting_close_at=at + timedelta(minutes=1),
     )
 
 
@@ -112,6 +114,10 @@ def _fixture():
 
     event_a = _event(f"probe-a-{secrets.token_hex(5)}", "Probe Event A", admin, at)
     event_b = _event(f"probe-b-{secrets.token_hex(5)}", "Probe Event B", admin, at)
+    VotingConfig.objects.create(
+        event=event_a, access=VotingAccess.AUTHENTICATED,
+        style=VotingStyle.QUADRATIC, credits=16,
+    )
     track_a = Track.objects.create(event=event_a, name="Track A", position=0)
     track_b = Track.objects.create(event=event_a, name="Track B", position=1)
     track_b_event = Track.objects.create(event=event_b, name="Track B", position=0)
@@ -287,6 +293,22 @@ def _attacks(f):
                "Spreadsheet formula prefixes must be rendered as inert text.",
                must_contain="'=1+1", must_not_contain=",=1+1,",
                expected_detail="200 with formula cell quoted"),
+        Attack("voting-results-hidden", "VOTING",
+               "Non-organizer cannot read live voting results",
+               "GET", f"/api/v1/events/{event}/voting/results", "participant", (403,),
+               "Voting results remain hidden until the voting window closes.",
+               must_contain="results_hidden"),
+        Attack("second-ballot-same-identity", "VOTING",
+               "The same authenticated voter cannot create a second ballot",
+               "POST", f"/api/v1/events/{event}/votes/ballot", "participant", (409,),
+               "One ballot is allowed per authenticated identity.",
+               request_kind="duplicate_ballot", must_contain="duplicate_voter"),
+        Attack("quadratic-ballot-over-budget", "VOTING",
+               "A quadratic ballot over its credit budget is refused",
+               "PUT", f"/api/v1/events/{event}/votes/ballot/[temporary]",
+               "participant", (400,),
+               "Ballot cost is recomputed and capped by the configured budget.",
+               request_kind="quadratic_over_budget", must_contain="budget_exceeded"),
     ]
     return cases
 
@@ -300,6 +322,20 @@ def _perform(case: Attack, clients, tokens):
         client = clients.get(case.actor) or _client()
         token = tokens.get(case.actor)
         headers = {"HTTP_AUTHORIZATION": f"Bearer {token}"} if token else {}
+    if case.request_kind == "duplicate_ballot":
+        url = f"/api/v1/events/{case.path.split('/events/', 1)[1].split('/')[0]}/votes/ballot"
+        data = json.dumps({})
+        client.post(url, data=data, content_type="application/json", **headers)
+        return client.post(url, data=data, content_type="application/json", **headers)
+    if case.request_kind == "quadratic_over_budget":
+        ballot = Ballot.objects.get(
+            voter__event__slug=case.path.split("/events/", 1)[1].split("/", 1)[0],
+            voter__user=clients["participant_user"],
+        )
+        url = f"/api/v1/events/{ballot.voter.event.slug}/votes/ballot/{ballot.public_id}"
+        project = Project.objects.filter(event=ballot.voter.event, status=ProjectStatus.SUBMITTED).first()
+        data = json.dumps({"items": [{"project": project.public_id, "votes": 5}]})
+        return client.put(url, data=data, content_type="application/json", **headers)
     if case.request_kind == "image":
         return client.post(
             case.path,

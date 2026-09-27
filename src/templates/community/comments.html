@@ -1,0 +1,43 @@
+{% if available %}
+<section class="card-verdict p-4 mt-4" aria-labelledby="project-comments-heading">
+  <h2 class="section-title" id="project-comments-heading">Community comments</h2>
+  <div class="vstack gap-3 mb-4">
+    {% for comment in comments %}
+      <article class="border-bottom pb-2">
+        <p class="mb-1">{{ comment.body|linebreaksbr }}</p>
+        <p class="form-hint mb-0">{{ comment.author.display_name }} · {{ comment.created_at|date:"Y-m-d H:i" }}</p>
+        {% if comment.hidden_at %}<p class="text-warning small">Hidden: {{ comment.hide_reason }}</p>{% endif %}
+        {% if can_moderate %}
+          {% if comment.hidden_at %}
+            <form class="d-flex gap-2 mt-2" data-api-method="POST"
+                  data-api-url="/api/v1/events/{{ project.event.slug }}/comments/{{ comment.public_id }}/restore"
+                  data-success="reload">
+              <input class="form-control" name="reason" maxlength="300" required placeholder="Reason to restore">
+              <button class="btn btn-sm btn-outline-primary" type="submit">Restore</button>
+            </form>
+          {% else %}
+            <form class="d-flex gap-2 mt-2" data-api-method="POST"
+                  data-api-url="/api/v1/events/{{ project.event.slug }}/comments/{{ comment.public_id }}/hide"
+                  data-success="reload">
+              <input class="form-control" name="reason" maxlength="300" required placeholder="Reason to hide">
+              <button class="btn btn-sm btn-outline-danger" type="submit">Hide</button>
+            </form>
+          {% endif %}
+        {% endif %}
+      </article>
+    {% empty %}
+      <p class="form-hint mb-0">No comments yet.</p>
+    {% endfor %}
+  </div>
+  {% if can_comment %}
+    <form data-api-method="POST" data-api-url="/api/v1/events/{{ project.event.slug }}/projects/{{ project.public_id }}/comments">
+      <label class="form-label" for="project-comment-body">Add a comment</label>
+      <textarea class="form-control mb-2" id="project-comment-body" name="body" maxlength="1000" required></textarea>
+      <div data-form-errors class="text-danger mb-2" role="alert"></div>
+      <button class="btn btn-sm btn-primary" type="submit">Post comment</button>
+    </form>
+  {% else %}
+    <p class="form-hint mb-0"><a href="/login">Sign in</a> to comment.</p>
+  {% endif %}
+</section>
+{% endif %}

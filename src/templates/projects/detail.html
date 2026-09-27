@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load portal_tags %}
+{% load portal_tags community_tags %}
 {% comment %}
 One project. Team names are shown; member emails never are (rule 10). A draft
 only reaches this page for its own team and for organizers, because the view
@@ -70,6 +70,8 @@ resolves the project through projects.policy.visible_project_by_id.
           {% endfor %}
         </div>
       {% endif %}
+
+      {% project_comments project %}
     </div>
 
     <div class="col-12 col-lg-4">

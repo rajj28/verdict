@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Vote · {{ event.name }}{% endblock %}
+{% block heading %}Community vote{% endblock %}
+{% block lead %}{{ event.name }} · {{ config.get_style_display }}{% endblock %}
+{% block page_actions %}
+  <a class="btn btn-outline-secondary" href="{{ results_url }}">Results</a>
+  {% if can_manage %}<a class="btn btn-outline-primary" href="/manage/{{ event.slug }}/voting">Manage voting</a>{% endif %}
+{% endblock %}
+{% block content %}
+  {% if not event.gallery_public %}
+    <div class="alert alert-warning" role="alert">Voting will be available after the gallery is published.</div>
+  {% elif not window_open %}
+    <div class="alert alert-info" role="status">Voting is not currently open.</div>
+  {% elif config.access == "email" and not email_ticket %}
+    <section class="card-verdict p-4 mb-4">
+      <h2 class="section-title">Verify your email</h2>
+      <p>A verification link will be sent before you can vote. Your email is not shown publicly.</p>
+      <form data-api-method="POST" data-api-url="/api/v1/events/{{ event.slug }}/votes/email">
+        <label class="form-label" for="voter-email">Email address</label>
+        <input class="form-control mb-3" id="voter-email" name="email" type="email" required>
+        <div data-form-errors class="text-danger mb-2" role="alert"></div>
+        <button class="btn btn-primary" type="submit">Send verification link</button>
+      </form>
+    </section>
+  {% endif %}
+
+  {% if window_open and event.gallery_public %}
+    {% if config.access != "email" or email_ticket %}
+      <p class="text-muted-verdict">
+        {% if config.style == "quadratic" %}
+          Each extra vote on the same project costs more: 1 vote = 1 credit, 2 votes = 4, 3 votes = 9.
+          You have {{ config.credits }} credits.
+        {% else %}
+          Select projects for your single vote per project.
+        {% endif %}
+      </p>
+      <section class="card-verdict p-4" data-voting
+               data-api-url="{{ api_url }}"
+               data-link-token="{{ link_token }}"
+               data-email-ticket="{{ email_ticket }}"
+               data-style="{{ config.style }}"
+               data-credits="{{ config.credits }}"
+               data-max-votes="{{ config.max_votes_per_project }}">
+        <div data-voting-message class="mb-3" role="status"></div>
+        <button class="btn btn-primary" type="button" data-voting-start>Start voting</button>
+        <form class="d-none" data-voting-form>
+          <div data-voting-projects class="vstack gap-3 mb-3"></div>
+          <div data-voting-budget class="form-hint mb-3"></div>
+          <button class="btn btn-primary" type="submit">Submit ballot</button>
+        </form>
+      </section>
+    {% endif %}
+  {% endif %}
+{% endblock %}
+{% block extra_js %}<script src="{% static 'js/voting.js' %}" defer></script>{% endblock %}

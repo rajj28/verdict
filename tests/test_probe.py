@@ -8,8 +8,9 @@ from rest_framework.test import APIClient
 from accounts.models import ApiToken, User
 from accounts.tokens import issue_token
 from audit.models import AuditEvent
+from community.models import AbuseFlag, Ballot, Voter, VotingConfig
 from core.probe import run_probe
-from events.models import CustomQuestion, Event, EventRole, Track, Role
+from events.models import CustomQuestion, Event, EventRole, Role, Track
 from judging.models import Assignment, Review, Rubric
 from projects.models import Answer, Project
 from teams.models import Team, TeamInvite, TeamMember
@@ -34,10 +35,14 @@ class IntegrityProbeTests(TestCase):
             "questions": CustomQuestion.objects.count(),
             "rubrics": Rubric.objects.count(),
             "audit": AuditEvent.objects.count(),
+            "voting_configs": VotingConfig.objects.count(),
+            "voters": Voter.objects.count(),
+            "ballots": Ballot.objects.count(),
+            "abuse_flags": AbuseFlag.objects.count(),
         }
         report = run_probe()
         self.assertTrue(report["ok"], report["cases"])
-        self.assertEqual(report["total"], 22)
+        self.assertEqual(report["total"], 25)
         self.assertTrue(all(case["passed"] for case in report["cases"]))
         self.assertEqual(
             next(case["path"] for case in report["cases"] if case["key"] == "participant-join-after-deadline"),
@@ -61,6 +66,10 @@ class IntegrityProbeTests(TestCase):
         self.assertEqual(CustomQuestion.objects.count(), before["questions"])
         self.assertEqual(Rubric.objects.count(), before["rubrics"])
         self.assertEqual(AuditEvent.objects.count(), before["audit"] + 1)
+        self.assertEqual(VotingConfig.objects.count(), before["voting_configs"])
+        self.assertEqual(Voter.objects.count(), before["voters"])
+        self.assertEqual(Ballot.objects.count(), before["ballots"])
+        self.assertEqual(AbuseFlag.objects.count(), before["abuse_flags"])
 
     def test_policy_regression_fails_its_matching_case(self):
         with patch("projects.policy.can_see_project", return_value=True):
@@ -94,7 +103,7 @@ class IntegrityProbeTests(TestCase):
         client.credentials(HTTP_AUTHORIZATION=f"Bearer {plaintext}")
         response = client.post("/api/v1/integrity/probe", {}, format="json")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["total"], 22)
+        self.assertEqual(response.data["total"], 25)
         self.assertTrue(response.data["ok"])
 
     def test_organizer_must_scope_probe_to_their_event(self):

@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Voting results · {{ event.name }}{% endblock %}
+{% block heading %}Voting results{% endblock %}
+{% block lead %}{{ event.name }}{% endblock %}
+{% block page_actions %}
+  {% if can_manage %}<a class="btn btn-outline-primary" href="/manage/{{ event.slug }}/voting">Manage voting</a>{% endif %}
+{% endblock %}
+{% block content %}
+  {% if results_hidden %}
+    <div class="alert alert-info" role="status">Results are hidden until voting closes.</div>
+  {% else %}
+    <section class="card-verdict p-4">
+      <div class="table-responsive">
+        <table class="table align-middle mb-0">
+          <thead><tr><th scope="col">Project</th><th scope="col">Votes</th><th scope="col">Quadratic credits</th></tr></thead>
+          <tbody>
+            {% for row in results %}
+              <tr><th scope="row">{{ row.project__title }}</th><td>{{ row.votes }}</td><td>{{ row.credits }}</td></tr>
+            {% empty %}
+              <tr><td colspan="3" class="text-muted-verdict">No public projects are available.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% endif %}
+{% endblock %}

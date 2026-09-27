@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block title %}Voting · {{ event.name }}{% endblock %}
+{% block heading %}Voting management{% endblock %}
+{% block lead %}{{ event.name }} · organizers only{% endblock %}
+{% block page_actions %}
+  <a class="btn btn-outline-secondary" href="/manage/{{ event.slug }}/">Event overview</a>
+  <a class="btn btn-outline-primary" href="{{ export_url }}">Download votes.csv</a>
+{% endblock %}
+{% block content %}
+  {% if voting_link %}
+    <section class="card-verdict p-4 mb-4">
+      <h2 class="section-title">Open voting link</h2>
+      <p>Share this capability link with voters. Each device can create one ballot.</p>
+      <p class="mb-0"><code>{{ request.scheme }}://{{ request.get_host }}{{ voting_link }}</code></p>
+    </section>
+  {% endif %}
+  <section class="card-verdict p-4 mb-4">
+    <h2 class="section-title">Voting rules</h2>
+    <form data-api-method="PATCH" data-api-url="{{ config_api_url }}" data-success="reload">
+      <div class="row g-3">
+        <div class="col-md-6">
+          <label class="form-label" for="voting-access">Access</label>
+          <select class="form-select" id="voting-access" name="access">
+            <option value="open_link"{% if config.access == "open_link" %} selected{% endif %}>Open link + device cookie</option>
+            <option value="email"{% if config.access == "email" %} selected{% endif %}>Email verification</option>
+            <option value="authenticated"{% if config.access == "authenticated" %} selected{% endif %}>Authenticated account</option>
+          </select>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label" for="voting-style">Ballot style</label>
+          <select class="form-select" id="voting-style" name="style">
+            <option value="single"{% if config.style == "single" %} selected{% endif %}>Single vote</option>
+            <option value="quadratic"{% if config.style == "quadratic" %} selected{% endif %}>Quadratic</option>
+          </select>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label" for="voting-credits">Quadratic credit budget</label>
+          <input class="form-control" id="voting-credits" name="credits" type="number" min="1"
+                 value="{{ config.credits|default:16 }}" data-type="int">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label" for="max-project-votes">Maximum votes per project (single style)</label>
+          <input class="form-control" id="max-project-votes" name="max_votes_per_project" type="number"
+                 min="1" value="{{ config.max_votes_per_project|default:1 }}" data-type="int">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label" for="voting-opens">Voting opens</label>
+          <input class="form-control" id="voting-opens" name="voting_open_at" type="datetime-local"
+                 value="{{ event.voting_open_at|date:'Y-m-d\\TH:i' }}">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label" for="voting-closes">Voting closes</label>
+          <input class="form-control" id="voting-closes" name="voting_close_at" type="datetime-local"
+                 value="{{ event.voting_close_at|date:'Y-m-d\\TH:i' }}">
+        </div>
+      </div>
+      <div data-form-errors class="text-danger my-2" role="alert"></div>
+      <button class="btn btn-primary mt-3" type="submit">Save rules</button>
+      {% if config and config.access == "open_link" %}
+        <button class="btn btn-outline-secondary mt-3" type="submit"
+                data-api-method="PATCH" data-api-url="{{ config_api_url }}"
+                data-body='{"rotate_link":true}' data-confirm="Rotate the open voting link? Existing links will stop working."
+                data-success="reload">Rotate open link</button>
+      {% endif %}
+    </form>
+  </section>
+  <section class="card-verdict p-4 mb-4">
+    <h2 class="section-title">Live tallies</h2>
+    <div class="table-responsive">
+      <table class="table align-middle">
+        <thead><tr><th scope="col">Project</th><th scope="col">Votes</th><th scope="col">Quadratic credits</th></tr></thead>
+        <tbody>{% for row in results %}
+          <tr><th scope="row">{{ row.project__title }}</th><td>{{ row.votes }}</td><td>{{ row.credits }}</td></tr>
+        {% empty %}<tr><td colspan="3">No public projects.</td></tr>{% endfor %}</tbody>
+      </table>
+    </div>
+  </section>
+  <section class="card-verdict p-4 mb-4">
+    <h2 class="section-title">Abuse flags</h2>
+    {% for flag in flags %}
+      <article class="border-bottom py-3">
+        <p><strong>{{ flag.get_kind_display|default:flag.kind }}</strong> · {{ flag.created_at|date:"Y-m-d H:i" }} · {{ flag.detail.new_voters_10m }} new voters / 10 min</p>
+        {% if flag.resolved_at %}<p class="form-hint">Resolved {{ flag.resolved_at|date:"Y-m-d H:i" }}</p>
+        {% else %}
+          <form data-api-method="POST" data-api-url="/api/v1/events/{{ event.slug }}/voting/flags/{{ flag.public_id }}/resolve" data-success="reload">
+            <button class="btn btn-sm btn-outline-secondary" type="submit">Resolve flag</button>
+          </form>
+        {% endif %}
+      </article>
+    {% empty %}<p class="form-hint mb-0">No abuse flags.</p>{% endfor %}
+  </section>
+  <section class="card-verdict p-4">
+    <h2 class="section-title">Ballots</h2>
+    {% for ballot in ballots %}
+      <article class="border-bottom py-3">
+        <h3 class="h6">Ballot {{ ballot.public_id }} · {{ ballot.voter.kind }}</h3>
+        <p class="form-hint">Submitted: {{ ballot.submitted_at|default:"Not submitted" }}
+          {% if ballot.voided_at %} · Voided: {{ ballot.void_reason }}{% endif %}</p>
+        <ul>{% for item in ballot.items.all %}<li>{{ item.project.title }} · {{ item.votes }} vote(s)</li>{% endfor %}</ul>
+        {% if ballot.voided_at %}
+          <form class="d-flex gap-2" data-api-method="POST" data-api-url="/api/v1/events/{{ event.slug }}/voting/ballots/{{ ballot.public_id }}/restore" data-success="reload">
+            <input class="form-control" name="reason" maxlength="300" required placeholder="Reason to restore">
+            <button class="btn btn-sm btn-outline-primary" type="submit">Restore</button>
+          </form>
+        {% else %}
+          <form class="d-flex gap-2" data-api-method="POST" data-api-url="/api/v1/events/{{ event.slug }}/voting/ballots/{{ ballot.public_id }}/void" data-success="reload">
+            <input class="form-control" name="reason" maxlength="300" required placeholder="Reason to void">
+            <button class="btn btn-sm btn-outline-danger" type="submit">Void</button>
+          </form>
+        {% endif %}
+      </article>
+    {% empty %}<p class="form-hint mb-0">No ballots submitted.</p>{% endfor %}
+  </section>
+  <section class="card-verdict p-4 mt-4">
+    <h2 class="section-title">Voting audit</h2>
+    {% for entry in audit_events %}
+      <article class="border-bottom py-2">
+        <p class="mb-1"><strong>{{ entry.action }}</strong> · {{ entry.actor_label }} ·
+          {{ entry.created_at|date:"Y-m-d H:i" }}</p>
+        <p class="form-hint mb-0">{{ entry.summary }}{% if entry.target_id %} · {{ entry.target_id }}{% endif %}</p>
+      </article>
+    {% empty %}<p class="form-hint mb-0">No voting changes have been recorded.</p>{% endfor %}
+  </section>
+{% endblock %}

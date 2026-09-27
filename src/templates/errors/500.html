@@ -1,0 +1,32 @@
+{% comment %}
+Standalone on purpose: the 500 handler renders this without the request context,
+so a failure inside a context processor (usually the database) cannot fail again
+while we are already answering 500. No {% extends %}, no url tags, no csrf.
+{% endcomment %}<!DOCTYPE html>
+<html lang="en" data-bs-theme="light">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Something broke &middot; {{ PORTAL_NAME }}</title>
+    <link rel="stylesheet" href="/static/vendor/bootstrap/bootstrap.min.css">
+    <link rel="stylesheet" href="/static/css/app.css">
+  </head>
+  <body>
+    <main class="container py-5">
+      <header class="page-header">
+        <div>
+          <h1>Something broke</h1>
+          <p class="lead">The request could not be completed. Nothing was saved.</p>
+        </div>
+      </header>
+      <div class="empty-state">
+        <h2>500</h2>
+        <p>
+          The failure has been logged with the request that caused it. Nothing you submitted
+          was written: writes happen inside a transaction that is rolled back.
+        </p>
+        <p class="mb-0"><a class="btn btn-primary" href="/">Back to the front page</a></p>
+      </div>
+    </main>
+  </body>
+</html>

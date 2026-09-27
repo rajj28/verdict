@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% comment %}
+The offline reset target. The token arrives in the query string (never the path) so
+it does not end up in a server access log; the page only reads it, and the API
+decides whether it is still good.
+{% endcomment %}
+{% block title %}Set a new password &middot; {{ PORTAL_NAME }}{% endblock %}
+
+{% block heading %}Set a new password{% endblock %}
+{% block lead %}
+  A platform admin generated this link for you. It works once, and only for 24 hours.
+{% endblock %}
+
+{% block content %}
+  <div class="row">
+    <div class="col-lg-6">
+      <div class="card-verdict p-4">
+        {% if token %}
+          <form method="post" action="/api/v1/auth/reset-password"
+                data-api-method="POST" data-api-url="/api/v1/auth/reset-password"
+                data-success="redirect-field:redirect_to" novalidate>
+            <input type="hidden" name="token" value="{{ token }}">
+            <div data-form-errors role="alert"></div>
+
+            <div class="mb-3">
+              <label class="form-label" for="id_password">New password</label>
+              <input class="form-control" id="id_password" name="password" type="password"
+                     autocomplete="new-password" required minlength="8" maxlength="256">
+              <div class="form-hint">At least 8 characters.</div>
+            </div>
+
+            <button class="btn btn-primary" type="submit">Set password</button>
+          </form>
+        {% else %}
+          <div class="empty-state">
+            <h2>No reset token</h2>
+            <p class="mb-0">
+              Open the link an admin gave you, or ask for a new one from the admin panel.
+            </p>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+    <div class="col-lg-6">
+      <div class="card-verdict p-4">
+        <h2 class="section-title">Why a link instead of an email?</h2>
+        <p class="text-muted-verdict mb-0">
+          This portal never calls out to the network, so there is no mail server to send
+          through. The admin hands the link over in person, it is stored only as a hash, and
+          generating a new one retires the previous link.
+        </p>
+      </div>
+    </div>
+  </div>
+{% endblock %}

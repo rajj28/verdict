@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Not allowed &middot; {{ PORTAL_NAME }}{% endblock %}
+
+{% block heading %}Not allowed{% endblock %}
+{% block lead %}Your account does not have the role this page needs.{% endblock %}
+
+{% block content %}
+  <div class="empty-state">
+    <h2>403</h2>
+    <p>{{ detail|default:"This is not yours to open. Roles are per event, and one person holds at most one role per event." }}</p>
+    <p class="mb-0">
+      <a class="btn btn-primary" href="/">Back to the front page</a>
+      {% if not user.is_authenticated %}
+        <a class="btn btn-outline-primary" href="{% url 'login' %}">Sign in</a>
+      {% endif %}
+    </p>
+  </div>
+{% endblock %}

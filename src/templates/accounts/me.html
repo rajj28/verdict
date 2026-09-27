@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% load portal_tags %}
+{% block title %}My dashboard &middot; {{ PORTAL_NAME }}{% endblock %}
+
+{% block heading %}My dashboard{% endblock %}
+{% block lead %}
+  Everything you are part of, and nothing you are not. One card per event, with the role that
+  decides what you can do there.
+{% endblock %}
+
+{% block page_actions %}
+  <a class="btn btn-outline-primary" href="{% url 'my_tokens' %}">API tokens</a>
+  <a class="btn btn-outline-primary" href="/events/">Find an event</a>
+{% endblock %}
+
+{% block content %}
+  {% if cards %}
+    <div class="row g-4">
+      {% for card in cards %}
+        <div class="col-lg-6">
+          <div class="card-verdict p-4 h-100 d-flex flex-column">
+            <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+              <h2 class="section-title mb-0">{{ card.event.name }}</h2>
+              <span class="role-pill role-{{ card.role.role }}">{{ card.role.get_role_display }}</span>
+            </div>
+            <p class="form-hint mb-3">
+              <span class="mono">{{ card.role.public_id }}</span> in
+              <a href="/events/{{ card.event.slug }}/">{{ card.event.slug }}</a>
+            </p>
+
+            {% if card.role.role == "participant" %}
+              {% if card.membership %}
+                <p class="mb-1">
+                  Team <strong>{{ card.membership.team.name }}</strong>
+                  <span class="mono text-muted-verdict">{{ card.membership.team.public_id }}</span>
+                </p>
+                {% if card.project %}
+                  <p class="mb-1">
+                    Project <strong>{{ card.project.title }}</strong>
+                    <span class="status-badge status-{{ card.project.status }}">{{ card.project.get_status_display }}</span>
+                    {% if card.project.revision %}&middot; revision {{ card.project.revision }}{% endif %}
+                  </p>
+                  <p class="form-hint mb-3">
+                    {% if card.project.last_submitted_at %}
+                      Last submitted
+                      <time datetime="{{ card.project.last_submitted_at|date:'c' }}">{{ card.project.last_submitted_at|utc }}</time>
+                    {% else %}
+                      Not submitted yet.
+                    {% endif %}
+                  </p>
+                {% else %}
+                  <p class="mb-3">
+                    <span class="status-badge status-draft">No project yet</span>
+                  </p>
+                {% endif %}
+                <p class="mt-auto mb-0 d-flex flex-wrap gap-2">
+                  <a class="btn btn-sm btn-outline-primary" href="/events/{{ card.event.slug }}/submission">Submission</a>
+                  <a class="btn btn-sm btn-outline-secondary" href="/events/{{ card.event.slug }}/team">Team</a>
+                </p>
+              {% else %}
+                <p class="mb-3">
+                  You are registered as a participant but have no team in this event yet.
+                </p>
+                <p class="mt-auto mb-0">
+                  <a class="btn btn-sm btn-primary" href="/events/{{ card.event.slug }}/team">Create or join a team</a>
+                </p>
+              {% endif %}
+            {% elif card.role.role == "judge" %}
+              <p class="mb-1">
+                Assigned <strong>{{ card.progress.assigned|default:0 }}</strong> &middot;
+                submitted <strong>{{ card.progress.submitted|default:0 }}</strong> &middot;
+                remaining <strong>{{ card.progress.remaining|default:0 }}</strong>
+              </p>
+              {% if card.role.tracks.all %}
+                <p class="mb-3">
+                  {% for track in card.role.tracks.all %}
+                    <span class="track-badge">{{ track.name }}</span>
+                  {% endfor %}
+                </p>
+              {% endif %}
+              <p class="mt-auto mb-0">
+                <a class="btn btn-sm btn-primary" href="/judge/{{ card.event.slug }}/">Open the judge console</a>
+              </p>
+            {% else %}
+              <p class="mb-3">
+                You organize this event: setup, judges, assignments, progress, results and
+                exports.
+              </p>
+              <p class="mt-auto mb-0">
+                <a class="btn btn-sm btn-primary" href="/manage/{{ card.event.slug }}/">Manage {{ card.event.name }}</a>
+              </p>
+            {% endif %}
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  {% elif is_admin %}
+    <div class="empty-state">
+      <h2>No event roles yet</h2>
+      <p class="mb-3">
+        As a platform admin you hold organizer powers on every event, so there is nothing to
+        list here. Start with the admin panel.
+      </p>
+      <a class="btn btn-primary" href="{% url 'admin_panel' %}">Open the admin panel</a>
+    </div>
+  {% else %}
+    <div class="empty-state">
+      <h2>You are not in an event yet</h2>
+      <p class="mb-3">
+        Registration is per event: open one, register, and the role appears here.
+      </p>
+      <a class="btn btn-primary" href="/events/">Browse events</a>
+    </div>
+  {% endif %}
+
+  <section class="mt-5">
+    <div class="row g-4">
+      <div class="col-lg-7">
+        <div class="card-verdict p-4 h-100">
+          <h2 class="section-title">Change your password</h2>
+          {% if password_usable %}
+            <form method="post" action="/api/v1/me/password"
+                  data-api-method="POST" data-api-url="/api/v1/me/password"
+                  data-success="reload" novalidate>
+              <div data-form-errors role="alert"></div>
+              <div class="mb-3">
+                <label class="form-label" for="id_current_password">Current password</label>
+                <input class="form-control" id="id_current_password" name="current_password"
+                       type="password" autocomplete="current-password" required maxlength="256">
+              </div>
+              <div class="mb-3">
+                <label class="form-label" for="id_new_password">New password</label>
+                <input class="form-control" id="id_new_password" name="password" type="password"
+                       autocomplete="new-password" required minlength="8" maxlength="256">
+                <div class="form-hint">At least 8 characters.</div>
+              </div>
+              <button class="btn btn-primary" type="submit">Change password</button>
+            </form>
+          {% else %}
+            <p class="text-muted-verdict">
+              This account was seeded without a password. Ask a platform admin to generate a
+              reset link for you from the admin panel.
+            </p>
+          {% endif %}
+        </div>
+      </div>
+      <div class="col-lg-5">
+        <div class="card-verdict p-4 h-100">
+          <h2 class="section-title">Your account</h2>
+          <p class="mb-1"><span class="mono">{{ user.public_id }}</span></p>
+          <p class="mb-1">{{ user.display_name|default:user.email }}</p>
+          <p class="mb-3">
+            {% if user.is_admin %}<span class="role-pill role-admin">admin</span>{% endif %}
+            {% if user.is_host %}<span class="role-pill role-organizer">host</span>{% endif %}
+            joined <time datetime="{{ user.date_joined|date:'c' }}">{{ user.date_joined|utc }}</time>
+          </p>
+          <p class="form-hint mb-0">
+            Signed in as {{ user.email }}. Your address is never shown on a public page.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+{% endblock %}

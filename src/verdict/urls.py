@@ -54,3 +54,9 @@ urlpatterns = [
     path("", include(interop_html)),
     path("", include(community_html)),
 ]
+
+# The layout stays the same on an error page, so the brand and the nav survive a
+# 404 and a reader can navigate away instead of hitting back.
+handler403 = "core.views.error_403"
+handler404 = "core.views.error_404"
+handler500 = "core.views.error_500"

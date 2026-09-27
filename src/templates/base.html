@@ -1,35 +1,151 @@
 {% comment %}
-Temporary shell from packet P0b. P1-UI replaces it with the Bootstrap 5.3 UI kit
-described in BUILD-SEC section 12. No inline <script> and no on* handlers: the CSP
-middleware forbids both.
-{% endcomment %}<!DOCTYPE html>
-<html lang="en">
+The one layout every page extends. Blocks: title, breadcrumbs, content,
+page_actions, extra_js. No inline <script> and no on* attributes anywhere: the CSP
+in core.middleware forbids both, so behaviour comes from the three vendored/local
+scripts at the bottom of the body.
+{% endcomment %}{% load static %}<!DOCTYPE html>
+<html lang="en" data-bs-theme="light">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}{{ PORTAL_NAME }}{% endblock %}</title>
     <meta name="csrf-token" content="{{ csrf_token }}">
+    <meta name="description" content="{% block description %}VERDICT is a self-hostable hackathon portal where deadlines, judge isolation and score normalization are enforced in the backend.{% endblock %}">
+    <link rel="stylesheet" href="{% static 'vendor/bootstrap/bootstrap.min.css' %}">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}">
+    {# Runs before the body paints so the correct theme is set with no flash. #}
+    <script src="{% static 'js/theme.js' %}"></script>
   </head>
   <body>
-    <header>
-      <a href="/">{% firstof PORTAL_NAME "VERDICT" %}</a>
-      <nav>
-        <a href="/projects">Projects</a>
-        <a href="/api/docs/">API</a>
-        {% if user.is_authenticated %}
-          <span>{{ user.display_name|default:user.email }}</span>
-        {% else %}
-          <a href="/login">Sign in</a>
+    {% if DEMO_MODE %}
+      <div class="demo-ribbon">
+        Demo mode &mdash; seeded events, seeded accounts and one-click sign-in.
+        Never use these accounts in production.
+        <a href="{% url 'login' %}" class="link-dark link-underline">Sign in as&hellip;</a>
+      </div>
+    {% endif %}
+
+    <nav class="navbar navbar-expand-lg navbar-verdict sticky-top" aria-label="Main navigation">
+      <div class="container">
+        <a class="navbar-brand brand-mark" href="{% url 'home' %}">
+          {{ PORTAL_NAME }}<span class="brand-dot" aria-hidden="true"></span>
+        </a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse"
+                data-bs-target="#verdict-nav" aria-controls="verdict-nav"
+                aria-expanded="false" aria-label="Toggle navigation">
+          <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="verdict-nav">
+          <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+            <li class="nav-item">
+              <a class="nav-link{% if request.resolver_match.url_name == 'gallery' %} active{% endif %}"
+                 href="{% url 'gallery' %}">Gallery</a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" href="/events/">Events</a>
+            </li>
+            {% if is_judge_anywhere %}
+              <li class="nav-item">
+                <a class="nav-link" href="/judge">Judge console</a>
+              </li>
+            {% endif %}
+            {% for event in organized_events %}
+              <li class="nav-item">
+                <a class="nav-link" href="/manage/{{ event.slug }}/">Manage {{ event.name }}</a>
+              </li>
+            {% endfor %}
+            {% if show_admin_panel %}
+              <li class="nav-item">
+                <a class="nav-link{% if request.resolver_match.url_name == 'admin_panel' %} active{% endif %}"
+                   href="{% url 'admin_panel' %}">Admin</a>
+              </li>
+            {% endif %}
+          </ul>
+          <ul class="navbar-nav align-items-lg-center">
+            <li class="nav-item">
+              <button class="btn btn-sm btn-outline-secondary" type="button" data-theme-toggle
+                      aria-pressed="false" title="Switch between light and dark">Theme</button>
+            </li>
+            {% if user.is_authenticated %}
+              <li class="nav-item dropdown">
+                <button class="btn btn-sm btn-outline-primary dropdown-toggle" type="button"
+                        data-bs-toggle="dropdown" aria-expanded="false">
+                  {{ user.display_name|default:user.email }}
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                  <li><h6 class="dropdown-header">{{ user.email }}</h6></li>
+                  <li><a class="dropdown-item" href="{% url 'me' %}">My dashboard</a></li>
+                  <li><a class="dropdown-item" href="{% url 'my_tokens' %}">API tokens</a></li>
+                  {% if show_admin_panel %}
+                    <li><a class="dropdown-item" href="{% url 'admin_panel' %}">Admin panel</a></li>
+                  {% endif %}
+                  <li><hr class="dropdown-divider"></li>
+                  <li class="px-3 py-1">
+                    <form method="post" action="/api/v1/auth/logout"
+                          data-api-method="POST" data-api-url="/api/v1/auth/logout"
+                          data-success="redirect:/">
+                      <button type="submit" class="btn btn-sm btn-outline-secondary w-100">Sign out</button>
+                    </form>
+                  </li>
+                </ul>
+              </li>
+            {% else %}
+              <li class="nav-item">
+                <a class="btn btn-sm btn-outline-primary me-2" href="{% url 'login' %}">Sign in</a>
+              </li>
+              <li class="nav-item">
+                <a class="btn btn-sm btn-primary" href="{% url 'register' %}">Create account</a>
+              </li>
+            {% endif %}
+          </ul>
+        </div>
+      </div>
+    </nav>
+
+    <main class="container py-4">
+      {% block breadcrumbs %}
+        {% if breadcrumbs %}
+          <nav aria-label="Breadcrumb">
+            <ol class="breadcrumb">
+              {% for crumb in breadcrumbs %}
+                <li class="breadcrumb-item{% if forloop.last %} active{% endif %}"
+                    {% if forloop.last %}aria-current="page"{% endif %}>
+                  {% if crumb.url and not forloop.last %}
+                    <a href="{{ crumb.url }}">{{ crumb.label }}</a>
+                  {% else %}
+                    {{ crumb.label }}
+                  {% endif %}
+                </li>
+              {% endfor %}
+            </ol>
+          </nav>
         {% endif %}
-      </nav>
-    </header>
-    <main>
+      {% endblock %}
+
+      <header class="page-header">
+        <div>
+          <h1>{% block heading %}{% endblock %}</h1>
+          <p class="lead">{% block lead %}{% endblock %}</p>
+        </div>
+        <div class="page-actions">{% block page_actions %}{% endblock %}</div>
+      </header>
+
       {% block content %}{% endblock %}
     </main>
-    <footer>
-      <p>VERDICT &mdash; self-hostable hackathon portal.</p>
+
+    <footer class="footer-verdict mt-5">
+      <div class="container d-flex flex-wrap gap-2 justify-content-between">
+        <span>{{ PORTAL_NAME }} &mdash; Self-hosted &middot; MIT licensed &middot;
+          <a href="/api/docs/">API docs</a></span>
+        <span>No trackers, no CDNs, no network calls at runtime.</span>
+      </div>
     </footer>
-    {% block page_actions %}{% endblock %}
+
+    <div class="toast-container position-fixed bottom-0 end-0 p-3" aria-live="polite"></div>
+
+    <script src="{% static 'vendor/bootstrap/bootstrap.bundle.min.js' %}"></script>
+    <script src="{% static 'js/time.js' %}"></script>
+    <script src="{% static 'js/api-forms.js' %}"></script>
     {% block extra_js %}{% endblock %}
   </body>
 </html>

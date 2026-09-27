@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% load portal_tags %}
+{% comment %}
+The front page. Every number is a real aggregate from the database: the pitch has
+to survive an empty install too, where all four tiles read zero.
+{% endcomment %}
+{% block title %}{{ PORTAL_NAME }} &middot; hackathon results you can defend{% endblock %}
+
+{% block heading %}Hackathon results you can defend{% endblock %}
+{% block lead %}
+  A self-hostable portal where deadlines, judge isolation and score normalization are
+  enforced in the backend &mdash; and explained to the organizer who has to stand behind them.
+{% endblock %}
+
+{% block page_actions %}
+  <a class="btn btn-outline-primary" href="/events/">Browse events</a>
+  <a class="btn btn-primary" href="{% url 'gallery' %}">Open the gallery</a>
+{% endblock %}
+
+{% block content %}
+  <section class="row g-4 align-items-center mb-5">
+    <div class="col-lg-7">
+      <h2 class="section-title">One command, no loopholes</h2>
+      <p class="text-muted-verdict mb-3">
+        A submission window is half-open and checked on the server after the row lock, so a
+        late edit is refused at the deadline and not a second later. A judge sees only their
+        own queue, scores and comments &mdash; separation of duties is a database constraint
+        on one role per person per event, not a UI convention.
+      </p>
+      <p class="text-muted-verdict mb-0">
+        Scores are normalized with per-judge offsets and shrinkage, every publication stores
+        the input set it was computed from with a digest, and any organizer can re-verify a
+        result later. The gallery is public, and that is documented rather than hidden.
+      </p>
+    </div>
+    <div class="col-lg-5">
+      <div class="card-verdict p-4">
+        <h2 class="section-title">This portal right now</h2>
+        <div class="stat-grid">
+          <div class="stat-tile">
+            <div class="stat-label">Events</div>
+            <div class="stat-value">{{ stats.events }}</div>
+          </div>
+          <div class="stat-tile">
+            <div class="stat-label">Projects</div>
+            <div class="stat-value">{{ stats.projects }}</div>
+          </div>
+          <div class="stat-tile">
+            <div class="stat-label">Judges</div>
+            <div class="stat-value">{{ stats.judges }}</div>
+          </div>
+          <div class="stat-tile">
+            <div class="stat-label">Reviews</div>
+            <div class="stat-value">{{ stats.reviews }}</div>
+          </div>
+        </div>
+        <p class="stat-note mt-3 mb-0">
+          Submitted projects in events that publish a gallery, and reviews already handed in.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="mb-5">
+    <div class="d-flex flex-wrap gap-2 justify-content-between align-items-center mb-3">
+      <h2 class="section-title mb-0">Current and recent events</h2>
+      <a href="/events/">All events</a>
+    </div>
+    {% if cards %}
+      <ul class="project-list">
+        {% for card in cards %}
+          <li class="project-card">
+            <div class="project-thumb" aria-hidden="true">{{ card.event.name|initials }}</div>
+            <div class="d-flex justify-content-between align-items-start gap-2">
+              <h3 class="project-title">{{ card.event.name }}</h3>
+              <span class="status-badge {{ card.phase.0 }}">{{ card.phase.1 }}</span>
+            </div>
+            {% if card.event.tagline or card.event.description %}
+              <p class="project-summary">
+                {% if card.event.tagline %}{{ card.event.tagline|short:140 }}
+                {% else %}{{ card.event.description|short:140 }}{% endif %}
+              </p>
+            {% endif %}
+            <p class="project-meta">
+              <span>{{ card.projects }} submitted</span>
+              <span aria-hidden="true">&middot;</span>
+              <span>
+                <time datetime="{{ card.event.submissions_close_at|date:'c' }}"
+                      data-countdown data-countdown-label="Submissions">…</time>
+              </span>
+            </p>
+            <p class="project-meta">
+              <a href="/events/{{ card.event.slug }}/">Event page</a>
+            </p>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <div class="empty-state">
+        <h2>No public events yet</h2>
+        <p class="mb-3">An organizer with host rights can create the first one.</p>
+        <a class="btn btn-primary" href="/events/new">Create an event</a>
+      </div>
+    {% endif %}
+  </section>
+
+  <section class="row g-4">
+    <div class="col-md-4">
+      <div class="card-verdict p-4 h-100">
+        <h2 class="section-title">Compete</h2>
+        <p class="text-muted-verdict">
+          Register for an event, form a team, submit and revise until the deadline. Drafts
+          stay private; what is published is exactly what the organizers published.
+        </p>
+        <a class="btn btn-outline-primary" href="{% url 'register' %}">Create an account</a>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card-verdict p-4 h-100">
+        <h2 class="section-title">Judge</h2>
+        <p class="text-muted-verdict">
+          A queue scoped to your tracks and your assignments. Your scores and comments are
+          yours; peer scores answer 403, and so does another judge's.
+        </p>
+        <a class="btn btn-outline-primary" href="{% url 'login' %}">Sign in to the console</a>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card-verdict p-4 h-100">
+        <h2 class="section-title">Organize</h2>
+        <p class="text-muted-verdict">
+          Configure the rubric, add judges, assign projects, watch coverage, publish a result
+          with a decision record you can verify later &mdash; and export every stage as CSV.
+        </p>
+        <a class="btn btn-outline-primary" href="/api/docs/">Read the API docs</a>
+      </div>
+    </div>
+  </section>
+{% endblock %}

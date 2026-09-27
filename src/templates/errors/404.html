@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Not found &middot; {{ PORTAL_NAME }}{% endblock %}
+
+{% block heading %}Not found{% endblock %}
+{% block lead %}There is nothing at this address.{% endblock %}
+
+{% block content %}
+  <div class="empty-state">
+    <h2>404</h2>
+    <p>{{ detail|default:"The page, project or event you asked for is not here." }}</p>
+    <p class="mb-3">
+      Records that belong to another event, or a draft you may not read, answer with a 404
+      too: the portal will not confirm that they exist.
+    </p>
+    <p class="mb-0">
+      <a class="btn btn-primary" href="{% url 'gallery' %}">Browse the gallery</a>
+      <a class="btn btn-outline-primary" href="/events/">All events</a>
+    </p>
+  </div>
+{% endblock %}

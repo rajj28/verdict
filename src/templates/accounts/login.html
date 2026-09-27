@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% comment %}
+Read-only page: the form below posts to /api/v1/auth/login through api-forms.js.
+The demo buttons are the same write path with a different endpoint, so a demo
+sign-in cannot bypass a rule the real one enforces.
+{% endcomment %}
+{% block title %}Sign in &middot; {{ PORTAL_NAME }}{% endblock %}
+
+{% block heading %}Sign in{% endblock %}
+{% block lead %}Email and password. Sessions are cookie based; the API also takes bearer tokens.{% endblock %}
+
+{% block content %}
+  <div class="row g-4">
+    <div class="col-lg-6">
+      <div class="card-verdict p-4">
+        {% if reset_done %}
+          <div class="alert alert-success" role="status">
+            Your password is set. Sign in with it.
+          </div>
+        {% endif %}
+        <form method="post" action="/api/v1/auth/login"
+              data-api-method="POST" data-api-url="/api/v1/auth/login"
+              data-success="redirect-field:redirect_to" novalidate>
+          <input type="hidden" name="next" value="{{ next }}">
+          <div data-form-errors role="alert"></div>
+
+          <div class="mb-3">
+            <label class="form-label" for="id_email">Email</label>
+            <input class="form-control" id="id_email" name="email" type="email"
+                   autocomplete="username" required maxlength="254"
+                   value="">
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label" for="id_password">Password</label>
+            <input class="form-control" id="id_password" name="password" type="password"
+                   autocomplete="current-password" required maxlength="256">
+          </div>
+
+          <button class="btn btn-primary" type="submit">Sign in</button>
+          <a class="btn btn-link" href="{% url 'register' %}">Create an account</a>
+        </form>
+        <p class="form-hint mt-3 mb-0">
+          A wrong email and a wrong password give the same answer, so this form cannot be used
+          to find out who has an account. Ten attempts per fifteen minutes per address.
+        </p>
+      </div>
+    </div>
+
+    <div class="col-lg-6">
+      {% if demo_accounts %}
+        <div class="card-verdict p-4">
+          <h2 class="section-title">Demo accounts</h2>
+          <p class="text-muted-verdict">
+            This portal runs in demo mode with seeded data. Pick a role to look around; each
+            button signs in as that seeded account.
+          </p>
+          <div class="demo-accounts">
+            {% for account in demo_accounts %}
+              <button class="demo-account" type="button"
+                      data-api-method="POST" data-api-url="/api/v1/auth/demo-login"
+                      data-body="{&quot;role&quot;: &quot;{{ account.role }}&quot;}"
+                      data-success="redirect-field:redirect_to">
+                <span class="demo-role">{{ account.role }}</span>
+                <span class="demo-can">{{ account.description }}</span>
+              </button>
+            {% endfor %}
+          </div>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+{% endblock %}

@@ -1,0 +1,520 @@
+/*
+ * VERDICT UI kit (BUILD-SPEC section 12).
+ *
+ * Everything else is stock Bootstrap 5.3: this file only carries the brand, the
+ * shared page furniture and the states the product needs (countdowns, status
+ * badges, role pills, stat tiles, project cards, empty states, data tables).
+ *
+ * Colours are declared once as custom properties and mapped onto Bootstrap's own
+ * tokens, so light and dark mode stay in sync without a second stylesheet.
+ */
+
+:root {
+  --v-brand: #4f46e5;
+  --v-brand-strong: #4338ca;
+  --v-brand-soft: #eef2ff;
+  --v-ink: #0f172a;
+  --v-muted: #64748b;
+  --v-line: #e2e8f0;
+  --v-surface: #ffffff;
+  --v-surface-2: #f8fafc;
+  --v-shadow: 0 1px 2px rgba(15, 23, 42, .06), 0 8px 24px -16px rgba(15, 23, 42, .25);
+  --v-radius: .75rem;
+
+  --bs-primary: var(--v-brand);
+  --bs-primary-rgb: 79, 70, 229;
+  --bs-link-color: var(--v-brand);
+  --bs-link-hover-color: var(--v-brand-strong);
+  --bs-body-color: var(--v-ink);
+  --bs-body-bg: var(--v-surface-2);
+  --bs-border-color: var(--v-line);
+}
+
+[data-bs-theme="dark"] {
+  --v-brand: #818cf8;
+  --v-brand-strong: #a5b4fc;
+  --v-brand-soft: #1e1b4b;
+  --v-ink: #e2e8f0;
+  --v-muted: #94a3b8;
+  --v-line: #1f2937;
+  --v-surface: #0f172a;
+  --v-surface-2: #0b1120;
+  --v-shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px -16px rgba(0, 0, 0, .8);
+
+  --bs-link-color: var(--v-brand);
+  --bs-link-hover-color: var(--v-brand-strong);
+  --bs-body-color: var(--v-ink);
+  --bs-body-bg: var(--v-surface-2);
+  --bs-border-color: var(--v-line);
+}
+
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  color: var(--bs-body-color);
+  background: var(--v-surface-2);
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+main {
+  flex: 1 0 auto;
+}
+
+/* --- brand ------------------------------------------------------------- */
+
+.navbar-verdict {
+  background: var(--v-surface);
+  border-bottom: 1px solid var(--v-line);
+  box-shadow: 0 1px 0 rgba(15, 23, 42, .02);
+}
+
+.brand-mark {
+  font-weight: 700;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--v-ink);
+}
+
+.brand-mark:hover,
+.brand-mark:focus {
+  color: var(--v-brand);
+}
+
+.brand-dot {
+  display: inline-block;
+  width: .5rem;
+  height: .5rem;
+  border-radius: 50%;
+  background: var(--v-brand);
+  margin-left: .1rem;
+}
+
+.footer-verdict {
+  background: var(--v-surface);
+  border-top: 1px solid var(--v-line);
+  color: var(--v-muted);
+  font-size: .9rem;
+  padding: 1.5rem 0;
+}
+
+.demo-ribbon {
+  background: repeating-linear-gradient(135deg, #fef3c7, #fef3c7 12px, #fde68a 12px, #fde68a 24px);
+  color: #78350f;
+  font-size: .85rem;
+  font-weight: 600;
+  padding: .4rem 0;
+  text-align: center;
+}
+
+[data-bs-theme="dark"] .demo-ribbon {
+  background: repeating-linear-gradient(135deg, #422006, #422006 12px, #78350f 12px, #78350f 24px);
+  color: #fde68a;
+}
+
+/* --- page furniture ---------------------------------------------------- */
+
+.page-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding: 2rem 0 1.25rem;
+  border-bottom: 1px solid var(--v-line);
+  margin-bottom: 1.75rem;
+}
+
+.page-header h1 {
+  font-size: clamp(1.6rem, 1.2rem + 1.6vw, 2.25rem);
+  font-weight: 700;
+  margin: 0;
+  letter-spacing: -.02em;
+}
+
+.page-header .lead {
+  color: var(--v-muted);
+  margin: .35rem 0 0;
+  max-width: 62ch;
+}
+
+/* A page that fills in its own <h1> inside the content block leaves the shared
+   header empty: collapse it instead of printing an empty band. */
+.page-header h1:empty,
+.page-header .lead:empty,
+.page-header .page-actions:empty {
+  display: none;
+}
+
+.page-header:not(:has(h1:not(:empty), .lead:not(:empty), .page-actions:not(:empty))) {
+  display: none;
+}
+
+.page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+}
+
+.breadcrumb {
+  --bs-breadcrumb-divider-color: var(--v-muted);
+  margin: 1.25rem 0 0;
+  font-size: .9rem;
+}
+
+.card-verdict {
+  background: var(--v-surface);
+  border: 1px solid var(--v-line);
+  border-radius: var(--v-radius);
+  box-shadow: var(--v-shadow);
+}
+
+.section-title {
+  font-size: 1.05rem;
+  font-weight: 650;
+  letter-spacing: -.01em;
+  margin-bottom: .75rem;
+}
+
+.text-muted-verdict {
+  color: var(--v-muted) !important;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: .9em;
+}
+
+/* --- stat tiles -------------------------------------------------------- */
+
+.stat-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+}
+
+.stat-tile {
+  background: var(--v-surface);
+  border: 1px solid var(--v-line);
+  border-radius: var(--v-radius);
+  box-shadow: var(--v-shadow);
+  padding: 1.1rem 1.25rem;
+}
+
+.stat-tile .stat-label {
+  color: var(--v-muted);
+  font-size: .8rem;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.stat-tile .stat-value {
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-tile .stat-note {
+  color: var(--v-muted);
+  font-size: .85rem;
+}
+
+/* --- status badges and role pills -------------------------------------- */
+
+.status-badge,
+.role-pill,
+.track-badge {
+  display: inline-block;
+  border-radius: 999px;
+  font-size: .75rem;
+  font-weight: 600;
+  letter-spacing: .02em;
+  line-height: 1.4;
+  padding: .2rem .6rem;
+  white-space: nowrap;
+}
+
+.status-draft { background: #f1f5f9; color: #475569; }
+.status-submitted { background: #dcfce7; color: #14532d; }
+.status-withdrawn { background: #fef3c7; color: #78350f; }
+.status-disqualified { background: #fee2e2; color: #7f1d1d; }
+.status-superseded { background: #e2e8f0; color: #334155; }
+.status-open { background: #dcfce7; color: #14532d; }
+.status-closed { background: #fee2e2; color: #7f1d1d; }
+.status-not-started { background: #f1f5f9; color: #475569; }
+.status-in-progress { background: #dbeafe; color: #1e3a8a; }
+.status-done { background: #dcfce7; color: #14532d; }
+.status-upcoming { background: #ede9fe; color: #4c1d95; }
+.status-judging { background: #dbeafe; color: #1e3a8a; }
+.status-published { background: var(--v-brand-soft); color: var(--v-brand-strong); }
+
+.role-participant { background: #dbeafe; color: #1e3a8a; }
+.role-judge { background: #ede9fe; color: #4c1d95; }
+.role-organizer { background: #ffedd5; color: #7c2d12; }
+.role-admin { background: var(--v-brand-soft); color: var(--v-brand-strong); }
+
+.track-badge { background: var(--v-brand-soft); color: var(--v-brand-strong); }
+
+.tag-pill {
+  display: inline-block;
+  background: var(--v-surface-2);
+  border: 1px solid var(--v-line);
+  border-radius: 999px;
+  color: var(--v-muted);
+  font-size: .75rem;
+  padding: .1rem .55rem;
+}
+
+[data-bs-theme="dark"] .status-draft,
+[data-bs-theme="dark"] .status-superseded,
+[data-bs-theme="dark"] .status-not-started { background: #1e293b; color: #cbd5e1; }
+
+[data-bs-theme="dark"] .status-submitted,
+[data-bs-theme="dark"] .status-open,
+[data-bs-theme="dark"] .status-done { background: #052e16; color: #86efac; }
+
+[data-bs-theme="dark"] .status-withdrawn,
+[data-bs-theme="dark"] .status-upcoming { background: #422006; color: #fde68a; }
+
+[data-bs-theme="dark"] .status-disqualified,
+[data-bs-theme="dark"] .status-closed { background: #450a0a; color: #fca5a5; }
+
+[data-bs-theme="dark"] .status-in-progress,
+[data-bs-theme="dark"] .status-judging { background: #172554; color: #93c5fd; }
+
+[data-bs-theme="dark"] .role-participant { background: #172554; color: #bfdbfe; }
+[data-bs-theme="dark"] .role-judge { background: #2e1065; color: #ddd6fe; }
+[data-bs-theme="dark"] .role-organizer { background: #431407; color: #fdba74; }
+
+/* --- countdowns -------------------------------------------------------- */
+
+.countdown {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--v-muted);
+  white-space: nowrap;
+}
+
+.countdown.countdown-open { color: #15803d; }
+.countdown.countdown-soon { color: #b45309; }
+.countdown.countdown-closed { color: #b91c1c; }
+
+[data-bs-theme="dark"] .countdown.countdown-open { color: #4ade80; }
+[data-bs-theme="dark"] .countdown.countdown-soon { color: #fbbf24; }
+[data-bs-theme="dark"] .countdown.countdown-closed { color: #f87171; }
+
+/* --- project cards ----------------------------------------------------- */
+
+.project-list {
+  list-style: none;
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+  margin: 0;
+  padding: 0;
+}
+
+.project-card {
+  background: var(--v-surface);
+  border: 1px solid var(--v-line);
+  border-radius: var(--v-radius);
+  box-shadow: var(--v-shadow);
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+  height: 100%;
+  padding: 1.1rem 1.2rem;
+  transition: border-color .12s ease, transform .12s ease;
+}
+
+.project-card:hover {
+  border-color: var(--v-brand);
+  transform: translateY(-1px);
+}
+
+.project-card .project-title {
+  font-size: 1.05rem;
+  font-weight: 650;
+  margin: 0;
+}
+
+.project-card .project-summary {
+  color: var(--v-muted);
+  font-size: .92rem;
+  margin: 0;
+}
+
+.project-card .project-meta {
+  align-items: center;
+  color: var(--v-muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: .82rem;
+  gap: .4rem .6rem;
+  margin-top: auto;
+}
+
+.project-thumb {
+  align-items: center;
+  aspect-ratio: 16 / 9;
+  background: var(--v-brand-soft);
+  border-radius: calc(var(--v-radius) - .15rem);
+  color: var(--v-brand-strong);
+  display: flex;
+  font-size: 1.75rem;
+  font-weight: 700;
+  justify-content: center;
+  letter-spacing: .04em;
+  overflow: hidden;
+}
+
+.project-thumb img {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+/* --- tables ------------------------------------------------------------ */
+
+.data-table {
+  background: var(--v-surface);
+  border: 1px solid var(--v-line);
+  border-radius: var(--v-radius);
+  margin: 0;
+  overflow: auto;
+}
+
+.table.data-table > :not(caption) > * > * {
+  background: transparent;
+}
+
+.data-table thead th {
+  background: var(--v-surface);
+  border-bottom: 1px solid var(--v-line);
+  color: var(--v-muted);
+  font-size: .78rem;
+  font-weight: 600;
+  letter-spacing: .04em;
+  position: sticky;
+  text-transform: uppercase;
+  top: 0;
+  z-index: 1;
+}
+
+.data-table tbody td {
+  vertical-align: middle;
+}
+
+/* --- empty states and forms -------------------------------------------- */
+
+.empty-state {
+  background: var(--v-surface);
+  border: 1px dashed var(--v-line);
+  border-radius: var(--v-radius);
+  color: var(--v-muted);
+  padding: 2.5rem 1.5rem;
+  text-align: center;
+}
+
+.empty-state h2,
+.empty-state h3 {
+  color: var(--bs-body-color);
+  font-size: 1.1rem;
+  font-weight: 650;
+}
+
+.form-label {
+  font-size: .85rem;
+  font-weight: 600;
+  margin-bottom: .25rem;
+}
+
+.form-hint {
+  color: var(--v-muted);
+  font-size: .8rem;
+}
+
+[data-form-errors]:empty {
+  display: none;
+}
+
+[data-form-errors] {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: calc(var(--v-radius) - .2rem);
+  color: #991b1b;
+  font-size: .9rem;
+  margin-bottom: 1rem;
+  padding: .6rem .8rem;
+}
+
+[data-bs-theme="dark"] [data-form-errors] {
+  background: #450a0a;
+  border-color: #7f1d1d;
+  color: #fecaca;
+}
+
+.demo-accounts {
+  display: grid;
+  gap: .75rem;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+}
+
+.demo-account {
+  background: var(--v-surface);
+  border: 1px solid var(--v-line);
+  border-radius: calc(var(--v-radius) - .15rem);
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+  padding: .85rem 1rem;
+  text-align: left;
+}
+
+.demo-account .demo-role {
+  font-weight: 650;
+  text-transform: capitalize;
+}
+
+.demo-account .demo-can {
+  color: var(--v-muted);
+  font-size: .82rem;
+}
+
+.secret-reveal {
+  background: var(--v-brand-soft);
+  border: 1px dashed var(--v-brand);
+  border-radius: calc(var(--v-radius) - .2rem);
+  padding: .85rem 1rem;
+}
+
+/* --- toasts ------------------------------------------------------------ */
+
+.toast-container {
+  z-index: 1090;
+}
+
+.toast {
+  box-shadow: var(--v-shadow);
+}
+
+/* --- focus and small screens ------------------------------------------- */
+
+:focus-visible {
+  outline: 3px solid var(--v-brand);
+  outline-offset: 2px;
+}
+
+@media (max-width: 360px) {
+  .page-header { padding-top: 1.25rem; }
+  .stat-tile .stat-value { font-size: 1.6rem; }
+  .project-list { grid-template-columns: 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .project-card { transition: none; }
+  .project-card:hover { transform: none; }
+}

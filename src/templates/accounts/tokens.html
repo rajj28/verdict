@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% load portal_tags %}
+{% comment %}
+Tokens page. The plaintext of a new token is revealed once by api-forms.js
+(data-response-field) and never again: only its sha256 is stored, so there is
+nothing to show a second time.
+{% endcomment %}
+{% block title %}API tokens &middot; {{ PORTAL_NAME }}{% endblock %}
+
+{% block heading %}API tokens{% endblock %}
+{% block lead %}
+  A token authenticates the JSON API as you, with the same roles you have here. Send it as
+  <span class="mono">Authorization: Bearer vd_&hellip;</span> and never from a browser.
+{% endblock %}
+
+{% block page_actions %}
+  <a class="btn btn-outline-primary" href="/api/docs/">API docs</a>
+{% endblock %}
+
+{% block content %}
+  <div class="row g-4">
+    <div class="col-lg-5">
+      <div class="card-verdict p-4">
+        <h2 class="section-title">Create a token</h2>
+        {# No data-success: a reload would wipe the plaintext before it is read. #}
+        <form method="post" action="/api/v1/me/tokens"
+              data-api-method="POST" data-api-url="/api/v1/me/tokens"
+              data-response-field="plaintext" data-response-target="#new-token"
+              data-response-reveal="#new-token-block" novalidate>
+          <div data-form-errors role="alert"></div>
+          <div class="mb-3">
+            <label class="form-label" for="id_name">Name</label>
+            <input class="form-control" id="id_name" name="name" type="text" required
+                   maxlength="80" placeholder="laptop, CI, load test">
+            <div class="form-hint">So you can tell later which one to revoke.</div>
+          </div>
+          <button class="btn btn-primary" type="submit">Create token</button>
+          <a class="btn btn-link" href="{% url 'my_tokens' %}">Reload the list</a>
+        </form>
+
+        <div class="secret-reveal mt-3 d-none" id="new-token-block">
+          <h3 class="section-title">Copy it now</h3>
+          <p class="mono mb-2" id="new-token"></p>
+          <button class="btn btn-sm btn-outline-primary" type="button" data-copy="#new-token">
+            Copy token
+          </button>
+          <p class="form-hint mb-0 mt-2">
+            This is the only time it is shown. If you lose it, revoke it and make another.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-7">
+      <div class="card-verdict p-4">
+        <h2 class="section-title">Your tokens ({{ live_tokens|length }} live)</h2>
+        {% if tokens %}
+          <div class="table-responsive">
+            <table class="table data-table table-sm align-middle">
+              <thead>
+                <tr>
+                  <th scope="col">Name</th>
+                  <th scope="col">Prefix</th>
+                  <th scope="col">Created</th>
+                  <th scope="col">Last used</th>
+                  <th scope="col"><span class="visually-hidden">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for token in tokens %}
+                  <tr>
+                    <td>
+                      {{ token.name }}
+                      {% if token.is_demo %}<span class="tag-pill">demo</span>{% endif %}
+                      {% if token.revoked_at %}
+                        <span class="status-badge status-closed">revoked</span>
+                      {% else %}
+                        <span class="status-badge status-open">live</span>
+                      {% endif %}
+                    </td>
+                    <td class="mono">{{ token.prefix }}&hellip;</td>
+                    <td><time datetime="{{ token.created_at|date:'c' }}">{{ token.created_at|utc }}</time></td>
+                    <td>
+                      {% if token.last_used_at %}
+                        <time datetime="{{ token.last_used_at|date:'c' }}">{{ token.last_used_at|utc }}</time>
+                      {% else %}
+                        <span class="text-muted-verdict">never</span>
+                      {% endif %}
+                    </td>
+                    <td class="text-end">
+                      {% if not token.revoked_at %}
+                        <button class="btn btn-sm btn-outline-danger" type="button"
+                                data-api-method="DELETE"
+                                data-api-url="/api/v1/me/tokens/{{ token.prefix }}"
+                                data-success="reload"
+                                data-confirm="Revoke {{ token.name }}? Anything using it stops working at once.">
+                          Revoke
+                        </button>
+                      {% endif %}
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div class="empty-state">
+            <h2>No tokens yet</h2>
+            <p class="mb-0">Create one to drive the API from a script or a CI job.</p>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+{% endblock %}

@@ -29,6 +29,16 @@ class ResultPublication(models.Model):
     input_digest = models.CharField(max_length=64, blank=True, default="")
     rows = models.JSONField(default=list)
     judge_rows = models.JSONField(default=list, blank=True)
+    awards = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Prize awards as decided at publication time (results.prizes).",
+    )
+    unawarded = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Prizes that could not be awarded, with the reason (ties need an organizer).",
+    )
     note = models.CharField(max_length=300, blank=True)
     published_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,

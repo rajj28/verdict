@@ -20,7 +20,7 @@ from events.policy import is_organizer
 from judging.models import Review, ReviewExclusion, ReviewStatus
 from judging.policy import engine_criteria, engine_reviews, included_reviews, review_values, scored_reviews
 from projects.models import Project, ProjectStatus
-from results import engine
+from results import engine, prizes
 from results.models import ResultPublication
 
 
@@ -33,6 +33,45 @@ def _lam_for_event(event: Event) -> float | str:
     if event.shrinkage_lambda is None:
         return "auto"
     return float(event.shrinkage_lambda)
+
+
+def _prize_specs(event: Event) -> list[prizes.PrizeSpec]:
+    """Prizes as the pure allocator wants them, in position order."""
+    return [
+        prizes.PrizeSpec(
+            prize_id=p.public_id,
+            name=p.name,
+            scope=p.scope,
+            track_id=p.track.public_id if p.track_id else None,
+            places=p.places,
+            value=p.value,
+            track_name=p.track.name if p.track_id else "",
+            eligibility_note=p.eligibility_note,
+            position=p.position,
+        )
+        for p in event.prizes.select_related("track").order_by("position", "id")
+    ]
+
+
+def _prize_config(event: Event) -> list[dict]:
+    """Prize configuration in position order, as stored in the canonical inputs.
+
+    Part of the digest: changing a prize after publication must show up
+    when the live data is re-hashed.
+    """
+    return [
+        {
+            "prize_id": s.prize_id,
+            "name": s.name,
+            "scope": s.scope,
+            "track_id": s.track_id,
+            "track_name": s.track_name,
+            "places": s.places,
+            "position": s.position,
+            "eligibility_note": s.eligibility_note,
+        }
+        for s in _prize_specs(event)
+    ]
 
 
 def _canonical_inputs(
@@ -51,6 +90,8 @@ def _canonical_inputs(
         "reviews_per_project": event.reviews_per_project,
         "included": sorted(included, key=lambda r: r["review_id"]),
         "excluded": sorted(excluded, key=lambda r: r["review_id"]),
+        "prizes": _prize_config(event),
+        "one_prize_per_team": event.one_prize_per_team,
         "params": params,
     }
 
@@ -216,6 +257,8 @@ def preview(event: Event) -> dict:
         params["lambda_cv_n"] = result.lambda_choice.n
         params["lambda_cv_folds"] = result.lambda_choice.folds
     input_digest = _digest(_canonical_inputs(event, inc, exc, params))
+    snapshot = _project_snapshot(result, event)
+    allocation = _allocate(result, event, snapshot)
     return {
         "method": result.method,
         "lam": result.lam,
@@ -231,8 +274,10 @@ def preview(event: Event) -> dict:
             else None
         ),
         "input_digest": input_digest,
-        "rows": _build_rows(result, event),
+        "rows": _build_rows(result, snapshot),
         "judge_rows": _build_judge_rows(result),
+        "awards": [a.as_dict() for a in allocation.awards],
+        "unawarded": [u.as_dict() for u in allocation.unawarded],
         "diagnostics": {
             "under_reviewed": result.diagnostics.under_reviewed,
             "single_review_judges": result.diagnostics.single_review_judges,
@@ -257,57 +302,109 @@ def preview(event: Event) -> dict:
     }
 
 
-def _build_rows(result: engine.Result, event: Event) -> list[dict]:
-    """Build public-facing rows with status classification."""
-    projects = list(
+def _official_score(result: engine.Result, project_id: str) -> float | None:
+    """The score the event's ranking method ranks on (prizes use this one)."""
+    if result.method == "raw":
+        entry = result.raw.get(project_id)
+        return entry[0] if entry else None
+    if result.method == "pairwise":
+        return result.strengths.get(project_id)
+    return result.normalized.get(project_id)
+
+
+def _project_outcome(result: engine.Result, project: Project) -> tuple[str, float | None]:
+    """Result status and official score for one project (score None unless ranked)."""
+    raw_entry = result.raw.get(project.public_id)
+    if project.status == ProjectStatus.WITHDRAWN:
+        status = "withdrawn"
+    elif project.status == ProjectStatus.DISQUALIFIED:
+        status = "disqualified"
+    elif project.status == ProjectStatus.SUPERSEDED:
+        status = "superseded"
+    elif raw_entry is None:
+        status = "unranked_no_reviews"
+    else:
+        status = "ranked"
+    score = _official_score(result, project.public_id) if status == "ranked" else None
+    return status, score
+
+
+def _project_snapshot(result: engine.Result, event: Event) -> list[tuple[Project, str, float | None]]:
+    """Every project of the event with its result status and score (one query)."""
+    projects = (
         Project.objects.filter(event=event)
         .select_related("team", "track")
         .order_by("public_id")
     )
+    return [(p, *_project_outcome(result, p)) for p in projects]
+
+
+def _rank_order(rank: str | None, title: str) -> tuple:
+    """Display order: rank first, unranked last, ties and equal titles by name."""
+    if rank is None or rank == "unranked":
+        return (2, 0, title.casefold())
+    return (1 if rank.startswith("=") else 0, int(rank.lstrip("=")), title.casefold())
+
+
+def _build_rows(
+    result: engine.Result, snapshot: list[tuple[Project, str, float | None]]
+) -> list[dict]:
+    """Build public-facing rows with status classification."""
     rows = []
-    for project in projects:
+    for project, status, _score in snapshot:
         pid = project.public_id
-        rank_str = result.rank.get(pid)
-        rank_raw = result.rank_raw.get(pid)
-        rank_norm = result.rank_norm.get(pid)
-        rank_bt = result.rank_bt.get(pid)
         raw_tuple = result.raw.get(pid)
-        raw_mean = raw_tuple[0] if raw_tuple else None
-        n_reviews = raw_tuple[1] if raw_tuple else 0
-        normalized = result.normalized.get(pid)
-        if project.status == ProjectStatus.WITHDRAWN:
-            status = "withdrawn"
-        elif project.status == ProjectStatus.DISQUALIFIED:
-            status = "disqualified"
-        elif project.status == ProjectStatus.SUPERSEDED:
-            status = "superseded"
-        elif n_reviews == 0:
-            status = "unranked_no_reviews"
-        else:
-            status = "ranked"
         rows.append({
             "project_id": pid,
             "title": project.title,
             "team": project.team.name,
             "track": project.track.name if project.track_id else None,
-            "n_reviews": n_reviews,
-            "raw_mean": raw_mean,
-            "normalized": normalized,
-            "rank": rank_str,
-            "rank_raw": rank_raw,
-            "rank_norm": rank_norm,
-            "rank_bt": rank_bt,
+            "n_reviews": raw_tuple[1] if raw_tuple else 0,
+            "raw_mean": raw_tuple[0] if raw_tuple else None,
+            "normalized": result.normalized.get(pid),
+            "rank": result.rank.get(pid),
+            "rank_raw": result.rank_raw.get(pid),
+            "rank_norm": result.rank_norm.get(pid),
+            "rank_bt": result.rank_bt.get(pid),
             "status": status,
             "status_reason": project.status_reason or None,
         })
     # Sort by primary rank, then title
-    def _rank_key(row):
-        r = row.get("rank")
-        if r is None or r == "unranked":
-            return (2, 0, row["title"].casefold())
-        return (1 if r.startswith("=") else 0, int(r.lstrip("=")), row["title"].casefold())
-    rows.sort(key=_rank_key)
+    rows.sort(key=lambda row: _rank_order(row["rank"], row["title"]))
     return rows
+
+
+def _allocation_inputs(
+    result: engine.Result, snapshot: list[tuple[Project, str, float | None]]
+) -> list[prizes.RankedProject]:
+    """Snapshot rows as the pure allocator reads them, in official rank order."""
+    rows = [
+        prizes.RankedProject(
+            project_id=project.public_id,
+            title=project.title,
+            team_id=project.team.public_id,
+            team_name=project.team.name,
+            track_id=project.track.public_id if project.track_id else None,
+            track_name=project.track.name if project.track_id else None,
+            score=score,
+            rank=result.rank.get(project.public_id),
+            status=status,
+        )
+        for project, status, score in snapshot
+    ]
+    rows.sort(key=lambda row: _rank_order(row.rank, row.title))
+    return rows
+
+
+def _allocate(
+    result: engine.Result, event: Event, snapshot: list[tuple[Project, str, float | None]]
+) -> prizes.Allocation:
+    """Award the event's prizes from a computed result (pure allocation)."""
+    return prizes.allocate(
+        _allocation_inputs(result, snapshot),
+        _prize_specs(event),
+        one_per_team=event.one_prize_per_team,
+    )
 
 
 def _build_judge_rows(result: engine.Result) -> list[dict]:
@@ -427,8 +524,14 @@ def publish(actor, event: Event, note: str = "", acknowledge_unranked: bool = Fa
 
     inputs = _canonical_inputs(event_locked, inc, exc, params)
     digest = _digest(inputs)
-    rows = _build_rows(result, event_locked)
+    snapshot = _project_snapshot(result, event_locked)
+    rows = _build_rows(result, snapshot)
     judge_rows = _build_judge_rows(result)
+    # Awards are proposed, never final: an exact tie at a cut stays
+    # unawarded until an organizer decides (results.prizes).
+    allocation = _allocate(result, event_locked, snapshot)
+    awards = [a.as_dict() for a in allocation.awards]
+    unawarded = [u.as_dict() for u in allocation.unawarded]
 
     previous = (
         ResultPublication.objects.filter(event=event_locked)
@@ -450,6 +553,8 @@ def publish(actor, event: Event, note: str = "", acknowledge_unranked: bool = Fa
         input_digest=digest,
         rows=rows,
         judge_rows=judge_rows,
+        awards=awards,
+        unawarded=unawarded,
         note=note,
         published_by=actor,
         supersedes=previous,
@@ -471,6 +576,8 @@ def publish(actor, event: Event, note: str = "", acknowledge_unranked: bool = Fa
             "digest": digest,
             "n_included": len(inc),
             "n_excluded": len(exc),
+            "n_awards": len(awards),
+            "n_unawarded": len(unawarded),
             "note": note,
         },
     )
@@ -519,6 +626,8 @@ def public_results(event: Event) -> dict:
         "lam": pub.params.get("lam"),
         "lambda_source": pub.params.get("lambda_source"),
         "rows": public_rows,
+        "awards": pub.awards,
+        "unawarded": pub.unawarded,
     }
 
 
@@ -558,7 +667,10 @@ def decision_record(pub: ResultPublication) -> dict:
         f"{lam_sentence}. "
         f"Rubric version: {pub.params.get('rubric_version')}. "
         "Reviews excluded from results are listed below with their reasons. "
-        "Only submitted reviews of submitted projects are included."
+        "Only submitted reviews of submitted projects are included. "
+        "Prizes are awarded from the official ranking in prize order; a "
+        "team that already won a higher prize is skipped for the next one, "
+        "and an exact tie at a cut is left for an organizer to decide."
     )
     return {
         "pub_id": pub.public_id,
@@ -570,6 +682,10 @@ def decision_record(pub: ResultPublication) -> dict:
         "rule_plain": rule_plain,
         "included_reviews": pub.inputs.get("included", []),
         "excluded_reviews": pub.inputs.get("excluded", []),
+        "prizes": pub.inputs.get("prizes", []),
+        "one_prize_per_team": pub.inputs.get("one_prize_per_team"),
+        "awards": pub.awards,
+        "unawarded": pub.unawarded,
         "interventions": [
             {
                 "action": iv["action"],
@@ -599,9 +715,11 @@ def decision_record(pub: ResultPublication) -> dict:
 def verify_publication(pub: ResultPublication) -> dict:
     """Recompute results from stored inputs and compare.
 
-    Two checks (BUILD-SPEC 16):
+    Three checks (BUILD-SPEC 16):
     1. Rerun the engine on the stored inputs → rows must be identical.
-    2. Hash the live database → digest must match the stored digest.
+    2. Rerun the prize allocation from the stored prize config → awards
+       and unawarded prizes must be identical.
+    3. Hash the live database → digest must match the stored digest.
     """
     stored_inputs = pub.inputs
     inc = stored_inputs.get("included", [])
@@ -668,22 +786,30 @@ def verify_publication(pub: ResultPublication) -> dict:
 
     rows_match = recomputed_rows == stored_rows
 
+    # Awards: recompute from the stored prize configuration and the re-run
+    # engine, using the live project metadata (title, team, track) exactly as
+    # the rows check does. Publications made before prize allocation carry no
+    # prize configuration, so the check is skipped rather than failed.
+    awards_match = _verify_awards(pub, result)
+
     # Live digest check: same params, but freshly built included/excluded lists.
-    # This checks whether the live data (reviews/exclusions) has changed since
-    # publication. The params are fixed at publication time and don't vary.
+    # This checks whether the live data (reviews/exclusions/prizes) has changed
+    # since publication. The params are fixed at publication time and don't vary.
     live_inc, live_exc = _build_input_lists(pub.event)
     # Use the stored params to reconstruct the live digest – only the review
     # data changes if there is tampering.
     live_digest = _digest(_canonical_inputs(pub.event, live_inc, live_exc, params))
     digest_match = live_digest == pub.input_digest
 
-    if rows_match and digest_match:
+    if rows_match and digest_match and awards_match is not False:
         verdict = "identical"
         detail = "Recomputed rows match and live data digest matches the stored digest."
     else:
         parts = []
         if not rows_match:
             parts.append("recomputed rows differ from stored rows")
+        if awards_match is False:
+            parts.append("recomputed awards differ from stored awards")
         if not digest_match:
             parts.append(
                 f"live data digest {live_digest[:12]}… differs from stored {pub.input_digest[:12]}…"
@@ -696,10 +822,40 @@ def verify_publication(pub: ResultPublication) -> dict:
         "verdict": verdict,
         "detail": detail,
         "rows_match": rows_match,
+        "awards_match": awards_match,
         "digest_match": digest_match,
         "stored_digest": pub.input_digest,
         "live_digest": live_digest,
     }
+
+
+def _verify_awards(pub: ResultPublication, result: engine.Result) -> bool | None:
+    """True when the re-run allocation equals the stored one, None when absent."""
+    stored_prizes = pub.inputs.get("prizes")
+    if stored_prizes is None:
+        return None
+    specs = [
+        prizes.PrizeSpec(
+            prize_id=p["prize_id"],
+            name=p["name"],
+            scope=p["scope"],
+            track_id=p.get("track_id"),
+            places=p["places"],
+            track_name=p.get("track_name", ""),
+            position=p.get("position", 0),
+            eligibility_note=p.get("eligibility_note", ""),
+        )
+        for p in stored_prizes
+    ]
+    recomputed = prizes.allocate(
+        _allocation_inputs(result, _project_snapshot(result, pub.event)),
+        specs,
+        one_per_team=bool(pub.inputs.get("one_prize_per_team", True)),
+    )  # the stored policy, not today's
+    return (
+        [a.as_dict() for a in recomputed.awards] == pub.awards
+        and [u.as_dict() for u in recomputed.unawarded] == pub.unawarded
+    )
 
 
 # ---------------------------------------------------------------------------

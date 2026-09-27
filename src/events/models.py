@@ -43,6 +43,11 @@ class Role(models.TextChoices):
     ORGANIZER = "organizer", "Organizer"
 
 
+class PrizeScope(models.TextChoices):
+    OVERALL = "overall", "Overall (any track)"
+    TRACK = "track", "Track"
+
+
 class Event(models.Model):
     """A hackathon. Slug is the public identifier; source_id keeps import provenance."""
 
@@ -69,6 +74,10 @@ class Event(models.Model):
     )
     scoring_locked_at = models.DateTimeField(null=True, blank=True)
     gallery_public = models.BooleanField(default=True)
+    one_prize_per_team = models.BooleanField(
+        default=True,
+        help_text="A team already awarded a higher prize is skipped for lower ones.",
+    )
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
                                    related_name="events_created")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -133,6 +142,14 @@ class Track(models.Model):
 
 
 class Prize(models.Model):
+    """A prize and the place(s) it awards.
+
+    ``scope`` decides the candidate pool (``results.prizes``): overall
+    prizes draw from every ranked project, track prizes only from their
+    track. A prize with a track is always a track prize, so the two
+    cannot disagree.
+    """
+
     event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="prizes")
     public_id = models.CharField(max_length=32, default=_new_prz_id)
     name = models.CharField(max_length=160)
@@ -141,6 +158,18 @@ class Prize(models.Model):
     track = models.ForeignKey(Track, on_delete=models.CASCADE, null=True, blank=True,
                               related_name="prizes")
     position = models.PositiveSmallIntegerField(default=0)
+    scope = models.CharField(
+        max_length=8, choices=PrizeScope.choices, default=PrizeScope.OVERALL,
+        help_text="Overall prizes draw from every ranked project; track prizes only from their track.",
+    )
+    places = models.PositiveSmallIntegerField(
+        default=1,
+        help_text="How many ranked places this prize awards (1 = single winner).",
+    )
+    eligibility_note = models.CharField(
+        max_length=300, blank=True,
+        help_text="Shown with the award, e.g. 'must ship a running demo'.",
+    )
 
     class Meta:
         db_table = "events_prize"
@@ -148,7 +177,33 @@ class Prize(models.Model):
         constraints = [
             models.UniqueConstraint(fields=["event", "public_id"],
                                     name="prize_unique_public_id_per_event"),
+            models.CheckConstraint(
+                condition=models.Q(places__gte=1), name="prize_places_positive",
+            ),
+            models.CheckConstraint(
+                condition=(models.Q(scope=PrizeScope.OVERALL, track__isnull=True)
+                           | models.Q(scope=PrizeScope.TRACK, track__isnull=False)),
+                name="prize_scope_matches_track",
+            ),
         ]
+
+    def __str__(self) -> str:
+        return f"{self.event.slug}: {self.name}"
+
+    def save(self, *args, **kwargs):
+        """Keep scope and track in step: a track makes a prize a track prize.
+
+        Doing it here (not only in the service) means bulk paths such as
+        ``update_fields=["track"]`` cannot leave the row contradicting the
+        ``prize_scope_matches_track`` constraint.
+        """
+        wanted = PrizeScope.TRACK if self.track_id else PrizeScope.OVERALL
+        if self.scope != wanted:
+            self.scope = wanted
+            update_fields = kwargs.get("update_fields")
+            if update_fields is not None and "scope" not in update_fields:
+                kwargs["update_fields"] = [*update_fields, "scope"]
+        super().save(*args, **kwargs)
 
 
 class CustomQuestion(models.Model):

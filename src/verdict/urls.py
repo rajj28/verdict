@@ -1,7 +1,7 @@
 """Root URL configuration: every app's HTML urls at "", every api_urls under /api/v1/."""
-from django.http import HttpResponse, JsonResponse
+from django.http import JsonResponse
 from django.urls import include, path
-from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
+from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerSplitView
 
 from accounts.api_urls import urlpatterns as accounts_api
 from accounts.urls import urlpatterns as accounts_html
@@ -24,20 +24,16 @@ from teams.api_urls import urlpatterns as teams_api
 from teams.urls import urlpatterns as teams_html
 
 
-def healthz(request):
-    """Container healthcheck target: cheap, no DB round trip, no secrets."""
-    return HttpResponse("ok", content_type="text/plain")
-
-
 def api_root(request):
     return JsonResponse({"name": "VERDICT API", "version": "1.0.0"})
 
 
 urlpatterns = [
-    path("healthz", healthz, name="healthz"),
     path("api/v1/", api_root, name="api-root"),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
-    path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="api-docs"),
+    # Split view: the Swagger bootstrap is a separate file, so the page needs no
+    # inline <script> and stays within our Content-Security-Policy.
+    path("api/docs/", SpectacularSwaggerSplitView.as_view(url_name="schema"), name="api-docs"),
     path("api/v1/", include(events_api)),
     path("api/v1/", include(teams_api)),
     path("api/v1/", include(projects_api)),

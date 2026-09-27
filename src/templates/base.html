@@ -1,0 +1,35 @@
+{% comment %}
+Temporary shell from packet P0b. P1-UI replaces it with the Bootstrap 5.3 UI kit
+described in BUILD-SEC section 12. No inline <script> and no on* handlers: the CSP
+middleware forbids both.
+{% endcomment %}<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}{{ PORTAL_NAME }}{% endblock %}</title>
+    <meta name="csrf-token" content="{{ csrf_token }}">
+  </head>
+  <body>
+    <header>
+      <a href="/">{% firstof PORTAL_NAME "VERDICT" %}</a>
+      <nav>
+        <a href="/projects">Projects</a>
+        <a href="/api/docs/">API</a>
+        {% if user.is_authenticated %}
+          <span>{{ user.display_name|default:user.email }}</span>
+        {% else %}
+          <a href="/login">Sign in</a>
+        {% endif %}
+      </nav>
+    </header>
+    <main>
+      {% block content %}{% endblock %}
+    </main>
+    <footer>
+      <p>VERDICT &mdash; self-hostable hackathon portal.</p>
+    </footer>
+    {% block page_actions %}{% endblock %}
+    {% block extra_js %}{% endblock %}
+  </body>
+</html>

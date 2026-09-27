@@ -15,7 +15,9 @@ REPO_DIR = BASE_DIR.parent
 DATA_DIR = Path(os.environ.get("DATA_DIR") or (REPO_DIR / ".data")).resolve()
 FIXTURES_PATH = Path(os.environ.get("FIXTURES_PATH") or (REPO_DIR / "fixtures.json")).resolve()
 MEDIA_ROOT = DATA_DIR / "media"
-STATIC_ROOT = DATA_DIR / "static"
+# Overridable so the image can collectstatic into a baked directory: /data is a
+# volume at runtime and would otherwise shadow whatever the build produced.
+STATIC_ROOT = Path(os.environ.get("STATIC_ROOT") or (DATA_DIR / "static")).resolve()
 
 DEBUG = os.environ.get("DEBUG", "0") == "1"
 DEMO_MODE = os.environ.get("DEMO_MODE", "0") == "1"
@@ -208,8 +210,8 @@ REST_FRAMEWORK = {
         "user": "1200/min",
         "login": "10/15min",
     },
-    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
-    "PAGE_SIZE": 48,
+    "DEFAULT_PAGINATION_CLASS": "core.pagination.VerdictPagination",
+    "PAGE_SIZE": 50,
 }
 
 SPECTACULAR_SETTINGS = {
@@ -218,6 +220,10 @@ SPECTACULAR_SETTINGS = {
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
     "SCHEMA_PATH_PREFIX": "/api/v1",
+    # Everything is served from the vendored sidecar: no CDN, no network at runtime.
+    "SWAGGER_UI_DIST": "SIDECAR",
+    "SWAGGER_UI_FAVICON_HREF": "SIDECAR",
+    "REDOC_DIST": "SIDECAR",
 }
 
 DATA_UPLOAD_MAX_MEMORY_SIZE = 6 * 1024 * 1024  # rule 9: images are capped at 5 MB

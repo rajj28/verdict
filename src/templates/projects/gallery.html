@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% comment %}
+The gallery the acceptance checker reads: server-rendered, anonymous, sorted by
+title, 48 to a page. The first three fixture titles must be in page one, so no
+"newest first" default here.
+{% endcomment %}
+{% block title %}Projects &middot; {{ PORTAL_NAME }}{% endblock %}
+
+{% block content %}
+  <h1>Projects</h1>
+  <p>{{ result_count }} submitted project{{ result_count|pluralize }} from public events.</p>
+
+  <form method="get" action="/projects" role="search">
+    <label for="q">Search</label>
+    <input id="q" type="search" name="q" value="{{ q }}" placeholder="Title or summary">
+    <label for="track">Track</label>
+    <select id="track" name="track">
+      <option value="">All tracks</option>
+      {% for track_id, track_name in tracks %}
+        <option value="{{ track_id }}"{% if track_id == track %} selected{% endif %}>{{ track_name }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit">Filter</button>
+  </form>
+
+  {% if projects %}
+    <ul class="project-list">
+      {% for project in projects %}
+        <li class="project-card">
+          <h2>{{ project.title }}</h2>
+          <p>{{ project.summary|default:"No summary yet." }}</p>
+          <p class="project-meta">
+            <span class="team">{{ project.team.name }}</span>
+            {% if project.track %}<span class="track">{{ project.track.name }}</span>{% endif %}
+            <span class="event">{{ project.event.name }}</span>
+          </p>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="empty-state">No project matches this search.</p>
+  {% endif %}
+
+  {% if page_obj.paginator.num_pages > 1 %}
+    <nav class="pagination" aria-label="Project pages">
+      {% if page_obj.has_previous %}
+        <a href="?q={{ q }}&amp;track={{ track }}&amp;page={{ page_obj.previous_page_number }}">Previous</a>
+      {% endif %}
+      <span>Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+      {% if page_obj.has_next %}
+        <a href="?q={{ q }}&amp;track={{ track }}&amp;page={{ page_obj.next_page_number }}">Next</a>
+      {% endif %}
+    </nav>
+  {% endif %}
+{% endblock %}

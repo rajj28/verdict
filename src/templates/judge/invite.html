@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% comment %}
+The judge invitation landing page. Reading it changes nothing: the only write
+is the Accept button, which posts to the invitation endpoint through
+api-forms.js. The token arrives as ?token=… so it stays out of the access log.
+{% endcomment %}
+{% block title %}Judge invitation &middot; {{ PORTAL_NAME }}{% endblock %}
+
+{% block heading %}
+  {% if event %}Judge {{ event.name }}{% else %}This judge invitation{% endif %}
+{% endblock %}
+{% block lead %}
+  {% if event %}
+    You have been invited to judge {{ event.name }}.
+  {% else %}
+    An invitation to judge a {{ PORTAL_NAME }} event.
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+  <div class="row justify-content-center">
+    <div class="col-12 col-lg-7">
+      {% if problem %}
+        <div class="empty-state">
+          <h2>This link cannot be used</h2>
+          <p class="mb-3">{{ problem }}</p>
+          {% if not signed_in %}
+            <div class="d-flex flex-wrap gap-2 justify-content-center">
+              <a class="btn btn-primary" href="{{ login_url }}">Sign in</a>
+              <a class="btn btn-outline-primary" href="{{ register_url }}">Create an account</a>
+            </div>
+          {% else %}
+            <a class="btn btn-outline-primary" href="/events/">Browse the events</a>
+          {% endif %}
+        </div>
+      {% elif not signed_in %}
+        <div class="card-verdict p-4">
+          <h2 class="section-title">Sign in to accept</h2>
+          <p class="text-muted-verdict">
+            This invitation was sent to {{ invited_email }}. Sign in with that address
+            (or create an account with it) and you will come straight back here.
+          </p>
+          <div class="d-flex flex-wrap gap-2">
+            <a class="btn btn-primary" href="{{ login_url }}">Sign in</a>
+            <a class="btn btn-outline-primary" href="{{ register_url }}">Create an account</a>
+          </div>
+        </div>
+      {% else %}
+        <div class="card-verdict p-4">
+          <h2 class="section-title">Accept the invitation</h2>
+          <p class="text-muted-verdict">
+            You will be added to {{ event.name }} as a judge{% if tracks %}
+              for {% for track in tracks %}{{ track.name }}{% if not forloop.last %}, {% endif %}{% endfor %}{% endif %}.
+          </p>
+          <p class="form-hint">
+            Your reviews stay private: the other judges never see your scores, and your
+            comment is read only by the organizers.
+          </p>
+          <form method="post" action="/api/v1/judge-invites/{{ token }}/accept"
+                data-api-method="POST" data-api-url="/api/v1/judge-invites/{{ token }}/accept"
+                data-success="redirect:/judge" novalidate>
+            <div data-form-errors role="alert"></div>
+            <button class="btn btn-primary" type="submit">Accept and open my queue</button>
+            <a class="btn btn-link" href="/events/">Not now</a>
+          </form>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+{% endblock %}

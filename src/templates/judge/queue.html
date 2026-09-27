@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% load portal_tags %}
+{% comment %}
+The judge console: the caller's own assignments across every event they judge,
+grouped by event with submitted/assigned progress. Read-only: every write on
+the review pages goes through the JSON API, never from this page.
+{% endcomment %}
+{% block title %}Judge console &middot; {{ PORTAL_NAME }}{% endblock %}
+{% block description %}Your judging queue: the projects assigned to you, your progress per event, and where you left off.{% endblock %}
+
+{% block heading %}Judge console{% endblock %}
+{% block lead %}
+  Everything assigned to you, and nothing that is not. You never see another
+  judge's queue, name or score.
+{% endblock %}
+
+{% block content %}
+  {% for group in groups %}
+    <section class="mb-4" aria-labelledby="queue-{{ group.event.slug }}">
+      <div class="d-flex flex-wrap justify-content-between align-items-baseline gap-2 mb-2">
+        <h2 class="h4 mb-0" id="queue-{{ group.event.slug }}">{{ group.event.name }}</h2>
+        {% if group.window_open %}
+          <span class="status-badge status-judging">Judging open</span>
+        {% else %}
+          <span class="status-badge status-closed">Judging closed</span>
+        {% endif %}
+      </div>
+
+      <div class="card-verdict p-4 mb-2">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-2">
+          <p class="mb-0 num">
+            <strong>{{ group.submitted }}</strong> of {{ group.assigned }} reviews submitted
+          </p>
+          {% if group.event.judging_close_at %}
+            <p class="mb-0 form-hint">
+              Judging closes
+              <time datetime="{{ group.event.judging_close_at|date:'c' }}"
+                    data-countdown data-countdown-label="judging closes">{{ group.event.judging_close_at|utc }}</time>
+            </p>
+          {% else %}
+            <p class="mb-0 form-hint">No judging deadline: judging stays open until the organizer closes it.</p>
+          {% endif %}
+        </div>
+        <div class="progress" role="progressbar" aria-label="Reviews submitted for {{ group.event.name }}"
+             aria-valuenow="{{ group.percent }}" aria-valuemin="0" aria-valuemax="100">
+          <div class="progress-bar" style="width: {{ group.percent }}%"></div>
+        </div>
+      </div>
+
+      {% if group.continue %}
+        <p class="form-hint mb-2">
+          Continue where you left off:
+          <a class="link-underline" href="{{ group.continue.url }}">{{ group.continue.project.title }}</a>
+        </p>
+      {% endif %}
+
+      <div class="table-responsive">
+        <table class="data-table">
+          <caption class="visually-hidden">Your assignments in {{ group.event.name }}</caption>
+          <thead>
+            <tr>
+              <th scope="col">Project</th>
+              <th scope="col">Track</th>
+              <th scope="col">Status</th>
+              <th scope="col"><span class="visually-hidden">Action</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in group.rows %}
+              <tr>
+                <td>
+                  <a class="link-underline" href="{{ row.url }}">{{ row.project.title }}</a>
+                  <div class="form-hint">{{ row.project.team.name }}</div>
+                </td>
+                <td>
+                  {% if row.project.track %}<span class="track-badge">{{ row.project.track.name }}</span>
+                  {% else %}<span class="form-hint">&mdash;</span>{% endif %}
+                </td>
+                <td><span class="status-badge {{ row.status_badge }}">{{ row.status_label }}</span></td>
+                <td class="text-end">
+                  <a class="btn btn-sm btn-outline-primary" href="{{ row.url }}">
+                    {% if row.status == 'submitted' %}View{% else %}Review{% endif %}
+                  </a>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% empty %}
+    <div class="empty-state">
+      <h2>No assignments yet</h2>
+      <p class="mb-3">
+        You are a judge, but no project is assigned to you. The organizer assigns
+        projects per track; the queue fills up as soon as they do.
+      </p>
+      <a class="btn btn-outline-primary" href="/events/">Browse the events</a>
+    </div>
+  {% endfor %}
+{% endblock %}

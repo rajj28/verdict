@@ -1,0 +1,254 @@
+{% extends "base.html" %}
+{% load static portal_tags %}
+{% comment %}
+One review. Left: the evidence the judge scores. Right: the rubric, the comment
+and the two writes. Nothing here writes by itself: the buttons carry the
+data-api-* attributes api-forms.js reads, and the autosave timer in
+static/js/judge-console.js posts to the same review endpoint. The controls are
+also disabled once judging closes, but the service refuses the write either way.
+{% endcomment %}
+{% block title %}{{ project.title }} &middot; review &middot; {{ PORTAL_NAME }}{% endblock %}
+{% block description %}Review {{ project.title }} for {{ event.name }}.{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="Breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/judge">Judge console</a></li>
+    <li class="breadcrumb-item"><a href="/events/{{ event.slug }}/">{{ event.name }}</a></li>
+    <li class="breadcrumb-item active" aria-current="page">{{ project.title }}</li>
+  </ol>
+</nav>
+{% endblock %}
+
+{% block heading %}{{ project.title }}{% endblock %}
+{% block lead %}
+  {{ team.name }}{% if track %} &mdash; {{ track.name }}{% endif %}
+  &mdash; revision {{ project.revision }} &mdash; <span class="mono">{{ project.public_id }}</span>
+{% endblock %}
+
+{% block page_actions %}
+  <span class="status-badge {{ submitted|yesno:'status-submitted,status-in-progress' }}">
+    {% if submitted %}Review submitted{% else %}In progress{% endif %}
+  </span>
+  <button type="button" class="btn btn-sm btn-link p-0" data-shortcuts-toggle
+          aria-label="Keyboard shortcuts">Shortcuts</button>
+  <div class="d-none" id="judge-shortcuts" role="tooltip">
+    <dl class="mb-2">
+      <dt><kbd>1</kbd>&ndash;<kbd>9</kbd></dt><dd class="mb-1">Score the focused criterion</dd>
+      <dt><kbd>&uarr;</kbd> <kbd>&darr;</kbd></dt><dd class="mb-1">Move between criteria</dd>
+      <dt><kbd>s</kbd></dt><dd class="mb-1">Submit this review</dd>
+      <dt><kbd>n</kbd> / <kbd>p</kbd></dt><dd class="mb-1">Next / previous assignment</dd>
+    </dl>
+    <p class="mb-0 form-hint">Shortcuts are ignored while you are typing a comment.</p>
+  </div>
+  {% if previous %}
+    <a class="btn btn-outline-primary" href="{{ previous.url }}" rel="prev">&larr; Previous</a>
+  {% else %}
+    <span class="btn btn-outline-primary disabled" aria-disabled="true">&larr; Previous</span>
+  {% endif %}
+  {% if next %}
+    <a class="btn btn-outline-primary" href="{{ next.url }}" rel="next">Next &rarr;</a>
+  {% else %}
+    <span class="btn btn-outline-primary disabled" aria-disabled="true">Next &rarr;</span>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+  {% if not window_open %}
+    <div class="alert alert-warning" role="alert">
+      <h2 class="h5 alert-heading">Judging is closed</h2>
+      <p class="mb-0">
+        {% if event.judging_close_at %}
+          Judging closed on
+          <time datetime="{{ event.judging_close_at|date:'c' }}">{{ event.judging_close_at|utc }}</time>.
+        {% else %}
+          The organizer has closed judging for this event.
+        {% endif %}
+        This page is read-only now, and the service refuses any further writes.
+      </p>
+    </div>
+  {% elif not editable %}
+    <div class="alert alert-info" role="alert">
+      <h2 class="h5 alert-heading">Read-only</h2>
+      <p class="mb-0">
+        Only the judges assigned to this project can score it, and only while
+        judging is open. You are reading the evidence, not editing a review.
+      </p>
+    </div>
+  {% endif %}
+
+  <div class="row g-4">
+    {# ---------- left: the evidence ---------- #}
+    <div class="col-12 col-lg-7">
+      <article class="card-verdict p-4">
+        <h2 class="section-title">What the team built</h2>
+        <p class="lead">{{ project.summary }}</p>
+
+        {% if project.thumbnail %}
+          <img class="w-100 rounded mb-3" src="{{ project.thumbnail.url }}"
+               alt="Screenshot of {{ project.title }}">
+        {% endif %}
+
+        {% if project.description %}
+          <div class="mb-3">{{ project.description|linebreaksbr }}</div>
+        {% else %}
+          <p class="form-hint">The team wrote no description.</p>
+        {% endif %}
+
+        <h3 class="section-title">Links</h3>
+        <ul class="list-unstyled d-flex flex-wrap gap-3 mb-0">
+          {% if project.repo_url %}
+            <li><a href="{{ project.repo_url }}" rel="noopener noreferrer nofollow ugc">Repository</a></li>
+          {% endif %}
+          {% if project.live_url %}
+            <li><a href="{{ project.live_url }}" rel="noopener noreferrer nofollow ugc">Live demo</a></li>
+          {% endif %}
+          {% if project.demo_video_url %}
+            <li><a href="{{ project.demo_video_url }}" rel="noopener noreferrer nofollow ugc">Demo video</a></li>
+          {% endif %}
+          {% if not project.repo_url and not project.live_url and not project.demo_video_url %}
+            <li class="form-hint">No links were added.</li>
+          {% endif %}
+        </ul>
+      </article>
+
+      {% if project.tech_tags %}
+        <section class="card-verdict p-4 mt-3">
+          <h2 class="section-title">Built with</h2>
+          <p class="d-flex flex-wrap gap-1 mb-0">
+            {% for tag_name in project.tech_tags %}<span class="tag-pill">{{ tag_name }}</span>{% endfor %}
+          </p>
+        </section>
+      {% endif %}
+
+      {% if answers %}
+        <section class="card-verdict p-4 mt-3">
+          <h2 class="section-title">Answers</h2>
+          {% for answer in answers %}
+            <h3 class="form-label">
+              {{ answer.question.prompt }}
+              {% if not answer.question.is_public %}
+                <span class="tag-pill">private to judges and organizers</span>
+              {% endif %}
+            </h3>
+            {% if answer.value %}
+              <p class="mb-3">{{ answer.value|linebreaksbr }}</p>
+            {% else %}
+              <p class="form-hint mb-3">No answer given.</p>
+            {% endif %}
+          {% endfor %}
+        </section>
+      {% endif %}
+
+      {% if images %}
+        <section class="mt-3">
+          <h2 class="section-title">Screenshots</h2>
+          <div class="row g-3">
+            {% for image in images %}
+              <div class="col-12 col-sm-6">
+                <figure class="card-verdict p-2 mb-0 h-100">
+                  <img class="w-100 rounded" src="{{ image.image.url }}"
+                       alt="{{ image.caption|default:project.title }}" loading="lazy">
+                  {% if image.caption %}
+                    <figcaption class="form-hint mt-1">{{ image.caption }}</figcaption>
+                  {% endif %}
+                </figure>
+              </div>
+            {% endfor %}
+          </div>
+        </section>
+      {% endif %}
+    </div>
+
+    {# ---------- right: the rubric ---------- #}
+    <div class="col-12 col-lg-5">
+      <section class="card-verdict p-4" data-review data-draft-url="{{ draft_url }}"
+               data-readonly="{% if editable %}0{% else %}1{% endif %}">
+        <div class="d-flex flex-wrap justify-content-between align-items-end gap-2 mb-3">
+          <div>
+            <h2 class="section-title mb-0">Rubric</h2>
+            <p class="form-hint mb-0">Every criterion is required before a review can be submitted.</p>
+          </div>
+          <div class="text-end">
+            <div class="stat-label">Weighted score</div>
+            <div class="h3 mb-0 num" data-score-preview>&mdash;</div>
+          </div>
+        </div>
+
+        {% if criterion_rows %}
+          <form data-review-form novalidate>
+            {# api-forms.js serializes the form; scores live here as one JSON object
+               so the generic serializer can express the nested payload the
+               review endpoints take. judge-console.js keeps it in sync. #}
+            <input type="hidden" name="scores" data-type="json" data-scores-payload
+                   value="{{ scores_json }}">
+            <div data-form-errors role="alert" class="text-danger small mb-2"></div>
+
+            {% for row in criterion_rows %}
+              <fieldset class="pb-3 mb-3 border-bottom" data-criterion="{{ row.key }}"
+                        data-min="{{ row.criterion.min_score }}" data-max="{{ row.criterion.max_score }}"
+                        data-weight="{{ row.weight }}">
+                <legend class="d-flex flex-wrap justify-content-between align-items-baseline gap-2 mb-1">
+                  <span class="form-label mb-0">
+                    {{ row.name }}
+                    {% if row.shortcut %}<kbd class="ms-1">{{ row.shortcut }}</kbd>{% endif %}
+                  </span>
+                  <span class="form-hint num">{{ row.weight_percent }}% of the score</span>
+                </legend>
+                {% if row.description %}
+                  <p class="form-hint">{{ row.description }}</p>
+                {% endif %}
+                <div class="d-flex flex-wrap gap-1" role="radiogroup" aria-label="{{ row.name }}">
+                  {% for option in row.options %}
+                    <input class="btn-check" type="radio" name="{{ row.key }}" value="{{ option.value }}"
+                           id="score-{{ row.key }}-{{ option.value }}"
+                           {% if row.value == option.value %}checked{% endif %}
+                           {% if not editable %}disabled{% endif %}>
+                    <label class="btn btn-sm btn-outline-secondary" for="score-{{ row.key }}-{{ option.value }}">
+                      {{ option.label }}
+                    </label>
+                  {% endfor %}
+                </div>
+              </fieldset>
+            {% endfor %}
+
+            <div class="mb-3">
+              <label class="form-label" for="review-comment">
+                Comment for the organizers
+                <span class="form-hint">private to you and the organizers, never shown to the team</span>
+              </label>
+              <textarea class="form-control" id="review-comment" name="comment" rows="4"
+                        maxlength="2000" {% if not editable %}disabled{% endif %}>{{ comment }}</textarea>
+            </div>
+
+            <div class="d-flex flex-wrap align-items-center gap-2">
+              <button type="button" class="btn btn-outline-primary" data-save-draft
+                      data-api-method="PUT" data-api-url="{{ draft_url }}" data-success="reload">
+                Save draft
+              </button>
+              <button type="button" class="btn btn-primary" data-submit-review
+                      data-api-method="POST" data-api-url="{{ submit_url }}" data-success="redirect:/judge"
+                      data-confirm="Submit this review? It is final for scoring: the organizers can read it, and it counts towards the results.">
+                Submit review
+              </button>
+              <span class="form-hint ms-auto" data-save-state role="status">
+                {% if submitted %}Submitted{% elif review %}Draft saved{% else %}Nothing saved yet{% endif %}
+              </span>
+            </div>
+          </form>
+        {% else %}
+          <div class="alert alert-warning mb-0" role="alert">
+            <h3 class="h6 alert-heading">No rubric yet</h3>
+            <p class="mb-0">The organizer has not published scoring criteria, so there is nothing to score.</p>
+          </div>
+        {% endif %}
+      </section>
+    </div>
+  </div>
+{% endblock %}
+
+{% block extra_js %}
+  {% if criterion_rows %}
+    <script src="{% static 'js/judge-console.js' %}"></script>
+  {% endif %}
+{% endblock %}

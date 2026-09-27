@@ -9,8 +9,8 @@ from audit.api_urls import urlpatterns as audit_api
 from audit.urls import urlpatterns as audit_html
 from community.api_urls import urlpatterns as community_api
 from community.urls import urlpatterns as community_html
-from core.urls import urlpatterns as core_html
 from core.api_urls import urlpatterns as core_api
+from core.urls import urlpatterns as core_html
 from events.api_urls import urlpatterns as events_api
 from events.urls import urlpatterns as events_html
 from interop.api_urls import urlpatterns as interop_api
@@ -42,8 +42,8 @@ urlpatterns = [
     path("api/v1/", include(results_api)),
     path("api/v1/", include(accounts_api)),
     path("api/v1/", include(audit_api)),
-    path("api/v1/", include(interop_api)),
     path("api/v1/", include(community_api)),
+    path("api/v1/", include(interop_api)),
     path("api/v1/", include(core_api)),
     path("", include(core_html)),
     path("", include(events_html)),

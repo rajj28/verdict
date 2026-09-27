@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Embed gallery &middot; {{ event.name }}{% endblock %}
+{% block heading %}Embed gallery{% endblock %}
+{% block lead %}Copy this script tag to embed the public project gallery on another site.{% endblock %}
+{% block content %}
+<section class="mb-4">
+  <h2 class="h4">Embed snippet</h2>
+  <pre class="p-3 bg-body-tertiary border rounded"><code>{{ snippet }}</code></pre>
+  <p class="form-hint">The widget loads only submitted public projects. It can be framed from any origin; the embed page itself does not set cookies.</p>
+</section>
+<section>
+  <h2 class="h4">Live preview</h2>
+  <iframe class="w-100 border rounded" title="{{ event.name }} project gallery preview"
+          src="{{ iframe_url }}" loading="lazy" style="min-height: 320px"></iframe>
+</section>
+{% endblock %}

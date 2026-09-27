@@ -21,6 +21,7 @@ STATIC_ROOT = Path(os.environ.get("STATIC_ROOT") or (DATA_DIR / "static")).resol
 
 DEBUG = os.environ.get("DEBUG", "0") == "1"
 DEMO_MODE = os.environ.get("DEMO_MODE", "0") == "1"
+WEBHOOKS_ALLOW_PRIVATE = os.environ.get("WEBHOOKS_ALLOW_PRIVATE") == "1"
 
 
 def _secret_key() -> str:

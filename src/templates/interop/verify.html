@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Verify judge record{% endblock %}
+{% block heading %}Verify a judge record{% endblock %}
+{% block lead %}Paste a JSON record document and verify its signature against this instance's published public keys.{% endblock %}
+{% block content %}
+<form data-api-method="POST" data-api-url="/api/v1/records/verify"
+      data-response-field="reason" data-response-target="#verify-result">
+  <label class="form-label" for="record-document">Signed record JSON</label>
+  <textarea class="form-control font-monospace mb-2" id="record-document" name="document" rows="12" data-type="json" required></textarea>
+  <div data-form-errors class="text-danger mb-2" role="alert"></div>
+  <button class="btn btn-primary" type="submit">Verify record</button>
+</form>
+<p id="verify-result" class="mt-3" aria-live="polite"></p>
+{% endblock %}

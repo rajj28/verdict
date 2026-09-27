@@ -22,10 +22,11 @@ class SecurityHeadersMiddleware:
 
     def __call__(self, request):
         response = self.get_response(request)
-        path = request.path
-        if path.startswith("/embed/"):
+        match = getattr(request, "resolver_match", None)
+        is_embed_document = match is not None and match.url_name == "embed-gallery"
+        if is_embed_document:
             response["Content-Security-Policy"] = EMBED_CSP
-            response["X-Frame-Options"] = "SAMEORIGIN"
+            response.headers.pop("X-Frame-Options", None)
         else:
             response["Content-Security-Policy"] = CSP
             response["X-Frame-Options"] = "DENY"

@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Webhooks &middot; {{ event.name }}{% endblock %}
+{% block heading %}Webhooks{% endblock %}
+{% block lead %}Signed notifications for audit actions in {{ event.name }}.{% endblock %}
+{% block page_actions %}
+  <a class="btn btn-outline-secondary" href="/manage/{{ event.slug }}/embed">Embed gallery</a>
+  <a class="btn btn-outline-secondary" href="/manage/{{ event.slug }}/certificates">Certificates</a>
+{% endblock %}
+{% block content %}
+<section class="mb-4">
+  <h2 class="h4">Add an endpoint</h2>
+  <form data-api-method="POST" data-api-url="/api/v1/events/{{ event.slug }}/webhooks"
+        data-response-field="secret" data-response-target="#new-webhook-secret" data-response-reveal="#new-webhook-secret-box">
+    <label class="form-label" for="webhook-url">URL</label>
+    <input class="form-control mb-2" id="webhook-url" name="url" type="url" required placeholder="https://example.org/hooks">
+    <label class="form-label" for="webhook-events">Event types</label>
+    <input class="form-control mb-2" id="webhook-events" name="event_types" value="*" data-type="list">
+    <p class="form-hint">Enter comma-separated audit action names, or * for every action. Private, loopback and link-local destinations are refused unless WEBHOOKS_ALLOW_PRIVATE=1 is set for an offline demo.</p>
+    <div data-form-errors class="text-danger mb-2" role="alert"></div>
+    <button class="btn btn-primary" type="submit">Add endpoint</button>
+  </form>
+  <div id="new-webhook-secret-box" class="alert alert-warning mt-3 d-none" hidden>
+    Copy this secret now; it is shown only once: <code id="new-webhook-secret"></code>
+  </div>
+</section>
+<section class="mb-4">
+  <h2 class="h4">Endpoints</h2>
+  <div class="list-group">
+    {% for endpoint in endpoints %}
+      <div class="list-group-item d-flex flex-wrap align-items-center justify-content-between gap-2">
+        <div><strong>{{ endpoint.public_id }}</strong> &middot; {{ endpoint.url }}
+          <div class="form-hint">{{ endpoint.event_types|join:", " }} &middot; {% if endpoint.is_active %}Active{% else %}Disabled{% endif %}</div>
+        </div>
+        <div class="d-flex gap-2">
+          <button class="btn btn-sm btn-outline-primary" data-api-method="POST"
+                  data-api-url="/api/v1/events/{{ event.slug }}/webhooks/{{ endpoint.public_id }}/test"
+                  data-success="reload">Send test</button>
+          {% if endpoint.is_active %}
+            <button class="btn btn-sm btn-outline-danger" data-api-method="DELETE"
+                    data-api-url="/api/v1/events/{{ event.slug }}/webhooks/{{ endpoint.public_id }}"
+                    data-success="reload">Disable</button>
+          {% endif %}
+        </div>
+      </div>
+    {% empty %}
+      <p class="form-hint">No webhook endpoints configured.</p>
+    {% endfor %}
+  </div>
+</section>
+<section>
+  <h2 class="h4">Recent deliveries</h2>
+  <div class="table-responsive">
+    <table class="data-table">
+      <thead><tr><th>Event</th><th>Endpoint</th><th>Status</th><th>Attempt</th><th>HTTP</th><th>Time</th><th>Error</th><th></th></tr></thead>
+      <tbody>
+        {% for delivery in deliveries %}
+          <tr>
+            <td>{{ delivery.event_type }}</td><td>{{ delivery.endpoint.public_id }}</td>
+            <td>{{ delivery.get_status_display }}</td><td>{{ delivery.attempt }}</td>
+            <td>{{ delivery.status_code|default:"—" }}</td><td>{{ delivery.response_ms|default:"—" }} ms</td><td>{{ delivery.error }}</td>
+            <td><button class="btn btn-sm btn-outline-secondary" data-api-method="POST"
+                        data-api-url="/api/v1/events/{{ event.slug }}/webhook-deliveries/{{ delivery.public_id }}/replay"
+                        data-success="reload">Replay</button></td>
+          </tr>
+        {% empty %}<tr><td colspan="8">No deliveries yet.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Judge record &middot; {{ record.record.event.name }}{% endblock %}
+{% block heading %}Judge participation record{% endblock %}
+{% block lead %}A cryptographically signed record that can be verified offline.{% endblock %}
+{% block content %}
+<p><strong>{{ record.record.judge.display_name }}</strong> submitted {{ record.record.reviews_submitted }} review(s) for {{ record.record.event.name }}.</p>
+{% if record.revoked_at %}<p class="alert alert-warning">This record has been revoked.</p>{% endif %}
+<pre class="p-3 bg-body-tertiary border rounded"><code>{{ document }}</code></pre>
+<a class="btn btn-outline-primary" href="/verify">Verify a record</a>
+{% endblock %}

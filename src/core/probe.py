@@ -309,6 +309,22 @@ def _attacks(f):
                "participant", (400,),
                "Ballot cost is recomputed and capped by the configured budget.",
                request_kind="quadratic_over_budget", must_contain="budget_exceeded"),
+        Attack("certificate-other-user-refused", "CERTIFICATES",
+               "A participant cannot view another team's certificate",
+               "GET", f"/events/{event}/certificates/participation/{f['other_track'].public_id}",
+               "participant", (403,),
+               "Certificates are private to the named participant or event organizers.",
+               request_kind="certificate_other_user"),
+        Attack("tampered-record-invalid", "SIGNED RECORDS",
+               "A tampered judge record fails signature verification",
+               "POST", "/api/v1/records/verify", "organizer", (200,),
+               "Record payload changes invalidate its Ed25519 signature.",
+               {"event": event}, request_kind="tampered_record", must_contain='"valid":false'),
+        Attack("webhook-loopback-refused", "WEBHOOKS",
+               "An organizer cannot configure a loopback webhook destination",
+               "POST", f"/api/v1/events/{event}/webhooks", "organizer", (400,),
+               "Webhook targets cannot resolve to loopback, private, or link-local addresses.",
+               {"url": "http://127.0.0.1:8765/hook", "event_types": ["*"]}),
     ]
     return cases
 
@@ -336,6 +352,24 @@ def _perform(case: Attack, clients, tokens):
         project = Project.objects.filter(event=ballot.voter.event, status=ProjectStatus.SUBMITTED).first()
         data = json.dumps({"items": [{"project": project.public_id, "votes": 5}]})
         return client.put(url, data=data, content_type="application/json", **headers)
+    if case.request_kind == "certificate_other_user":
+        client.force_login(clients["participant_user"])
+        return client.get(case.path)
+    if case.request_kind == "tampered_record":
+        from interop.models import JudgeParticipationRecord
+        from interop.signing import record_document
+
+        event_slug = case.body["event"]
+        review = Review.objects.filter(event__slug=event_slug, judge__user=clients["judge_user"]).first()
+        review.status = "submitted"
+        review.submitted_at = now()
+        review.save(update_fields=["status", "submitted_at"])
+        issue_path = f"/api/v1/events/{event_slug}/judge-records"
+        client.post(issue_path, data="{}", content_type="application/json", **headers)
+        record = JudgeParticipationRecord.objects.get(event__slug=event_slug)
+        document = record_document(record)
+        document["record"]["judge"]["display_name"] += " tampered"
+        return client.post(case.path, data=json.dumps(document), content_type="application/json", **headers)
     if case.request_kind == "image":
         return client.post(
             case.path,
@@ -416,6 +450,7 @@ def run_probe(*, actor=None, event=None) -> dict:
                 issued.append(revoked_row)
                 revoke_token(revoked_row)
                 clients["participant_user"] = fixture["participant"]
+                clients["judge_user"] = fixture["judge"]
                 request_logger = logging.getLogger("django.request")
                 original_disabled = request_logger.disabled
                 request_logger.disabled = True

@@ -1,0 +1,39 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ event.name }} projects</title>
+  <link rel="stylesheet" href="{% static 'vendor/bootstrap/bootstrap.min.css' %}">
+  <link rel="stylesheet" href="{% static 'css/app.css' %}">
+</head>
+<body class="bg-body">
+  <main class="container-fluid p-3">
+    <h1 class="h3">{{ event.name }} projects</h1>
+    <form method="get" class="row g-2 mb-3">
+      <div class="col"><label class="visually-hidden" for="embed-search">Search projects</label><input class="form-control" id="embed-search" name="q" value="{{ query }}" placeholder="Search projects"></div>
+      <div class="col-auto"><label class="visually-hidden" for="embed-track">Filter by track</label>
+        <select class="form-select" id="embed-track" name="track"><option value="">All tracks</option>{% for track in tracks %}<option value="{{ track.public_id }}"{% if selected_track == track.public_id %} selected{% endif %}>{{ track.name }}</option>{% endfor %}</select>
+      </div>
+      <div class="col-auto"><button class="btn btn-primary" type="submit">Filter</button></div>
+    </form>
+    <div class="row g-3">
+      {% for project in projects %}
+        <article class="col-12 col-md-6 col-xl-4">
+          <div class="card h-100">
+            {% if project.thumbnail %}<img class="card-img-top" src="{{ project.thumbnail.url }}" alt="">{% endif %}
+            <div class="card-body">
+              <h2 class="h5">{{ project.title }}</h2>
+              <p>{{ project.summary }}</p>
+              {% if project.track %}<span class="badge text-bg-secondary">{{ project.track.name }}</span>{% endif %}
+              <p class="small text-body-secondary mt-2">{{ project.team.name }}</p>
+            </div>
+          </div>
+        </article>
+      {% empty %}<p>No public submitted projects match.</p>{% endfor %}
+    </div>
+  </main>
+  <script src="/embed/{{ event.slug }}.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Certificate &middot; {{ event.name }}{% endblock %}
+{% block extra_css %}
+<style>
+  @page { size: A4 landscape; margin: 16mm; }
+  @media print {
+    nav, footer, .toast-container, .page-actions, .demo-ribbon { display: none !important; }
+    main { max-width: none !important; padding: 0 !important; }
+    .certificate { border: 4px double #222 !important; min-height: 150mm; }
+  }
+</style>
+{% endblock %}
+{% block heading %}{{ event.name }} certificate{% endblock %}
+{% block lead %}{% if code_valid %}Certificate verification code is valid.{% else %}Certificate verification code is invalid.{% endif %}{% endblock %}
+{% block page_actions %}<button class="btn btn-primary" type="button" data-print-page>Print</button>{% endblock %}
+{% block extra_js %}<script src="/static/js/certificates.js" defer></script>{% endblock %}
+{% block content %}
+<article class="certificate border border-3 rounded-4 p-5 text-center">
+  <p class="text-uppercase text-secondary">{{ event.name }}</p>
+  <h2 class="display-5 mb-4">
+    {% if kind == "participation" %}Certificate of Participation{% elif kind == "judge" %}Certificate of Judging{% else %}Winner Certificate{% endif %}
+  </h2>
+  <p class="lead">Presented to</p>
+  <h3 class="display-6">{{ certificate.subject }}</h3>
+  {% if certificate.people %}<p>{{ certificate.people|join:", " }}</p>{% endif %}
+  {% if certificate.project %}<p>For {{ certificate.project }}</p>{% endif %}
+  {% if certificate.detail %}<p>{{ certificate.detail }}</p>{% endif %}
+  <p>{{ event.name }}{% if certificate.issued_at %} &middot; {{ certificate.issued_at|date:"F j, Y" }}{% endif %}</p>
+  <hr>
+  <p class="mb-1">Verification code: <strong>{{ verification_code }}</strong></p>
+  <p class="small text-break">{{ verification_url }}</p>
+</article>
+{% endblock %}

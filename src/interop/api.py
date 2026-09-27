@@ -9,14 +9,17 @@ import json
 from django.http import HttpResponse
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core.errors import ApiError
 from events.policy import get_event_by_slug, is_organizer
+from interop import policy, services
 from interop.exports import EXPORT_KINDS, event_json, export_csv
+from interop.certificates import certificate_index, verification_code
+from core.csvutil import write_csv
 
 
 def _get_event(slug: str):
@@ -171,3 +174,127 @@ class ImportView(APIView):
         except ApiError:
             raise
         return Response(report.as_dict(), status=201)
+
+
+class WebhookCollectionView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request: Request, slug: str) -> Response:
+        event = _get_event(slug)
+        _require_organizer(request.user, event)
+        rows = policy.visible_endpoints(request.user, event)
+        return Response({"endpoints": [{
+            "public_id": endpoint.public_id,
+            "url": endpoint.url,
+            "event_types": endpoint.event_types,
+            "is_active": endpoint.is_active,
+            "created_at": endpoint.created_at,
+        } for endpoint in rows]})
+
+    def post(self, request: Request, slug: str) -> Response:
+        event = _get_event(slug)
+        body = request.data
+        if not isinstance(body, dict):
+            raise ApiError("invalid", "Request body must be an object.", status_code=400)
+        endpoint, secret = services.create_endpoint(
+            request.user, event, url=body.get("url", ""), event_types=body.get("event_types", ["*"]),
+        )
+        return Response({
+            "public_id": endpoint.public_id,
+            "url": endpoint.url,
+            "event_types": endpoint.event_types,
+            "secret": secret,
+        }, status=201)
+
+
+class WebhookEndpointDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request: Request, slug: str, public_id: str) -> Response:
+        event = _get_event(slug)
+        endpoint = policy.visible_endpoints(request.user, event).filter(public_id=public_id).first()
+        if endpoint is None:
+            if not is_organizer(request.user, event):
+                _require_organizer(request.user, event)
+            raise ApiError("not_found", "Webhook endpoint was not found.", status_code=404)
+        endpoint = services.disable_endpoint(request.user, endpoint)
+        return Response({"public_id": endpoint.public_id, "is_active": endpoint.is_active})
+
+
+class WebhookEndpointTestView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request: Request, slug: str, public_id: str) -> Response:
+        event = _get_event(slug)
+        endpoint = policy.visible_endpoints(request.user, event).filter(public_id=public_id).first()
+        if endpoint is None:
+            if not is_organizer(request.user, event):
+                _require_organizer(request.user, event)
+            raise ApiError("not_found", "Webhook endpoint was not found.", status_code=404)
+        delivery = services.test_endpoint(request.user, endpoint)
+        return Response({"delivery_id": delivery.public_id, "status": delivery.status}, status=202)
+
+
+class WebhookDeliveryReplayView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request: Request, slug: str, public_id: str) -> Response:
+        event = _get_event(slug)
+        delivery = policy.visible_deliveries(request.user, event).filter(public_id=public_id).first()
+        if delivery is None:
+            if not is_organizer(request.user, event):
+                _require_organizer(request.user, event)
+            raise ApiError("not_found", "Webhook delivery was not found.", status_code=404)
+        replay = services.replay(request.user, delivery)
+        return Response({"delivery_id": replay.public_id, "status": replay.status}, status=202)
+
+
+class CertificateExportView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request: Request, slug: str) -> HttpResponse:
+        event = _get_event(slug)
+        _require_organizer(request.user, event)
+        rows = []
+        for item in certificate_index(event):
+            code = verification_code(event, item["kind"], item["public_id"])
+            url = request.build_absolute_uri(
+                f"/certificates/verify/{event.slug}/{item['kind']}/{item['public_id']}?code={code}"
+            )
+            rows.append([item["kind"], item["public_id"], code, url])
+        response = HttpResponse(write_csv(["kind", "public_id", "verification_code", "url"], rows),
+                                content_type="text/csv; charset=utf-8")
+        response["Content-Disposition"] = f'attachment; filename="{event.slug}-certificates.csv"'
+        return response
+
+
+class JudgeRecordBulkIssueView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request: Request, slug: str) -> Response:
+        event = _get_event(slug)
+        rows = services.issue_judge_records(request.user, event)
+        return Response({"records": [row.record_id for row in rows], "count": len(rows)})
+
+
+class JudgeRecordRevokeView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request: Request, slug: str, record_id: str) -> Response:
+        event = _get_event(slug)
+        record = policy.visible_records(request.user, event).filter(record_id=record_id).first()
+        if record is None:
+            if not is_organizer(request.user, event):
+                _require_organizer(request.user, event)
+            raise ApiError("not_found", "Judge record was not found.", status_code=404)
+        record = services.revoke_judge_record(request.user, record)
+        return Response({"record_id": record.record_id, "revoked": record.revoked_at is not None})
+
+
+class RecordVerifyView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def post(self, request: Request) -> Response:
+        valid, reason = services.verify_submission(request.data)
+        return Response({"valid": valid, "reason": reason})

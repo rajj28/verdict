@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Certificates &middot; {{ event.name }}{% endblock %}
+{% block heading %}Certificates{% endblock %}
+{% block lead %}Printable participation, judging and winner certificates for {{ event.name }}.{% endblock %}
+{% block page_actions %}
+  <a class="btn btn-primary" href="/manage/{{ event.slug }}/certificates?print=1">Print all</a>
+  <a class="btn btn-outline-secondary" href="/api/v1/events/{{ event.slug }}/certificates.csv">Verification codes CSV</a>
+{% endblock %}
+{% block content %}
+<div class="list-group">
+  {% for certificate in certificates %}
+    <a class="list-group-item list-group-item-action" href="/events/{{ event.slug }}/certificates/{{ certificate.kind }}/{{ certificate.public_id }}">
+      {{ certificate.label }} <span class="form-hint">Code {{ certificate.code }}</span>
+    </a>
+  {% empty %}<p class="form-hint">No certificates are available yet.</p>{% endfor %}
+</div>
+<section class="mt-5">
+  <h2 class="h4">Signed judge participation records</h2>
+  <p class="form-hint">Bulk issuance is available after judging closes. Records are public and independently verifiable.</p>
+  <button class="btn btn-outline-primary mb-3" data-api-method="POST"
+          data-api-url="/api/v1/events/{{ event.slug }}/judge-records" data-success="reload">Issue records for all judges</button>
+  <div class="list-group">
+    {% for record in records %}
+      <div class="list-group-item d-flex flex-wrap justify-content-between gap-2">
+        <div><a href="/records/{{ record.record_id }}">{{ record.record.judge.display_name }}</a>
+          &middot; {{ record.record.reviews_submitted }} submitted review(s)
+          {% if record.revoked_at %}<span class="badge text-bg-warning">Revoked</span>{% endif %}
+        </div>
+        {% if not record.revoked_at %}
+          <button class="btn btn-sm btn-outline-danger" data-api-method="POST"
+                  data-api-url="/api/v1/events/{{ event.slug }}/judge-records/{{ record.record_id }}/revoke"
+                  data-success="reload">Revoke</button>
+        {% endif %}
+      </div>
+    {% empty %}<p class="form-hint">No signed judge records issued.</p>{% endfor %}
+  </div>
+</section>
+{% endblock %}

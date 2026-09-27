@@ -42,7 +42,7 @@ class IntegrityProbeTests(TestCase):
         }
         report = run_probe()
         self.assertTrue(report["ok"], report["cases"])
-        self.assertEqual(report["total"], 25)
+        self.assertEqual(report["total"], 28)
         self.assertTrue(all(case["passed"] for case in report["cases"]))
         self.assertEqual(
             next(case["path"] for case in report["cases"] if case["key"] == "participant-join-after-deadline"),
@@ -103,7 +103,7 @@ class IntegrityProbeTests(TestCase):
         client.credentials(HTTP_AUTHORIZATION=f"Bearer {plaintext}")
         response = client.post("/api/v1/integrity/probe", {}, format="json")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["total"], 25)
+        self.assertEqual(response.data["total"], 28)
         self.assertTrue(response.data["ok"])
 
     def test_organizer_must_scope_probe_to_their_event(self):

@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Print certificates &middot; {{ event.name }}{% endblock %}
+{% block extra_css %}
+<style>
+  @page { size: A4 landscape; margin: 16mm; }
+  @media print {
+    nav, footer, .toast-container, .page-actions, .demo-ribbon { display: none !important; }
+    main { max-width: none !important; padding: 0 !important; }
+    .certificate-sheet { break-after: page; min-height: 150mm; border: 4px double #222 !important; }
+  }
+</style>
+{% endblock %}
+{% block heading %}Print all certificates{% endblock %}
+{% block lead %}Use your browser's print dialog to print or save each certificate as PDF.{% endblock %}
+{% block page_actions %}<button class="btn btn-primary" type="button" data-print-page>Print all</button>{% endblock %}
+{% block extra_js %}<script src="/static/js/certificates.js" defer></script>{% endblock %}
+{% block content %}
+  {% for item in certificates %}
+    <article class="certificate-sheet border rounded-4 p-5 text-center mb-4">
+      <p class="text-uppercase text-secondary">{{ event.name }}</p>
+      <h2 class="display-5">{% if item.kind == "participation" %}Certificate of Participation{% elif item.kind == "judge" %}Certificate of Judging{% else %}Winner Certificate{% endif %}</h2>
+      <p class="lead">Presented to</p>
+      <h3 class="display-6">{{ item.subject }}</h3>
+      {% if item.people %}<p>{{ item.people|join:", " }}</p>{% endif %}
+      {% if item.project %}<p>For {{ item.project }}</p>{% endif %}
+      {% if item.detail %}<p>{{ item.detail }}</p>{% endif %}
+      <p>Verification code: <strong>{{ item.code }}</strong></p>
+      <p class="small text-break">{{ item.url }}</p>
+    </article>
+  {% empty %}<p>No certificates are available yet.</p>{% endfor %}
+{% endblock %}

@@ -27,6 +27,22 @@ def _phase(event, at) -> tuple[str, str]:
     return "status-closed", "Closed"
 
 
+def _acceptance_report() -> dict | None:
+    """The committed run.py output, shown verbatim on the landing page."""
+    path = settings.REPO_DIR / "acceptance-report.txt"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    lines = [line for line in text.splitlines() if line.startswith(("T1", "T2", "T3", "T4"))]
+    return {
+        "checks": [{"text": line, "passed": line.rstrip().endswith("PASS")} for line in lines],
+        "passed": sum(1 for line in lines if line.rstrip().endswith("PASS")),
+        "total": len(lines),
+        "summary": next((line for line in text.splitlines() if line.startswith("claimed")), ""),
+    }
+
+
 def home(request):
     """The front page: the pitch, real numbers from the database, live events.
 
@@ -52,7 +68,8 @@ def home(request):
         {"event": event, "phase": _phase(event, at), "projects": submitted.get(event.id, 0)}
         for event in card_events
     ]
-    return render(request, "home.html", {"stats": stats, "cards": cards, "now": at})
+    return render(request, "home.html", {"stats": stats, "cards": cards, "now": at,
+                                         "report": _acceptance_report()})
 
 
 def error_403(request, exception=None):

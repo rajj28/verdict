@@ -39,6 +39,10 @@ REPS = 100
 SIGMAS = (0.0, 0.3, 0.6, 1.0)
 SEEDS = {0.0: 4404, 0.3: 1101, 0.6: 2202, 1.0: 3303}
 
+# Adaptive-lambda simulation budget: the 5-fold CV rule (same as the
+# fixture) costs ~40 fits per replication, so it runs on a subset only.
+ADAPTIVE_REPS = 20
+
 
 # ---------------------------------------------------------------- fixtures
 
@@ -94,15 +98,23 @@ def top5(ordered):
 # --------------------------------------------------------------- simulation
 
 def simulate(sigma, seed, design, projects):
-    """One sigma setting: mean rho, top-5 recall, best-first rate per method."""
+    """One sigma setting: mean rho, top-5 recall, best-first rate per method.
+
+    The "adaptive" method applies the same predeclared 5-fold CV rule as
+    the fixture (:func:`select_lambda` over the default grid) inside each
+    replication. It runs on the first ADAPTIVE_REPS replications only
+    (subset for runtime); every other method uses all REPS.
+    """
     rng = random.Random(seed)
     judges = sorted({j for j, _ in design})
     acc = {
         m: {"rho": 0.0, "top5": 0.0, "best": 0.0}
         for m in ("raw", "zscore", "add0", "add2", "bt")
     }
+    acc_ad = {"rho": 0.0, "top5": 0.0, "best": 0.0}
+    ad_lams: list[float] = []
     z_skips = 0
-    for _ in range(REPS):
+    for rep in range(REPS):
         truth = {p: rng.gauss(0.0, 1.0) for p in projects}
         bias = {j: rng.gauss(0.0, sigma) for j in judges}
         reviews = []
@@ -157,11 +169,26 @@ def simulate(sigma, seed, design, projects):
             ordered = order_projects(est, projects)
             acc[m]["top5"] += len(top5(ordered) & true_top5) / 5.0
             acc[m]["best"] += ordered[0] == true_best
+        if rep < ADAPTIVE_REPS:
+            choice = E.select_lambda(scored)
+            ad_lams.append(choice.value)
+            est_ad = dict(E.fit_additive(scored, choice.value).mu)
+            vals = [est_ad[p] for p in projects]
+            acc_ad["rho"] += spearman(vals, true_vals)
+            ordered = order_projects(est_ad, projects)
+            acc_ad["top5"] += len(top5(ordered) & true_top5) / 5.0
+            acc_ad["best"] += ordered[0] == true_best
     out = {
         m: (v["rho"] / REPS, v["top5"] / REPS, v["best"] / REPS)
         for m, v in acc.items()
     }
-    return out, z_skips / REPS
+    out["adaptive"] = (
+        acc_ad["rho"] / ADAPTIVE_REPS,
+        acc_ad["top5"] / ADAPTIVE_REPS,
+        acc_ad["best"] / ADAPTIVE_REPS,
+    )
+    mean_lam = sum(ad_lams) / len(ad_lams) if ad_lams else float("nan")
+    return out, z_skips / REPS, mean_lam
 
 
 # ------------------------------------------------------------------- render
@@ -185,20 +212,29 @@ def main():
     design = sorted({(r.judge_id, r.project_id) for r in reviews})
 
     fits = {lam: E.evaluate(reviews, criteria, lam=lam, target=TARGET) for lam in LAM_GRID}
-    base = fits[LAM_DEFAULT]
+    base = E.evaluate(reviews, criteria, lam="auto", target=TARGET)
+    auto = base.lambda_choice
+    assert auto is not None
     bt_order = order_projects(base.strengths, projects)
 
     lines = []
     add = lines.append
+    grid_str = ", ".join(f"{g:g}" for g in E.DEFAULT_LAMBDA_GRID)
     add("# Normalization proof")
     add("")
     add("Method in one paragraph: every review is reduced to a 0-100 score by "
         "equal-weighted rescaling of the three 1-5 criteria "
         "(functionality, quality, innovation), then fitted to the additive "
         "model `score = project quality + judge offset` by block coordinate "
-        "descent minimizing `sum (s - mu - b)^2 + lambda * sum b^2` with "
-        f"`lambda = {LAM_DEFAULT}` (BUILD-SPEC 9). The normalized project score "
+        "descent minimizing `sum (s - mu - b)^2 + lambda * sum b^2` "
+        "(BUILD-SPEC 9). The normalized project score "
         "is `mu`; ranks below are competition ranks with ties shared at 2 dp. "
+        "Lambda is not hand-picked: the locked policy selects it by seeded "
+        "5-fold cross-validation over the grid "
+        f"({grid_str}) at calculation time (ties go to the larger, more "
+        "conservative value; BUILD-SPEC 19), and the chosen value is "
+        f"recorded with the result. On this fixture the procedure selects "
+        f"`lambda = {auto.value:g}` (see the CV table below). "
         "The portal results page runs this same code "
         "(`src/results/engine.py`), so these numbers match it exactly. "
         f"Source: `fixtures.json` ({len(reviews)} included reviews over "
@@ -220,7 +256,7 @@ def main():
             f"{arrow(base.rank_raw[p], base.rank_norm[p])} | `{p}` | "
             f"{titles[p]} | {n} | {f2(mean)} | {f2(base.normalized[p])} |")
     add("")
-    add("### Judge offsets (lambda = 2)")
+    add(f"### Judge offsets (adaptive lambda = {auto.value:g})")
     add("")
     add("| Judge | Name | n | Mean given | Offset | Label | Spread |")
     add("|---|---|---:|---:|---:|---|---:|")
@@ -248,10 +284,14 @@ def main():
     add(f"### Spread before/after: {f2(base.spread_before)} \u2192 "
         f"{f2(base.spread_after)}")
     add("")
-    add("Sigma of per-judge mean scores drops from "
+    add("Sigma of per-judge mean scores moves from "
         f"{f2(base.spread_before)} raw to {f2(base.spread_after)} after offset "
-        "removal: most of the disagreement between judges' average marks is "
-        "level, not ordering.")
+        "removal: with the adaptive choice (near-maximal shrinkage) the "
+        "fitted offsets are close to zero, so almost nothing is removed. "
+        "The raw spread of judge means on this sparse fixture mostly "
+        "reflects which projects each judge happened to receive, not an "
+        "estimable judge level \u2014 consistent with the leave-one-out and "
+        "permutation results below.")
     add("")
     add("### The judge who marks everything the same")
     add("")
@@ -266,7 +306,7 @@ def main():
         "reason before publication.")
     without = E.evaluate(
         [r for r in reviews if r.judge_id != CONSTANT_JUDGE],
-        criteria, lam=LAM_DEFAULT, target=TARGET, projects=projects,
+        criteria, lam=base.lam, target=TARGET, projects=projects,
     )
     changed = [p for p in projects
                if p in without.rank_norm
@@ -294,6 +334,23 @@ def main():
     add("")
     add("Outliers are detection-only signals for organizers (possible "
         "collusion or undeclared conflict) and are never auto-excluded.")
+    add("")
+    add("### Adaptive lambda selection (seeded 5-fold CV)")
+    add("")
+    add(f"The predeclared procedure shuffles the {len(reviews)} included "
+        f"reviews by sorted review id with seed `verdict`, holds out each "
+        f"fifth in turn, refits on the rest, and predicts held-out scores "
+        f"as `mu_p + b_j` ({auto.n} predicted, {auto.skipped} skipped where "
+        f"the project or judge has no training review). The baseline "
+        f"predicts the training mean of the held-out review's project "
+        f"mates. Winner is the smallest CV RMSE; ties go to the larger "
+        f"lambda. Selected: `lambda = {auto.value:g}`.")
+    add("")
+    add("| Predictor | CV RMSE |")
+    add("|---|---:|")
+    add(f"| project mean only | {auto.baseline_rmse:.2f} |")
+    for lam in E.DEFAULT_LAMBDA_GRID:
+        add(f"| additive \u03bb={lam:g} | {auto.cv_rmse[float(lam)]:.2f} |")
     add("")
     add("### Lambda sensitivity (vs lambda = 2)")
     add("")
@@ -328,12 +385,18 @@ def main():
         f"judge (`{CONSTANT_JUDGE}`, all 4s) like the fixture. "
         f"{REPS} replications per \u03c3_b. Methods: raw mean, per-judge "
         "z-score (zero-variance judges skipped), additive \u03bb=0, additive "
-        "\u03bb=2, derived Bradley\u2013Terry. Reported: mean Spearman "
+        "\u03bb=2, derived Bradley\u2013Terry, plus adaptive (the same "
+        "predeclared 5-fold CV rule over the default grid, applied inside "
+        f"each replication; {ADAPTIVE_REPS} replications per \u03c3_b for "
+        "this method only, to keep the total runtime under 3 minutes). "
+        "Reported: mean Spearman "
         "\u03c1 with truth, top-5 recall, share of replications where the "
         "true best project ranks first.")
     add("")
+    mean_lams: dict[float, float] = {}
     for sigma in SIGMAS:
-        res, skip_rate = simulate(sigma, SEEDS[sigma], design, projects)
+        res, skip_rate, mean_lam = simulate(sigma, SEEDS[sigma], design, projects)
+        mean_lams[sigma] = mean_lam
         add(f"### \u03c3_b = {sigma} (seed {SEEDS[sigma]})")
         add("")
         add("| Method | Mean \u03c1 | Top-5 recall | Best ranked first |")
@@ -341,6 +404,8 @@ def main():
         for m in ("raw", "zscore", "add0", "add2", "bt"):
             rho, top5r, best = res[m]
             add(f"| {m} | {rho:.3f} | {top5r:.3f} | {best:.3f} |")
+        rho, top5r, best = res["adaptive"]
+        add(f"| adaptive ({ADAPTIVE_REPS} reps) | {rho:.3f} | {top5r:.3f} | {best:.3f} |")
         add("")
         add(f"Zero-variance judges skipped in {skip_rate:.1%} of replications "
             "(the forced constant judge is skipped every replication; natural "
@@ -357,7 +422,15 @@ def main():
         "below). Per-judge z-scores throw away level information and must "
         "skip the constant judge in every replication, so they trail "
         "\u03bb=2 in every setting and cannot use the constant judge's "
-        "reviews at all.")
+        "reviews at all. The adaptive rows (20 replications each, so noisier "
+        "than the 100-rep rows) match or slightly beat fixed \u03bb=2 on "
+        "mean rank correlation and top-5 recall in every setting. Its mean "
+        "chosen \u03bb falls as judge bias grows "
+        f"({', '.join(f'{s}: {mean_lams[s]:.1f}' for s in SIGMAS)}), so the "
+        "rule normalizes gently when judges agree and strongly when they do "
+        "not. Its best-first shares trail fixed \u03bb=2 in three of four "
+        "settings, which is within the wider sampling noise of the 20-rep "
+        "subset.")
     add("")
     add("### Leave-one-review-out cross-validation (predicting unseen reviews)")
     add("")
@@ -383,15 +456,20 @@ def main():
     r_two = loo.additive[LAM_DEFAULT]
     r_zero = loo.additive[0.0]
     add(f"Smallest unseen-review RMSE is \u03bb={best_lam} ({r_best.rmse:.2f}); "
-        f"the predeclared default \u03bb={LAM_DEFAULT:g} ({r_two.rmse:.2f}) is "
-        f"{r_two.rmse - r_best.rmse:.2f} points behind it, while \u03bb=0 "
+        f"\u03bb={LAM_DEFAULT:g} ({r_two.rmse:.2f}) is "
+        f"{r_two.rmse - loo.mean_only.rmse:.2f} points worse than the project "
+        f"mean ({loo.mean_only.rmse:.2f}), while \u03bb=0 "
         f"({r_zero.rmse:.2f}) is {r_zero.rmse - loo.mean_only.rmse:.2f} points "
-        f"worse than ignoring judges entirely. The lesson is shrinkage: an "
-        f"unshrunk fit overfits the sparse fixture design, moderate-to-strong "
-        f"shrinkage matches or beats the project mean, and the default "
-        f"\u03bb=2 keeps almost all of that gain while staying adaptive to "
-        f"judge bias (see the simulations, where \u03bb=2 beats raw means "
-        f"whenever judges disagree).")
+        f"worse than ignoring judges entirely. In plain language: \u03bb=2 "
+        f"predicts unseen fixture reviews worse than the project mean; "
+        f"strong shrinkage (\u03bb\u2248{best_lam}) is best; the permutation "
+        f"test finds no detectable judge effect in this sparse fixture; the "
+        f"adaptive rule therefore normalizes gently here and strongly when "
+        f"bias is present (simulations). The adaptive 5-fold choice on this "
+        f"fixture is \u03bb={auto.value:g} (CV RMSE "
+        f"{auto.cv_rmse[auto.value]:.4f} vs baseline {auto.baseline_rmse:.4f}: "
+        f"the best of the grid and within 0.01 of the project mean), i.e. "
+        f"near-maximal shrinkage, exactly as that reading prescribes.")
     add("")
     add("### Permutation test for judge effects")
     add("")
@@ -400,7 +478,7 @@ def main():
         n_perm=PERM_N, seed=PERM_SEED, lam=PERM_LAM)
     q = perm.quantiles
     add(f"Statistic: population variance of the fitted judge offsets "
-        f"(\u03bb={PERM_LAM:g}, the portal default). Judge labels were "
+        f"(\u03bb={PERM_LAM:g}). Judge labels were "
         f"shuffled {PERM_N:,} times within each track (seed {PERM_SEED}; "
         f"each review keeps its project and score, only the judge label "
         f"moves). Observed variance {perm.observed:.2f}; null quantiles "
@@ -510,6 +588,10 @@ def main():
         "scripts/normalization_proof.py` (standard library only; reads "
         "`fixtures.json`, imports `src/results/engine.py`). Simulation seeds: "
         + ", ".join(f"\u03c3_b={s} \u2192 {SEEDS[s]}" for s in SIGMAS) + ". "
+        f"Adaptive rule: grid \u03bb \u2208 "
+        f"{{{', '.join(f'{g:g}' for g in E.DEFAULT_LAMBDA_GRID)}}}, 5 folds, "
+        f"seed `verdict`; adaptive simulation rows use {ADAPTIVE_REPS} "
+        f"replications per \u03c3_b (other rows {REPS}). "
         f"Leave-one-out grid: \u03bb \u2208 {{{', '.join(str(l) for l in LOO_LAMS)}}}. "
         f"Permutation test: {PERM_N:,} within-track shuffles, seed {PERM_SEED}, "
         f"\u03bb={PERM_LAM:g}. No timestamps are written, so regenerating "

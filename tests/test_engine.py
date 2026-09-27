@@ -8,9 +8,11 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from results.engine import (  # noqa: E402
+    DEFAULT_LAMBDA_GRID,
     Comparison,
     Criterion,
     Fit,
+    LambdaChoice,
     ReviewInput,
     ScoredReview,
     bradley_terry,
@@ -32,6 +34,7 @@ from results.engine import (  # noqa: E402
     raw_scores,
     review_score,
     score_reviews,
+    select_lambda,
     spearman,
     spread,
 )
@@ -427,6 +430,89 @@ class PermutationTests(unittest.TestCase):
         res = permutation_test(s, groups, n_perm=200, seed=97531, lam=2.0)
         self.assertEqual(res.observed, 0.0)
         self.assertGreater(res.p_value, 0.5)
+
+
+class SelectLambdaTests(unittest.TestCase):
+    def _two_judge_design(self, bump):
+        # Both judges review the same 8 projects; `bump` is judge A's offset.
+        reviews = []
+        for i in range(8):
+            reviews.append(scored("A", f"P{i}", 50 + bump))
+            reviews.append(scored("B", f"P{i}", 50 - bump))
+        return score_reviews(reviews, CRIT_0_100)
+
+    def test_grid_default(self):
+        self.assertEqual(
+            tuple(DEFAULT_LAMBDA_GRID),
+            (0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0),
+        )
+
+    def test_deterministic_and_order_invariant(self):
+        s = self._two_judge_design(10)
+        first = select_lambda(s)
+        second = select_lambda(list(reversed(s)))
+        self.assertEqual(first.value, second.value)
+        self.assertEqual(first.cv_rmse, second.cv_rmse)
+        self.assertEqual(first.baseline_rmse, second.baseline_rmse)
+        self.assertEqual(first.folds, 5)
+        self.assertIsInstance(first, LambdaChoice)
+
+    def test_picks_large_lambda_without_judge_effects(self):
+        # No judge offsets: every review of a project is identical, so all
+        # lambdas (and the baseline) predict perfectly; the tie rule then
+        # picks the largest, most conservative grid value.
+        s = self._two_judge_design(0)
+        choice = select_lambda(s)
+        self.assertEqual(choice.value, max(DEFAULT_LAMBDA_GRID))
+        self.assertLessEqual(choice.cv_rmse[choice.value], choice.baseline_rmse)
+
+    def test_picks_small_lambda_with_strong_bias(self):
+        # Strong systematic offsets: the near-unshrunk fit predicts held-out
+        # reviews far better than heavy shrinkage or the project mean.
+        s = self._two_judge_design(10)
+        choice = select_lambda(s)
+        self.assertEqual(choice.value, min(DEFAULT_LAMBDA_GRID))
+        self.assertLess(
+            choice.cv_rmse[choice.value], choice.cv_rmse[max(DEFAULT_LAMBDA_GRID)]
+        )
+        self.assertLess(choice.cv_rmse[choice.value], choice.baseline_rmse)
+
+    def test_ties_go_to_larger_lambda(self):
+        s = [
+            ScoredReview(f"r{i:03d}", "J0" if i % 2 == 0 else "J1", f"P{i % 3}", 50.0)
+            for i in range(12)
+        ]
+        choice = select_lambda(s)
+        self.assertEqual(choice.value, max(DEFAULT_LAMBDA_GRID))
+
+    def test_warm_start_matches_cold_fit(self):
+        s = self._two_judge_design(10)
+        cold = fit_additive(s, 2.0)
+        warm = fit_additive(s, 2.0, init=fit_additive(s, 5.0))
+        for p in cold.mu:
+            self.assertAlmostEqual(warm.mu[p], cold.mu[p], delta=1e-6)
+        for j in cold.offset:
+            self.assertAlmostEqual(warm.offset[j], cold.offset[j], delta=1e-6)
+
+    def test_evaluate_auto_reports_choice(self):
+        reviews = []
+        for i in range(8):
+            reviews.append(scored("A", f"P{i}", 60))
+            reviews.append(scored("B", f"P{i}", 40))
+        res = evaluate(reviews, CRIT_0_100, lam="auto")
+        self.assertIsNotNone(res.lambda_choice)
+        self.assertEqual(res.lam, res.lambda_choice.value)
+        self.assertIn(res.lam, tuple(float(g) for g in DEFAULT_LAMBDA_GRID))
+        self.assertEqual(
+            res.lambda_choice.cv_rmse,
+            select_lambda(score_reviews(reviews, CRIT_0_100)).cv_rmse,
+        )
+        # A fixed lambda reports no choice.
+        fixed = evaluate(reviews, CRIT_0_100, lam=2.0)
+        self.assertIsNone(fixed.lambda_choice)
+        self.assertEqual(fixed.lam, 2.0)
+        with self.assertRaises(ValueError):
+            evaluate(reviews, CRIT_0_100, lam="2")
 
 
 class AgreementTests(unittest.TestCase):

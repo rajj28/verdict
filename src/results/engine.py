@@ -76,6 +76,26 @@ class Fit:
     converged: bool = True
 
 
+#: Grid for the predeclared adaptive-lambda procedure (BUILD-SPEC 19).
+DEFAULT_LAMBDA_GRID: tuple[float, ...] = (0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0)
+
+#: Tie tolerance when comparing CV RMSEs: differences at or below this
+#: count as ties and resolve to the larger (more conservative) lambda.
+_LAMBDA_TIE_TOL = 1e-12
+
+
+@dataclass(frozen=True)
+class LambdaChoice:
+    """Outcome of :func:`select_lambda`: chosen value plus the CV table."""
+
+    value: float
+    cv_rmse: dict[float, float]
+    baseline_rmse: float
+    folds: int
+    n: int = 0
+    skipped: int = 0
+
+
 @dataclass(frozen=True)
 class JudgeRow:
     """One row of the organizer judge table."""
@@ -136,6 +156,7 @@ class Result:
     method: str
     lam: float
     target: int
+    lambda_choice: LambdaChoice | None = None
     scored: list[ScoredReview] = field(default_factory=list)
     raw: dict[str, tuple[float, int]] = field(default_factory=dict)
     fit: Fit = field(default_factory=Fit)
@@ -212,7 +233,9 @@ def raw_scores(
     }
 
 
-def fit_additive(scored: Sequence[ScoredReview], lam: float) -> Fit:
+def fit_additive(
+    scored: Sequence[ScoredReview], lam: float, init: Fit | None = None
+) -> Fit:
     """Fit ``s_r = mu_p + b_j`` minimizing ``sum (s-mu-b)^2 + lam*sum b^2``.
 
     Block coordinate descent in sorted-id order (BUILD-SPEC 9): start at
@@ -221,6 +244,12 @@ def fit_additive(scored: Sequence[ScoredReview], lam: float) -> Fit:
     below 1e-10 (cap 10 000 iterations). With ``lam == 0`` the level is
     unidentified, so re-centre to ``sum_j n_j b_j = 0`` (a uniform shift
     that leaves every ranking unchanged).
+
+    ``init`` is an optional warm start (used by :func:`select_lambda`):
+    project means and judge offsets default to its values where the ids
+    overlap, otherwise to the cold start above. The fixed point is the
+    same either way for ``lam > 0``; the warm start just needs fewer
+    iterations.
     """
     if lam < 0:
         raise ValueError("lam must be non-negative")
@@ -235,8 +264,17 @@ def fit_additive(scored: Sequence[ScoredReview], lam: float) -> Fit:
         by_proj[r.project_id].append(r)
         by_judge[r.judge_id].append(r)
     n_judge = {j: len(rs) for j, rs in by_judge.items()}
-    mu = {p: sum(r.score for r in rs) / len(rs) for p, rs in by_proj.items()}
-    offset = {j: 0.0 for j in judge_ids}
+    if init is None:
+        mu = {p: sum(r.score for r in rs) / len(rs) for p, rs in by_proj.items()}
+        offset = {j: 0.0 for j in judge_ids}
+    else:
+        mu = {
+            p: init.mu.get(
+                p, sum(r.score for r in by_proj[p]) / len(by_proj[p])
+            )
+            for p in proj_ids
+        }
+        offset = {j: init.offset.get(j, 0.0) for j in judge_ids}
     converged = False
     iterations = 0
     for iterations in range(1, MAX_ITER + 1):
@@ -829,10 +867,101 @@ def rank_agreement(
     )
 
 
+def select_lambda(
+    scored: Sequence[ScoredReview],
+    grid: Sequence[float] = DEFAULT_LAMBDA_GRID,
+    folds: int = 5,
+    seed: str | int = "verdict",
+) -> LambdaChoice:
+    """Pick lambda by seeded K-fold cross-validation (BUILD-SPEC 19).
+
+    Fold assignment is deterministic: reviews sort by ``review_id``,
+    shuffle with ``random.Random(seed)``, then fold ``k`` holds out
+    positions ``i % folds == k``. Each held-out review is predicted as
+    ``mu_p + b_j`` from the training fit; reviews whose project or
+    judge has no training review are skipped and counted. The baseline
+    predicts the training mean of the held-out review's project mates.
+    The winner is the argmin CV RMSE; ties (within 1e-12) go to the
+    larger, more conservative lambda. Each fold fit warm-starts from
+    the full-data fit at the same lambda.
+    """
+    grid_t = tuple(float(g) for g in grid)
+    if not grid_t:
+        raise ValueError("select_lambda needs a non-empty grid")
+    if any(g < 0 for g in grid_t):
+        raise ValueError("lambda grid values must be non-negative")
+    if folds < 2:
+        raise ValueError("select_lambda needs at least 2 folds")
+    data = list(scored)
+    if not data:
+        raise ValueError("select_lambda needs at least one scored review")
+    ordered = sorted(data, key=lambda r: r.review_id)
+    rng = random.Random(seed)
+    rng.shuffle(ordered)
+    full = {lam: fit_additive(data, lam) for lam in grid_t}
+    se_base = 0.0
+    se: dict[float, float] = {lam: 0.0 for lam in grid_t}
+    n = 0
+    skipped = 0
+    for k in range(folds):
+        train = [r for i, r in enumerate(ordered) if i % folds != k]
+        test = [r for i, r in enumerate(ordered) if i % folds == k]
+        if not train or not test:
+            skipped += len(test)
+            continue
+        train_projects = {r.project_id for r in train}
+        train_judges = {r.judge_id for r in train}
+        proj_scores: dict[str, list[float]] = {}
+        for r in train:
+            proj_scores.setdefault(r.project_id, []).append(r.score)
+        proj_mean = {p: sum(ss) / len(ss) for p, ss in proj_scores.items()}
+        fold_fits = {lam: fit_additive(train, lam, init=full[lam]) for lam in grid_t}
+        for r in test:
+            if r.project_id not in train_projects or r.judge_id not in train_judges:
+                skipped += 1
+                continue
+            n += 1
+            err_base = proj_mean[r.project_id] - r.score
+            se_base += err_base * err_base
+            for lam in grid_t:
+                f = fold_fits[lam]
+                pred = f.mu[r.project_id] + f.offset[r.judge_id]
+                err = pred - r.score
+                se[lam] += err * err
+    if n == 0:
+        nan_table = {lam: float("nan") for lam in grid_t}
+        return LambdaChoice(
+            value=max(grid_t),
+            cv_rmse=nan_table,
+            baseline_rmse=float("nan"),
+            folds=folds,
+            n=0,
+            skipped=skipped,
+        )
+    cv_rmse = {lam: math.sqrt(se[lam] / n) for lam in grid_t}
+    baseline_rmse = math.sqrt(se_base / n)
+    best = min(grid_t, key=lambda lam: cv_rmse[lam])
+    best_rmse = cv_rmse[best]
+    tied = [
+        lam
+        for lam in grid_t
+        if cv_rmse[lam] <= best_rmse + _LAMBDA_TIE_TOL
+    ]
+    value = max(tied)
+    return LambdaChoice(
+        value=value,
+        cv_rmse=cv_rmse,
+        baseline_rmse=baseline_rmse,
+        folds=folds,
+        n=n,
+        skipped=skipped,
+    )
+
+
 def evaluate(
     reviews: Sequence[ReviewInput],
     criteria: Sequence[Criterion],
-    lam: float = 2.0,
+    lam: float | str = 2.0,
     target: int = 3,
     method: str = "normalized",
     projects: Collection[str] | None = None,
@@ -841,18 +970,31 @@ def evaluate(
 
     ``method`` (normalized | raw | pairwise) selects which ranking is
     primary; all three are always computed for the cross-check display.
+    ``lam`` is a shrinkage penalty or ``"auto"`` for the predeclared
+    :func:`select_lambda` procedure; the chosen value is stored on
+    ``Result.lam`` and the full choice on ``Result.lambda_choice``.
     """
     if method not in _OFFICIAL_METHODS:
         raise ValueError(f"method must be one of {_OFFICIAL_METHODS}")
     reviews = list(reviews)
     scored = score_reviews(reviews, criteria)
+    lambda_choice: LambdaChoice | None = None
+    if isinstance(lam, str):
+        if lam != "auto":
+            raise ValueError('lam must be a non-negative number or "auto"')
+        if not scored:
+            raise ValueError('lam="auto" needs at least one review')
+        lambda_choice = select_lambda(scored)
+        lam_value = lambda_choice.value
+    else:
+        lam_value = float(lam)
     known = sorted(set(projects or ()) | {r.project_id for r in reviews})
     raw = {
         p: (sum(r.score for r in scored if r.project_id == p) / n, n)
         for p in known
         if (n := sum(1 for r in scored if r.project_id == p))
     }
-    fit = fit_additive(scored, lam)
+    fit = fit_additive(scored, lam_value)
     normalized = dict(fit.mu)
     rank_raw = rank({p: mean for p, (mean, _n) in raw.items()})
     rank_norm = rank(normalized)
@@ -868,8 +1010,9 @@ def evaluate(
     sp = spread(scored, fit)
     return Result(
         method=method,
-        lam=lam,
+        lam=lam_value,
         target=target,
+        lambda_choice=lambda_choice,
         scored=scored,
         raw=raw,
         fit=fit,

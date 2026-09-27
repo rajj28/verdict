@@ -207,6 +207,26 @@ Zero-variance judges skipped in 100.0% of replications (the forced constant judg
 
 Reading the tables in plain language: with fair judges (σ_b = 0.0) normalization costs essentially nothing — additive λ=2 matches raw means on rank correlation — so shrinkage is cheap insurance. Once judges disagree (σ_b ≥ 0.3), λ=2 beats raw means on both average rank correlation and top-5 recovery in every biased setting, while the unshrunk λ=0 fit overfits the sparse fixture pattern (it also predicts held-out fixture reviews worst in the leave-one-out check below). Per-judge z-scores throw away level information and must skip the constant judge in every replication, so they trail λ=2 in every setting and cannot use the constant judge's reviews at all. The adaptive rows (20 replications each, so noisier than the 100-rep rows) match or slightly beat fixed λ=2 on mean rank correlation and top-5 recall in every setting. Its mean chosen λ falls as judge bias grows (0.0: 44.9, 0.3: 1.3, 0.6: 0.6, 1.0: 0.5), so the rule normalizes gently when judges agree and strongly when they do not. Its best-first shares trail fixed λ=2 in three of four settings, which is within the wider sampling noise of the 20-rep subset.
 
+### Designing for calibration
+
+Same review budget (121 reviews): the fixture's review pattern vs an anchor pattern built by the portal assignment algorithm (`judging.assign.propose_assignments` with `anchors_per_track = 1`, target 3, seed `verdict`). The anchor run proposes 125 reviews across 8 anchor projects (`prj_14`, `prj_15`, `prj_17`, `prj_26`, `prj_28`, `prj_33`, `prj_34`, `prj_39`) with 39 anchor reviews; 4 project(s) come out under target because anchor load counts toward max_load, exactly the infeasibility the algorithm reports. Non-anchor reviews are then dropped from the most-covered projects until the total is back to 121, so the comparison holds the budget fixed. The anchor pattern covers 38 of 40 projects (uncovered: `prj_36`, `prj_40`).
+
+| Design | Reviews | Median SE | Power at 8 pts |
+|---|---:|---:|---:|
+| fixture | 121 | 4.66 | 0.134 |
+| anchor (1/track) | 121 | 4.67 | 0.127 |
+
+Estimability uses `results.engine.estimability` with the defaults (additive model, lam = 2.0, noise 15.0, 200 reps, same seed for both designs): per-judge expected SE of the offset and the mean share of judges whose injected 8-point bias exceeds 2 SE.
+
+Rank recovery under judge bias σ_b = 0.6 (100 replications, seed 2202, same generative model as above; projects with no reviews rank tied last):
+
+| Design | Raw mean ρ | Additive λ=2 ρ |
+|---|---:|---:|
+| fixture | 0.903 | 0.930 |
+| anchor (1/track) | 0.802 | 0.824 |
+
+Reading: at this budget the anchor pattern does not improve average detectability (0.127 vs 0.134 for the fixture pattern; median SE 4.67 vs 4.66, within sampling noise). The anchor reviews concentrate on 8 projects while 2 project(s) lose coverage entirely, so rank recovery at σ_b = 0.6 is lower on the anchor pattern (additive ρ 0.824 vs 0.930). Anchors buy shared comparisons for the covered projects at the price of thinner coverage elsewhere — under a fixed budget the net effect here is nil to negative, which is itself the design-time lesson: check the estimability meter before buying anchors.
+
 ### Leave-one-review-out cross-validation (predicting unseen reviews)
 
 Each included review was held out once: the model was refit without it and the held-out score predicted as `mu_p + b_j`; the baseline predicts the mean of the held-out review's project mates. 119 of 121 reviews predicted, 2 skipped (single-review judges `jdg_12`/`jdg_23`: holding out their only review leaves no data to estimate that judge's offset). Grids cover the project-mean baseline and additive λ ∈ {0, 1, 2, 5, 10}.
@@ -298,4 +318,4 @@ The additive fit is a shrinkage-penalized least-squares estimator of a two-way l
 
 ## Reproducibility
 
-Regenerate with `.venv\Scripts\python.exe scripts/normalization_proof.py` (standard library only; reads `fixtures.json`, imports `src/results/engine.py`). Simulation seeds: σ_b=0.0 → 4404, σ_b=0.3 → 1101, σ_b=0.6 → 2202, σ_b=1.0 → 3303. Adaptive rule: grid λ ∈ {0.5, 1, 2, 5, 10, 20, 50, 100}, 5 folds, seed `verdict`; adaptive simulation rows use 20 replications per σ_b (other rows 100). Leave-one-out grid: λ ∈ {0, 1, 2, 5, 10}. Permutation test: 2,000 within-track shuffles, seed 97531, λ=2. No timestamps are written, so regenerating twice gives identical bytes.
+Regenerate with `.venv\Scripts\python.exe scripts/normalization_proof.py` (standard library only; reads `fixtures.json`, imports `src/results/engine.py`). Simulation seeds: σ_b=0.0 → 4404, σ_b=0.3 → 1101, σ_b=0.6 → 2202, σ_b=1.0 → 3303. Adaptive rule: grid λ ∈ {0.5, 1, 2, 5, 10, 20, 50, 100}, 5 folds, seed `verdict`; adaptive simulation rows use 20 replications per σ_b (other rows 100). Leave-one-out grid: λ ∈ {0, 1, 2, 5, 10}. Permutation test: 2,000 within-track shuffles, seed 97531, λ=2. Calibration section: anchor pattern (anchors_per_track=1, target=3, seed `verdict`, trimmed to 121 reviews), estimability seed `verdict-cal` (200 reps), rank recovery σ_b=0.6 seed 2202 (100 reps). No timestamps are written, so regenerating twice gives identical bytes.

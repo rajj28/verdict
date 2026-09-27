@@ -1274,3 +1274,156 @@ def evaluate(
         components=components(scored),
         robustness=rob,
     )
+
+
+# ---------------------------------------------------------------------------
+# Estimability meter (packet P7-ANCHORS, step 2).
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class EstimabilityJudge:
+    """Expected offset precision and detection power for one judge."""
+
+    judge_id: str
+    n: int  # reviews by this judge in the design
+    se: float  # expected SE of the fitted offset (null-simulation SD)
+    power: dict[float, float]  # injected bias size -> detection share
+
+
+@dataclass(frozen=True)
+class EstimabilitySummary:
+    """Per-judge estimability plus event-level medians/means."""
+
+    judges: dict[str, EstimabilityJudge]
+    median_se: float  # median of per-judge SEs
+    power_at_8: float  # mean power at the grid point nearest 8.0
+    power_bias: float  # the grid point power_at_8 was read at
+    sigma_noise: float
+    reps: int
+    lam: float
+    n_pairs: int
+
+
+def _median(xs: Sequence[float]) -> float:
+    """Median of a non-empty list; NaN when empty."""
+    ys = sorted(xs)
+    n = len(ys)
+    if n == 0:
+        return float("nan")
+    mid = n // 2
+    if n % 2:
+        return ys[mid]
+    return (ys[mid - 1] + ys[mid]) / 2.0
+
+
+def estimability(
+    design: Sequence[tuple[str, str]],
+    sigma_noise: float = 15.0,
+    bias_grid: Sequence[float] = (4, 8, 12),
+    reps: int = 200,
+    seed: str | int = "verdict",
+    lam: float = 2.0,
+) -> EstimabilitySummary:
+    """Expected judge-offset SE and bias-detection power for a design.
+
+    ``design`` is a list of ``(judge_id, project_id)`` pairs (the review
+    pattern). The procedure is seeded simulation of the additive model
+    used by :func:`fit_additive` at penalty ``lam`` (default 2.0):
+
+    - Null reps: every review scores ``50 + N(0, sigma_noise)``; the
+      fitted offset of each judge is recorded. Its SD across reps is
+      the expected SE of that judge's offset.
+    - The estimator is linear in the scores, so injecting a true bias
+      ``b`` into one judge's reviews shifts their fitted offset by
+      ``b`` times a deterministic attenuation factor (measured once per
+      judge with a noiseless probe). Power at ``b`` is the share of
+      null reps where the shifted offset exceeds ``2 * SE``.
+
+    Noise draws run in sorted-pair order from ``random.Random(seed)``;
+    refits iterate in sorted-id order, so the result is deterministic.
+    Null refits warm-start from the previous rep's fit (same fixed
+    point for ``lam > 0``, fewer iterations); the noiseless probes are
+    exact up to the 1e-10 fit tolerance.
+    """
+    grid = tuple(float(b) for b in bias_grid)
+    if not grid:
+        raise ValueError("estimability needs a non-empty bias_grid")
+    if any(b <= 0 for b in grid):
+        raise ValueError("bias_grid values must be positive")
+    if reps < 1:
+        raise ValueError("estimability needs at least 1 rep")
+    if sigma_noise < 0:
+        raise ValueError("sigma_noise must be non-negative")
+    if lam < 0:
+        raise ValueError("lam must be non-negative")
+    pairs = sorted({(str(j), str(p)) for j, p in design})
+    judges = sorted({j for j, _ in pairs})
+    if not pairs:
+        return EstimabilitySummary(
+            judges={},
+            median_se=float("nan"),
+            power_at_8=float("nan"),
+            power_bias=8.0,
+            sigma_noise=float(sigma_noise),
+            reps=reps,
+            lam=float(lam),
+            n_pairs=0,
+        )
+    n_per_judge = {j: sum(1 for jj, _ in pairs if jj == j) for j in judges}
+    rng = random.Random(seed)
+    null_offsets: dict[str, list[float]] = {j: [] for j in judges}
+    prev: Fit | None = None
+    for _ in range(reps):
+        scored_rep = [
+            ScoredReview(
+                f"{j}__{p}", j, p, 50.0 + rng.gauss(0.0, sigma_noise)
+            )
+            for j, p in pairs
+        ]
+        if prev is not None and lam > 0:
+            fit = fit_additive(scored_rep, lam, init=prev)
+        else:
+            fit = fit_additive(scored_rep, lam)
+        prev = fit
+        for j in judges:
+            null_offsets[j].append(fit.offset.get(j, 0.0))
+    se = {j: _pstdev(xs) for j, xs in null_offsets.items()}
+    probe = 10.0
+    atten: dict[str, float] = {}
+    for j in judges:
+        probe_scored = [
+            ScoredReview(f"{jj}__{pp}", jj, pp, probe if jj == j else 0.0)
+            for jj, pp in pairs
+        ]
+        atten[j] = fit_additive(probe_scored, lam).offset.get(j, 0.0) / probe
+    per_judge: dict[str, EstimabilityJudge] = {}
+    for j in judges:
+        threshold = 2.0 * se[j]
+        shift_of = atten[j]
+        powers: dict[float, float] = {}
+        for b in grid:
+            shift = shift_of * b
+            if se[j] <= 0:
+                powers[b] = 1.0 if shift > threshold else 0.0
+            else:
+                hits = sum(
+                    1 for v in null_offsets[j] if v + shift > threshold
+                )
+                powers[b] = hits / reps
+        per_judge[j] = EstimabilityJudge(
+            judge_id=j, n=n_per_judge[j], se=se[j], power=powers
+        )
+    power_bias = min(grid, key=lambda b: abs(b - 8.0))
+    return EstimabilitySummary(
+        judges=per_judge,
+        median_se=_median([se[j] for j in judges]),
+        power_at_8=(
+            sum(per_judge[j].power[power_bias] for j in judges) / len(judges)
+        ),
+        power_bias=power_bias,
+        sigma_noise=float(sigma_noise),
+        reps=reps,
+        lam=float(lam),
+        n_pairs=len(pairs),
+    )

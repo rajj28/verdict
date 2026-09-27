@@ -19,6 +19,7 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
 
 from results import engine as E  # noqa: E402
+from judging import assign as A  # noqa: E402
 
 FIXTURES_PATH = REPO / "fixtures.json"
 OUT_PATH = REPO / "docs" / "NORMALIZATION-PROOF.md"
@@ -42,6 +43,16 @@ SEEDS = {0.0: 4404, 0.3: 1101, 0.6: 2202, 1.0: 3303}
 # Adaptive-lambda simulation budget: the 5-fold CV rule (same as the
 # fixture) costs ~40 fits per replication, so it runs on a subset only.
 ADAPTIVE_REPS = 20
+
+# "Designing for calibration" (packet P7-ANCHORS, step 3): same review
+# budget as the fixture design, fixture pattern vs an anchor pattern.
+ANCHORS_PER_TRACK = 1
+ANCHOR_TARGET = 3  # same per-project target as the fixture default
+ANCHOR_SEED = "verdict"  # seed for the anchor-pick in assign.propose_assignments
+CAL_EST_SEED = "verdict-cal"  # seed for both estimability() calls
+CAL_RANK_REPS = 100
+CAL_RANK_SIGMA_B = 0.6
+CAL_RANK_SEED = 2202  # same seed as the sigma_b = 0.6 row above
 
 
 # ---------------------------------------------------------------- fixtures
@@ -189,6 +200,107 @@ def simulate(sigma, seed, design, projects):
     )
     mean_lam = sum(ad_lams) / len(ad_lams) if ad_lams else float("nan")
     return out, z_skips / REPS, mean_lam
+
+
+# ------------------------------------------------- calibration comparison
+
+def anchor_design(budget):
+    """Anchor pattern at the fixture review budget.
+
+    Runs the portal assignment algorithm
+    (``judging.assign.propose_assignments``) with ``anchors_per_track=1``
+    and the default target, then deterministically drops non-anchor
+    assignments from the most-covered projects until the total equals
+    ``budget`` ("reducing other assignments to keep the budget"). No
+    conflicts exist in the fixture, so every track judge takes the
+    anchor. Returns ``(pairs, anchor_pairs, anchor_ids, n_unfilled,
+    n_before_trim)`` as sorted lists/counts.
+    """
+    data = json.loads(FIXTURES_PATH.read_text(encoding="utf-8"))
+    judge_inputs = [
+        A.JudgeInput(j["id"], frozenset(j["tracks"])) for j in data["judges"]
+    ]
+    project_inputs = [
+        A.ProjectInput(p["id"], p["track"], p["team"])
+        for p in data["projects"]
+        if p["id"] != SUPERSEDED
+    ]
+    proposal = A.propose_assignments(
+        judge_inputs,
+        project_inputs,
+        target=ANCHOR_TARGET,
+        seed=ANCHOR_SEED,
+        anchors_per_track=ANCHORS_PER_TRACK,
+    )
+    anchors = {
+        (a.judge_id, a.project_id)
+        for a in proposal.new_assignments
+        if a.is_anchor
+    }
+    kept = {(a.judge_id, a.project_id) for a in proposal.new_assignments}
+    non_anchor = sorted(kept - anchors)
+    while len(kept) > budget and non_anchor:
+        cover = Counter(p for _, p in kept)
+        load = Counter(j for j, _ in kept)
+        cands = sorted({p for _, p in non_anchor}, key=lambda p: (cover[p], p))
+        doomed = cands[-1]
+        jp = sorted(
+            ((j, p) for j, p in non_anchor if p == doomed),
+            key=lambda t: (load[t[0]], t[0]),
+        )
+        drop = jp[-1]
+        kept.discard(drop)
+        non_anchor.remove(drop)
+    return (
+        sorted(kept),
+        sorted(anchors),
+        list(proposal.anchor_project_ids),
+        len(proposal.unfilled),
+        len(proposal.new_assignments),
+    )
+
+
+def rank_recovery(design, projects, sigma_b, seed, reps):
+    """Mean Spearman rho with truth for raw means and additive lam=2.
+
+    Same generative model as :func:`simulate` (truth ~ N(0,1), judge
+    offsets ~ N(0, sigma_b) on the 1-5 scale, noise ~ N(0, 0.5) per
+    criterion, constant judge all 4s). Projects with no reviews in the
+    design score worst (they would be unranked, ranked here as tied
+    last so the correlation stays defined).
+    """
+    rng = random.Random(seed)
+    judges = sorted({j for j, _ in design})
+    acc = {"raw": 0.0, "add2": 0.0}
+    for _ in range(reps):
+        truth = {p: rng.gauss(0.0, 1.0) for p in projects}
+        bias = {j: rng.gauss(0.0, sigma_b) for j in judges}
+        reviews = []
+        for j, p in design:
+            if j == CONSTANT_JUDGE:
+                values = {k: 4 for k in CRITERIA_KEYS}  # like fixture jdg_07
+            else:
+                values = {}
+                for k in CRITERIA_KEYS:
+                    v = 3.0 + truth[p] + bias[j] + rng.gauss(0.0, 0.5)
+                    values[k] = min(5, max(1, round(v)))
+            reviews.append(E.ReviewInput(f"{j}__{p}", j, p, values))
+        criteria = [E.Criterion(k, 1.0, 1, 5) for k in CRITERIA_KEYS]
+        scored = E.score_reviews(reviews, criteria)
+        by_project: dict[str, list[float]] = defaultdict(list)
+        for r in scored:
+            by_project[r.project_id].append(r.score)
+        raw = {
+            p: (sum(by_project[p]) / len(by_project[p]) if p in by_project
+                else float("-inf"))
+            for p in projects
+        }
+        fitted = dict(E.fit_additive(scored, 2.0).mu)
+        add = {p: fitted.get(p, float("-inf")) for p in projects}
+        true_vals = [truth[p] for p in projects]
+        acc["raw"] += spearman([raw[p] for p in projects], true_vals)
+        acc["add2"] += spearman([add[p] for p in projects], true_vals)
+    return {m: v / reps for m, v in acc.items()}
 
 
 # ------------------------------------------------------------------- render
@@ -430,7 +542,83 @@ def main():
         "rule normalizes gently when judges agree and strongly when they do "
         "not. Its best-first shares trail fixed \u03bb=2 in three of four "
         "settings, which is within the wider sampling noise of the 20-rep "
-        "subset.")
+         "subset.")
+    add("")
+    add("### Designing for calibration")
+    add("")
+    anchor_pairs, anchor_only, anchor_ids, anchor_unfilled, anchor_before = (
+        anchor_design(len(design))
+    )
+    est_fixture = E.estimability(design, seed=CAL_EST_SEED)
+    est_anchor = E.estimability(anchor_pairs, seed=CAL_EST_SEED)
+    uncovered = sorted(set(projects) - {p for _, p in anchor_pairs})
+    add(f"Same review budget ({len(design)} reviews): the fixture's review "
+        f"pattern vs an anchor pattern built by the portal assignment "
+        f"algorithm (`judging.assign.propose_assignments` with "
+        f"`anchors_per_track = {ANCHORS_PER_TRACK}`, target "
+        f"{ANCHOR_TARGET}, seed `{ANCHOR_SEED}`). The anchor run proposes "
+        f"{anchor_before} reviews across {len(anchor_ids)} anchor projects "
+        f"({', '.join(f'`{p}`' for p in anchor_ids)}) with "
+        f"{len(anchor_only)} anchor reviews; {anchor_unfilled} project(s) "
+        f"come out under target because anchor load counts toward max_load, "
+        f"exactly the infeasibility the algorithm reports. Non-anchor "
+        f"reviews are then dropped from the most-covered projects until "
+        f"the total is back to {len(design)}, so the comparison holds the "
+        f"budget fixed. The anchor pattern covers {len({p for _, p in anchor_pairs})} "
+        f"of {len(projects)} projects"
+        + (f" (uncovered: {', '.join(f'`{p}`' for p in uncovered)})" if uncovered else " (full coverage)")
+        + ".")
+    add("")
+    add("| Design | Reviews | Median SE | Power at 8 pts |")
+    add("|---|---:|---:|---:|")
+    add(f"| fixture | {len(design)} | {est_fixture.median_se:.2f} | "
+        f"{est_fixture.power_at_8:.3f} |")
+    add(f"| anchor (1/track) | {len(anchor_pairs)} | {est_anchor.median_se:.2f} | "
+        f"{est_anchor.power_at_8:.3f} |")
+    add("")
+    add("Estimability uses `results.engine.estimability` with the defaults "
+        "(additive model, lam = 2.0, noise 15.0, 200 reps, same seed for "
+        "both designs): per-judge expected SE of the offset and the mean "
+        "share of judges whose injected 8-point bias exceeds 2 SE.")
+    add("")
+    rec_fixture = rank_recovery(
+        design, projects, CAL_RANK_SIGMA_B, CAL_RANK_SEED, CAL_RANK_REPS
+    )
+    rec_anchor = rank_recovery(
+        anchor_pairs, projects, CAL_RANK_SIGMA_B, CAL_RANK_SEED, CAL_RANK_REPS
+    )
+    add(f"Rank recovery under judge bias \u03c3_b = {CAL_RANK_SIGMA_B} "
+        f"({CAL_RANK_REPS} replications, seed {CAL_RANK_SEED}, same "
+        f"generative model as above; projects with no reviews rank tied "
+        f"last):")
+    add("")
+    add("| Design | Raw mean \u03c1 | Additive \u03bb=2 \u03c1 |")
+    add("|---|---:|---:|")
+    add(f"| fixture | {rec_fixture['raw']:.3f} | {rec_fixture['add2']:.3f} |")
+    add(f"| anchor (1/track) | {rec_anchor['raw']:.3f} | {rec_anchor['add2']:.3f} |")
+    add("")
+    if est_anchor.power_at_8 >= est_fixture.power_at_8:
+        add(f"Reading: at this budget the anchor pattern detects an 8-point "
+            f"bias {est_anchor.power_at_8:.3f} of the time vs "
+            f"{est_fixture.power_at_8:.3f} for the fixture pattern, with "
+            f"median SE {est_anchor.median_se:.2f} vs "
+            f"{est_fixture.median_se:.2f}.")
+    else:
+        add(f"Reading: at this budget the anchor pattern does not improve "
+            f"average detectability ({est_anchor.power_at_8:.3f} vs "
+            f"{est_fixture.power_at_8:.3f} for the fixture pattern; median "
+            f"SE {est_anchor.median_se:.2f} vs "
+            f"{est_fixture.median_se:.2f}, within sampling noise). The "
+            f"anchor reviews concentrate on 8 projects while "
+            f"{len(uncovered)} project(s) lose coverage"
+            + (" entirely" if uncovered else "")
+            + ", so rank recovery at \u03c3_b = 0.6 is lower on the anchor "
+            f"pattern (additive \u03c1 {rec_anchor['add2']:.3f} vs "
+            f"{rec_fixture['add2']:.3f}). Anchors buy shared comparisons "
+            f"for the covered projects at the price of thinner coverage "
+            f"elsewhere \u2014 under a fixed budget the net effect here is "
+            f"nil to negative, which is itself the design-time lesson: "
+            f"check the estimability meter before buying anchors.")
     add("")
     add("### Leave-one-review-out cross-validation (predicting unseen reviews)")
     add("")
@@ -667,7 +855,12 @@ def main():
         f"replications per \u03c3_b (other rows {REPS}). "
         f"Leave-one-out grid: \u03bb \u2208 {{{', '.join(str(l) for l in LOO_LAMS)}}}. "
         f"Permutation test: {PERM_N:,} within-track shuffles, seed {PERM_SEED}, "
-        f"\u03bb={PERM_LAM:g}. No timestamps are written, so regenerating "
+        f"\u03bb={PERM_LAM:g}. Calibration section: anchor pattern "
+        f"(anchors_per_track={ANCHORS_PER_TRACK}, target={ANCHOR_TARGET}, "
+        f"seed `{ANCHOR_SEED}`, trimmed to {len(reviews)} reviews), "
+        f"estimability seed `{CAL_EST_SEED}` (200 reps), rank recovery "
+        f"\u03c3_b={CAL_RANK_SIGMA_B} seed {CAL_RANK_SEED} "
+        f"({CAL_RANK_REPS} reps). No timestamps are written, so regenerating "
         f"twice gives identical bytes.")
     add("")
     text = "\n".join(lines)

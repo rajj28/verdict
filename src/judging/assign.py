@@ -82,6 +82,7 @@ class ProposedAssignment:
 
     judge_id: str
     project_id: str
+    is_anchor: bool = False  # True when created by the anchor phase (§P7)
 
 
 @dataclass
@@ -100,12 +101,15 @@ class AssignmentProposal:
 
     new_assignments : proposed (judge_id, project_id) pairs that do not
                       yet exist; the caller validates and persists these.
+                      Anchor assignments carry ``is_anchor=True``.
     unfilled        : projects whose review count will still be below target
                       after this proposal is applied.
+    anchor_project_ids : the projects picked as anchors this run (sorted).
     """
 
     new_assignments: list[ProposedAssignment]
     unfilled: list[UnfilledNeed]
+    anchor_project_ids: list[str] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -119,6 +123,7 @@ def propose_assignments(
     target: int,
     max_load: int | None = None,
     seed: str = "verdict",
+    anchors_per_track: int = 0,
 ) -> AssignmentProposal:
     """Return a proposal of new assignments per BUILD-SPEC §10.
 
@@ -130,6 +135,16 @@ def propose_assignments(
     max_load    : hard cap on assignments per judge across the entire run;
                   defaults to ceil(total_needed / eligible_judges) + 1
     seed        : string seed for the deterministic RNG tie-break
+    anchors_per_track : optional number of anchor projects per track (P7).
+                  Before the normal greedy fill, that many projects per
+                  track are picked as anchors (deterministic given ``seed``,
+                  preferring projects with the most eligible judges) and
+                  every eligible, non-conflicted judge of the track is
+                  assigned to them. Anchor assignments count toward
+                  ``max_load`` first, so the greedy fill sees the updated
+                  loads; projects left under target by anchor pressure are
+                  reported in ``unfilled``. ``0`` (default) disables anchors
+                  and reproduces the pre-anchor behaviour exactly.
 
     The algorithm only proposes *new* pairs – it never touches existing
     assignments.  Callers should pass in ``existing_assignment_project_ids``
@@ -138,6 +153,10 @@ def propose_assignments(
     """
     if target < 1:
         raise ValueError(f"target must be ≥ 1, got {target}")
+    if anchors_per_track < 0:
+        raise ValueError(
+            f"anchors_per_track must be ≥ 0, got {anchors_per_track}"
+        )
 
     rng = random.Random(seed)
 
@@ -195,7 +214,54 @@ def propose_assignments(
             max_load = target  # fallback; will surface as unfilled
 
     # ------------------------------------------------------------------
-    # 4. Order projects most-constrained first
+    # 4. Anchor phase (P7, optional): pick anchors_per_track projects per
+    #    track and assign every eligible judge of the track to them.
+    #    Anchors count toward max_load first, so the greedy fill below
+    #    sees the updated loads.
+    # ------------------------------------------------------------------
+    new_assignments: list[ProposedAssignment] = []
+    anchor_project_ids: list[str] = []
+    if anchors_per_track > 0:
+        # Seeded tie-break values, keyed by project id in sorted order so
+        # the draw is independent of the input list order.
+        tiebreak = {
+            p.project_id: rng.random()
+            for p in sorted(projects, key=lambda p: p.project_id)
+        }
+        by_track: dict[str, list[ProjectInput]] = {}
+        for p in projects:
+            by_track.setdefault(p.track_id, []).append(p)
+        for track_id in sorted(by_track):
+            candidates = by_track[track_id]
+            ranked = sorted(
+                candidates,
+                key=lambda p: (
+                    -sum(
+                        1 for j in judges if eligible(j.judge_id, p.project_id)
+                    ),
+                    tiebreak[p.project_id],
+                    p.project_id,
+                ),
+            )
+            anchor_project_ids.extend(
+                p.project_id for p in ranked[:anchors_per_track]
+            )
+        for pid in anchor_project_ids:
+            for j in sorted(judges, key=lambda j: j.judge_id):
+                if not eligible(j.judge_id, pid):
+                    continue
+                if judge_load[j.judge_id] >= max_load:
+                    continue  # anchors respect max_load; the shortfall
+                    # surfaces in `unfilled` below.
+                new_assignments.append(
+                    ProposedAssignment(j.judge_id, pid, is_anchor=True)
+                )
+                judge_load[j.judge_id] += 1
+                judge_projects[j.judge_id].add(pid)
+                project_reviewers[pid].add(j.judge_id)
+
+    # ------------------------------------------------------------------
+    # 5. Order projects most-constrained first
     #    key = (eligible_judge_count asc, need desc, project_id asc)
     # ------------------------------------------------------------------
     def project_sort_key(p: ProjectInput):
@@ -205,12 +271,14 @@ def propose_assignments(
         )
         return (elig_count, -need, p.project_id)
 
-    new_assignments: list[ProposedAssignment] = []
-
     # We iterate until no more need exists or no progress was made.
     # A single pass can leave a project under-covered if a judge that
     # would have helped gets fully loaded by an earlier project; a
     # second pass fixes those cases without infinite loops.
+    # Note: anchor projects already carry their anchor reviewers above,
+    # so the `while ... < target` guard skips them when they are at or
+    # over target; anchor overshoot (more reviewers than target) is
+    # intentional — it is what creates the calibration overlap.
     made_progress = True
     while made_progress:
         made_progress = False
@@ -271,7 +339,7 @@ def propose_assignments(
                 made_progress = True
 
     # ------------------------------------------------------------------
-    # 5. Collect unfilled needs with human-readable reasons
+    # 6. Collect unfilled needs with human-readable reasons
     # ------------------------------------------------------------------
     unfilled: list[UnfilledNeed] = []
     for proj in projects:
@@ -280,6 +348,7 @@ def propose_assignments(
             reason = _unfilled_reason(
                 proj, judges, judge_map, judge_load, max_load, target,
                 judge_projects, project_reviewers,
+                anchors_per_track=anchors_per_track,
             )
             unfilled.append(
                 UnfilledNeed(
@@ -296,6 +365,7 @@ def propose_assignments(
     return AssignmentProposal(
         new_assignments=new_assignments,
         unfilled=unfilled,
+        anchor_project_ids=sorted(anchor_project_ids),
     )
 
 
@@ -308,6 +378,7 @@ def _unfilled_reason(
     target: int,
     judge_projects: dict[str, set[str]],
     project_reviewers: dict[str, set[str]],
+    anchors_per_track: int = 0,
 ) -> str:
     """Produce a human-readable explanation of why a project is under target."""
     total_in_track = sum(
@@ -369,5 +440,10 @@ def _unfilled_reason(
             f"track {proj.track_id!r} has only {effective_eligible} available "
             f"judge(s) after conflicts/load; "
             f"need {still_needed} more reviewer(s) to reach target {target}"
+        )
+    if anchors_per_track > 0 and load_blocked > 0:
+        parts.append(
+            f"Anchor load counts toward max_load "
+            f"(anchors_per_track={anchors_per_track})."
         )
     return " ".join(parts)

@@ -550,5 +550,168 @@ class EdgeCaseTests(unittest.TestCase):
             self.assertIsInstance(a.project_id, str)
 
 
+# ---------------------------------------------------------------------------
+# 9. Anchor projects (packet P7-ANCHORS, step 1)
+# ---------------------------------------------------------------------------
+
+
+class AnchorTests(unittest.TestCase):
+    """anchors_per_track picks calibration anchors before the greedy fill."""
+
+    def test_no_anchors_by_default(self):
+        """Default (and explicit 0) reproduces the pre-anchor behaviour."""
+        judges = [make_judge(f"j{i}") for i in range(3)]
+        projects = [make_project(f"p{i}") for i in range(3)]
+        default = propose_assignments(judges, projects, target=2)
+        explicit = propose_assignments(
+            judges, projects, target=2, anchors_per_track=0
+        )
+        self.assertEqual(default.anchor_project_ids, [])
+        self.assertEqual(explicit.anchor_project_ids, [])
+        for result in (default, explicit):
+            self.assertTrue(
+                all(not a.is_anchor for a in result.new_assignments)
+            )
+        self.assertEqual(
+            [(a.judge_id, a.project_id) for a in default.new_assignments],
+            [(a.judge_id, a.project_id) for a in explicit.new_assignments],
+        )
+
+    def test_anchor_covers_every_eligible_judge_of_track(self):
+        """The anchor is assigned to every eligible judge of its track."""
+        judges = [
+            make_judge("j1", tracks=("t",)),
+            make_judge("j2", tracks=("t",)),
+            make_judge("j_other", tracks=("other",)),
+        ]
+        projects = [
+            make_project("p1", track="t"),
+            make_project("p2", track="t"),
+        ]
+        result = propose_assignments(
+            judges, projects, target=1, anchors_per_track=1, seed="a1"
+        )
+        self.assertEqual(len(result.anchor_project_ids), 1)
+        anchor = result.anchor_project_ids[0]
+        anchored = {
+            (a.judge_id, a.project_id)
+            for a in result.new_assignments
+            if a.is_anchor
+        }
+        self.assertIn(("j1", anchor), anchored)
+        self.assertIn(("j2", anchor), anchored)
+        # The off-track judge never touches the anchor.
+        self.assertNotIn(("j_other", anchor), anchored)
+
+    def test_anchors_one_per_track(self):
+        """Each track gets its own anchor; judges stay in-track."""
+        judges = [
+            make_judge("jt1", tracks=("t1",)),
+            make_judge("jt2", tracks=("t1",)),
+            make_judge("ju1", tracks=("t2",)),
+        ]
+        projects = [
+            make_project("pa", track="t1"),
+            make_project("pb", track="t1"),
+            make_project("pc", track="t2"),
+        ]
+        result = propose_assignments(
+            judges, projects, target=1, anchors_per_track=1, seed="a2"
+        )
+        by_track = {}
+        for pid in result.anchor_project_ids:
+            track = next(
+                p.track_id for p in projects if p.project_id == pid
+            )
+            by_track.setdefault(track, []).append(pid)
+        self.assertEqual(sorted(by_track), ["t1", "t2"])
+        self.assertEqual(len(by_track["t1"]), 1)
+        self.assertEqual(len(by_track["t2"]), 1)
+        for a in result.new_assignments:
+            if a.is_anchor:
+                judge = next(
+                    j for j in judges if j.judge_id == a.judge_id
+                )
+                project = next(
+                    p for p in projects if p.project_id == a.project_id
+                )
+                self.assertIn(project.track_id, judge.track_ids)
+
+    def test_anchors_respect_conflicts(self):
+        """A judge conflicted with the anchor's team skips the anchor."""
+        judges = [
+            make_judge("j_clash", tracks=("t",), conflicts=("tm",)),
+            make_judge("j_ok", tracks=("t",)),
+        ]
+        projects = [make_project("p1", track="t", team="tm")]
+        result = propose_assignments(
+            judges, projects, target=1, anchors_per_track=1, seed="a3"
+        )
+        self.assertEqual(result.anchor_project_ids, ["p1"])
+        anchored = {
+            (a.judge_id, a.project_id)
+            for a in result.new_assignments
+            if a.is_anchor
+        }
+        self.assertNotIn(("j_clash", "p1"), anchored)
+        self.assertIn(("j_ok", "p1"), anchored)
+
+    def test_anchors_prefer_most_eligible_project(self):
+        """The anchor is the project with the most eligible judges."""
+        judges = [
+            make_judge("j1", tracks=("t",)),
+            make_judge("j2", tracks=("t",), conflicts=("tm_few",)),
+            make_judge("j3", tracks=("t",), conflicts=("tm_few",)),
+        ]
+        projects = [
+            make_project("p_few", track="t", team="tm_few"),  # 1 eligible
+            make_project("p_many", track="t", team="tm_many"),  # 3 eligible
+        ]
+        result = propose_assignments(
+            judges, projects, target=1, anchors_per_track=1, seed="a4"
+        )
+        self.assertEqual(result.anchor_project_ids, ["p_many"])
+
+    def test_anchors_deterministic(self):
+        """Same seed → same anchors and assignments."""
+        judges = [make_judge(f"j{i}") for i in range(5)]
+        projects = [make_project(f"p{i}") for i in range(8)]
+
+        def run(seed):
+            result = propose_assignments(
+                judges, projects, target=2,
+                anchors_per_track=1, seed=seed,
+            )
+            return (
+                result.anchor_project_ids,
+                [(a.judge_id, a.project_id, a.is_anchor)
+                 for a in result.new_assignments],
+            )
+
+        self.assertEqual(run("anchor-seed"), run("anchor-seed"))
+
+    def test_anchors_respect_max_load_and_report(self):
+        """Anchor load counts toward max_load; shortfalls name anchors."""
+        judges = [make_judge(f"j{i}") for i in range(2)]
+        projects = [make_project(f"p{i}") for i in range(2)]
+        result = propose_assignments(
+            judges, projects, target=1, max_load=1,
+            anchors_per_track=1, seed="a5",
+        )
+        loads: dict[str, int] = {}
+        for a in result.new_assignments:
+            loads[a.judge_id] = loads.get(a.judge_id, 0) + 1
+        for load in loads.values():
+            self.assertLessEqual(load, 1)
+        # Both judges spent their single slot on the anchor, so the other
+        # project is unfilled and the reason says anchor load is why.
+        self.assertEqual(len(result.unfilled), 1)
+        self.assertIn("Anchor load counts", result.unfilled[0].reason)
+
+    def test_invalid_anchors_raise(self):
+        with self.assertRaises(ValueError):
+            propose_assignments([], [], target=1, anchors_per_track=-1)
+
+
 if __name__ == "__main__":
     unittest.main()

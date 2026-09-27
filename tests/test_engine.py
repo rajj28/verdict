@@ -12,6 +12,8 @@ from results.engine import (  # noqa: E402
     FLIP_CAP,
     Comparison,
     Criterion,
+    EstimabilityJudge,
+    EstimabilitySummary,
     Fit,
     LambdaChoice,
     ReviewInput,
@@ -22,6 +24,7 @@ from results.engine import (  # noqa: E402
     components,
     derived_comparisons,
     diagnostics,
+    estimability,
     evaluate,
     explain,
     fit_additive,
@@ -641,6 +644,72 @@ class RobustnessTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             robustness(reviews, None, 2.0)
         self.assertEqual(FLIP_CAP, 5)
+
+
+class EstimabilityTests(unittest.TestCase):
+    # 6 judges x 8 projects, 3 reviews per project (fixed synthetic design).
+    BASE = [
+        ("J0", "P1"), ("J0", "P2"), ("J0", "P3"), ("J0", "P4"),
+        ("J0", "P5"), ("J0", "P6"), ("J0", "P7"),
+        ("J1", "P0"), ("J1", "P3"), ("J1", "P5"),
+        ("J2", "P0"), ("J2", "P2"),
+        ("J3", "P0"), ("J3", "P4"), ("J3", "P5"), ("J3", "P6"),
+        ("J4", "P1"), ("J4", "P2"), ("J4", "P3"), ("J4", "P6"),
+        ("J4", "P7"),
+        ("J5", "P1"), ("J5", "P4"), ("J5", "P7"),
+    ]
+
+    def anchored(self):
+        judges = sorted({j for j, _ in self.BASE})
+        return sorted(set(self.BASE) | {(j, "PA") for j in judges})
+
+    def test_deterministic(self):
+        first = estimability(self.BASE, reps=50, seed="cal-test")
+        second = estimability(self.BASE, reps=50, seed="cal-test")
+        self.assertIsInstance(first, EstimabilitySummary)
+        self.assertEqual(first, second)
+        self.assertEqual(first.n_pairs, len(self.BASE))
+        self.assertEqual(
+            sorted(first.judges), ["J0", "J1", "J2", "J3", "J4", "J5"]
+        )
+        row = first.judges["J0"]
+        self.assertIsInstance(row, EstimabilityJudge)
+        self.assertEqual(row.n, 7)
+        self.assertEqual(sorted(row.power), [4.0, 8.0, 12.0])
+
+    def test_se_shrinks_as_overlap_grows(self):
+        # Adding a shared anchor project (every judge reviews PA) grows
+        # judge overlap; the expected offset SE must shrink.
+        base = estimability(self.BASE, reps=200, seed="cal-test")
+        anchored = estimability(self.anchored(), reps=200, seed="cal-test")
+        self.assertLess(anchored.median_se, base.median_se)
+
+    def test_power_increases_with_anchors(self):
+        # The same added overlap must raise the mean power to detect an
+        # 8-point judge bias.
+        base = estimability(self.BASE, reps=200, seed="cal-test")
+        anchored = estimability(self.anchored(), reps=200, seed="cal-test")
+        self.assertGreater(anchored.power_at_8, base.power_at_8)
+        self.assertEqual(anchored.power_bias, 8.0)
+
+    def test_bad_input_raises(self):
+        with self.assertRaises(ValueError):
+            estimability(self.BASE, reps=0)
+        with self.assertRaises(ValueError):
+            estimability(self.BASE, bias_grid=())
+        with self.assertRaises(ValueError):
+            estimability(self.BASE, bias_grid=(0.0,))
+        with self.assertRaises(ValueError):
+            estimability(self.BASE, sigma_noise=-1.0)
+        with self.assertRaises(ValueError):
+            estimability(self.BASE, lam=-1.0)
+
+    def test_empty_design(self):
+        res = estimability([], reps=10, seed="cal-test")
+        self.assertEqual(res.judges, {})
+        self.assertEqual(res.n_pairs, 0)
+        self.assertTrue(math.isnan(res.median_se))
+        self.assertTrue(math.isnan(res.power_at_8))
 
 
 if __name__ == "__main__":

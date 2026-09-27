@@ -1,0 +1,239 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% comment %}
+Command center: one row per judge with their pace and projected finish, a
+timeline bar per judge, and the rebalance proposal.
+
+Read-only. command-center.js re-reads /api/v1/events/<slug>/command-center
+every 30 seconds and repaints the same three sections from the same payload the
+server rendered here, so a stale read is never the page's fault. The one
+write (apply the proposal) goes through api-forms.js to the same API.
+{% endcomment %}
+
+{% block title %}Command center &mdash; {{ event.name }}{% endblock %}
+{% block heading %}Judging command center{% endblock %}
+{% block lead %}Pace forecast, projected finish and the work that could be moved off a slow judge.{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="Breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/events/">Events</a></li>
+    <li class="breadcrumb-item"><a href="/manage/{{ event.slug }}/">{{ event.name }}</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Command center</li>
+  </ol>
+</nav>
+{% endblock %}
+
+{% block page_actions %}
+<a class="btn btn-outline-secondary" href="/manage/{{ event.slug }}/progress">Progress</a>
+<button class="btn btn-outline-secondary" type="button" data-command-center-refresh>Refresh now</button>
+{% endblock %}
+
+{% block content %}
+
+<div data-command-center
+     data-api-url="{{ api_url }}"
+     data-rebalance-url="{{ rebalance_url }}"
+     data-refresh-seconds="30"
+     data-payload="{{ command_center_json }}">
+
+  {% if not judging_open %}
+  <div class="alert alert-secondary" role="alert">
+    The judging window is closed: no new reviews are accepted. The forecast below is
+    what is still outstanding, and a rebalance can still move untouched work.
+  </div>
+  {% endif %}
+
+  <section class="mb-4">
+    <div class="stat-grid">
+      <div class="stat-tile">
+        <div class="stat-label">Event finishes</div>
+        <div class="stat-value" data-cc="projected-finish">
+          {% if forecast.projected_finish %}
+            <time datetime="{{ forecast.projected_finish|date:'c' }}">{{ forecast.projected_finish }}</time>
+          {% else %}unknown{% endif %}
+        </div>
+        <div class="stat-sub" data-cc="finish-note">
+          {% if forecast.projected_finish and forecast.judging_close_at %}
+            {% if forecast.projected_finish > forecast.judging_close_at %}
+              after the window shuts
+            {% else %}
+              inside the judging window
+            {% endif %}
+          {% elif forecast.judging_close_at %}
+            judging closes {{ forecast.judging_close_at }}
+          {% else %}
+            no judging close set
+          {% endif %}
+        </div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Judges at risk</div>
+        <div class="stat-value" data-cc="at-risk-count">{{ at_risk_count }}</div>
+        <div class="stat-sub" data-cc="at-risk-note">
+          {% if at_risk_count == 1 %}judge needs help{% else %}judges need help{% endif %}
+        </div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Reviews left</div>
+        <div class="stat-value" data-cc="reviews-left">{{ reviews_left }}</div>
+        <div class="stat-sub" data-cc="reviews-note">across {{ forecast.judges|length }} judges</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Moves proposed</div>
+        <div class="stat-value" data-cc="move-count">{{ proposal.moves|length }}</div>
+        <div class="stat-sub" data-cc="move-note">max load {{ proposal.max_load }}</div>
+      </div>
+    </div>
+    <p class="form-text mt-2 mb-0">
+      Pace is the median gap between a judge&rsquo;s own consecutive <em>live</em> submissions.
+      Imported reviews carry no real timing and are left out. A gap of an hour or more counts
+      as a break, not as work.
+    </p>
+  </section>
+
+  <section class="mb-4">
+    <h2 class="h4">Judge forecast</h2>
+    <div class="table-responsive">
+      <table class="table data-table" id="cc-judges">
+        <thead>
+          <tr>
+            <th scope="col">Judge</th>
+            <th scope="col">Tracks</th>
+            <th scope="col" class="num">Assigned</th>
+            <th scope="col" class="num">Submitted</th>
+            <th scope="col" class="num">Drafts</th>
+            <th scope="col" class="num">Remaining</th>
+            <th scope="col" class="num">Pace</th>
+            <th scope="col">Projected finish</th>
+            <th scope="col">Timeline</th>
+            <th scope="col">Status</th>
+          </tr>
+        </thead>
+        <tbody data-cc="judges">
+          {% for judge in forecast.judges %}
+          <tr{% if judge.at_risk %} class="table-warning"{% endif %}>
+            <td>{{ judge.name }}</td>
+            <td>{{ judge.tracks|join:", " }}</td>
+            <td class="num">{{ judge.assigned }}</td>
+            <td class="num">{{ judge.submitted }}</td>
+            <td class="num">{{ judge.drafts }}</td>
+            <td class="num">{{ judge.remaining }}</td>
+            <td class="num">
+              {% if judge.pace_minutes is not None %}{{ judge.pace_minutes }} min/review
+              {% else %}no pace yet{% endif %}
+            </td>
+            <td>
+              {% if judge.projected_finish %}
+                <time datetime="{{ judge.projected_finish|date:'c' }}">{{ judge.projected_finish }}</time>
+              {% else %}no pace yet{% endif %}
+            </td>
+            <td>
+              <div class="progress" role="img"
+                   aria-label="{{ judge.submitted }} of {{ judge.assigned }} reviews submitted"
+                   style="height:.5rem">
+                <div class="progress-bar" style="width:{% widthratio judge.submitted judge.assigned 100 %}%"></div>
+                {% if judge.remaining %}
+                  <div class="progress-bar {% if judge.at_risk %}bg-danger{% else %}bg-secondary{% endif %}"
+                       style="width:{% widthratio judge.remaining judge.assigned 100 %}%"></div>
+                {% endif %}
+              </div>
+              <div class="stat-sub">{{ judge.submitted }} / {{ judge.assigned }}</div>
+            </td>
+            <td>
+              <span class="status-badge status-{{ judge.status|slugify }}">{{ judge.status }}</span>
+              {% if judge.at_risk %}
+                <div class="stat-sub">{{ judge.reasons|join:", " }}</div>
+              {% endif %}
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="10" class="text-muted">No judges are assigned to this event yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="mb-4">
+    <h2 class="h4">Rebalance proposal</h2>
+    <p class="form-text">
+      Only assignments with no draft and no submission are eligible, and they only move to a
+      judge who covers the same track, has no conflict with the team and is under the load cap.
+      Nothing a judge has started is ever moved.
+    </p>
+    <div class="table-responsive">
+      <table class="table data-table" id="cc-proposal">
+        <thead>
+          <tr>
+            <th scope="col">Project</th>
+            <th scope="col">Track</th>
+            <th scope="col">From</th>
+            <th scope="col">To</th>
+          </tr>
+        </thead>
+        <tbody data-cc="moves">
+          {% for move in proposal.moves %}
+          <tr>
+            <td>
+              {% if move.project_title %}{{ move.project_title }}{% else %}<code>{{ move.project }}</code>{% endif %}
+            </td>
+            <td>{% if move.track_name %}{{ move.track_name }}{% else %}<code>{{ move.track }}</code>{% endif %}</td>
+            <td>{{ move.from_judge_name }}</td>
+            <td>{{ move.to_judge_name }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="4" class="text-muted">
+            No assignment can be moved: nothing is both at risk and untouched.
+          </td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <ul class="list-group mt-2" data-cc="skipped">
+      {% for item in proposal.skipped %}
+      <li class="list-group-item small">
+        {% if item.project_title %}{{ item.project_title }}{% else %}<code>{{ item.project }}</code>{% endif %}
+        &mdash; {{ item.reason }}
+      </li>
+      {% endfor %}
+    </ul>
+    <div class="mt-3">
+      <button class="btn btn-primary" type="button"
+              data-api-method="POST"
+              data-api-url="{{ rebalance_url }}"
+              data-body='{"dry_run": false}'
+              data-success="reload"
+              data-cc-apply
+              data-confirm="Apply this rebalance? Untouched assignments change hands; nothing already started moves.">
+        Apply rebalance
+      </button>
+      <button class="btn btn-outline-secondary" type="button"
+              data-api-method="POST"
+              data-api-url="{{ rebalance_url }}"
+              data-body='{"dry_run": true}'>
+        Preview rebalance
+      </button>
+    </div>
+  </section>
+
+  <section class="mb-4">
+    <h2 class="h4">Why a judge is at risk</h2>
+    <ul class="small text-muted mb-0">
+      <li><strong>projected finish after close</strong> &mdash; their own pace times their remaining
+        reviews ends after the judging window shuts.</li>
+      <li><strong>not started</strong> &mdash; nothing submitted a while after their first assignment
+        arrived (the window shown in the stat tile above).</li>
+      <li><strong>overdue without pace</strong> &mdash; judging is shut, they still owe reviews and
+        they have no submission to measure a pace from.</li>
+    </ul>
+  </section>
+
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/command-center.js' %}"></script>
+{% endblock %}

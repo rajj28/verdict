@@ -14,10 +14,11 @@ from django.db import transaction
 from django.db.models import Q
 from events.models import Event, EventRole, JudgingMode, Role, Track
 from events.policy import judging_window_open
-from judging import assign, policy
+from judging import assign, forecast, policy
 from judging.models import (
     Assignment, AssignmentBatch, AssignmentMethod, Criterion, CriterionScore, Rubric,
-    Comparison, Conflict, ConflictSource, JudgeInvite, Review, ReviewExclusion, ReviewStatus,
+    Comparison, Conflict, ConflictSource, JudgeInvite, Review, ReviewExclusion, ReviewSource,
+    ReviewStatus,
 )
 from projects.models import Project, ProjectStatus
 from teams.models import Team
@@ -609,6 +610,203 @@ def auto_assign(actor: User, event: Event, target: int | None = None, max_load: 
         "unfilled": [{"project": row.project_id, "target": row.target,
                       "assigned": row.assigned, "reason": row.reason} for row in proposal.unfilled],
         "batch": batch,
+    }
+
+
+def _live_submission(row: Assignment):
+    """The timestamp of a live submitted review on this assignment, else None.
+
+    Imported reviews have no real timing: their ``submitted_at`` was written by
+    the import, so counting it would invent a pace nobody worked at.
+    """
+    review = getattr(row, "review", None)
+    if review is None or review.status != ReviewStatus.SUBMITTED:
+        return None
+    if review.source != ReviewSource.LIVE or review.submitted_at is None:
+        return None
+    return review.submitted_at
+
+
+def _own_tracks(role: EventRole, event: Event) -> list[Track]:
+    """The judge's tracks inside this event; a stray cross-event track never counts."""
+    return [track for track in role.tracks.all() if track.event_id == event.pk]
+
+
+def _pace_inputs(judge_roles, event: Event,
+                 assignments: list[Assignment]) -> list[forecast.JudgePaceInput]:
+    """Fold the event's assignments into one forecast input row per judge."""
+    by_judge: dict[int, list[Assignment]] = {}
+    for row in assignments:
+        by_judge.setdefault(row.judge_id, []).append(row)
+    inputs = []
+    for role in judge_roles:
+        rows = by_judge.get(role.pk, [])
+        reviews = [getattr(row, "review", None) for row in rows]
+        stamps = [stamp for stamp in (_live_submission(row) for row in rows) if stamp is not None]
+        inputs.append(forecast.JudgePaceInput(
+            judge_id=role.public_id,
+            name=_name(role.user),
+            tracks=tuple(sorted(track.name for track in _own_tracks(role, event))),
+            assigned=len(rows),
+            submitted=sum(1 for review in reviews
+                          if review is not None and review.status == ReviewStatus.SUBMITTED),
+            drafts=sum(1 for review in reviews
+                       if review is not None and review.status == ReviewStatus.DRAFT),
+            first_assigned_at=min((row.created_at for row in rows), default=None),
+            live_submitted_at=tuple(stamps),
+        ))
+    return inputs
+
+
+def _command_center_data(actor, event: Event, *, for_update: bool = False,
+                         max_load: int | None = None) -> dict:
+    """The forecast and the rebalance proposal, from policy-scoped querysets.
+
+    ``for_update`` swaps the assignment queryset for a locked one so the same
+    numbers can back a write; everything else is identical, so a preview and the
+    apply that follows it can never disagree about why.
+    """
+    policy.require_manager(actor, event)
+    judge_roles = list(policy.visible_judges(actor, event))
+    if for_update:
+        locked = Assignment.objects.select_for_update().filter(event=event)
+        assignments = list(locked.select_related(
+            "judge__user", "review", "project__track", "project__team"))
+    else:
+        assignments = list(policy.visible_assignments(actor, event).select_related(
+            "project__track", "project__team"
+        ).prefetch_related("review"))
+    rows = forecast.build_forecast(_pace_inputs(judge_roles, event, assignments), now(),
+                                   event.judging_close_at)
+    by_judge = {row.judge_id: row for row in rows.judges}
+    projects_by_judge: dict[int, set[str]] = {}
+    for row in assignments:
+        projects_by_judge.setdefault(row.judge_id, set()).add(row.project.public_id)
+    conflict_teams: dict[int, set[str]] = {}
+    for conflict in Conflict.objects.filter(event=event).select_related("team"):
+        conflict_teams.setdefault(conflict.judge_id, set()).add(conflict.team.public_id)
+    receivers = [
+        forecast.RebalanceJudge(
+            judge_id=role.public_id,
+            name=_name(role.user),
+            track_ids=frozenset(track.public_id for track in _own_tracks(role, event)),
+            conflict_team_ids=frozenset(conflict_teams.get(role.pk, set())),
+            assigned=by_judge[role.public_id].assigned,
+            assigned_project_ids=frozenset(projects_by_judge.get(role.pk, set())),
+            projected_finish=by_judge[role.public_id].projected_finish,
+            at_risk=by_judge[role.public_id].at_risk,
+        )
+        for role in judge_roles
+    ]
+    # Only untouched work can move: no review row means neither a draft nor a
+    # submission, and a draft is a judge's work in progress.
+    movables = [
+        forecast.MovableAssignment(
+            assignment_id=row.public_id,
+            judge_id=row.judge.public_id,
+            project_id=row.project.public_id,
+            track_id=row.project.track.public_id if row.project.track_id else "",
+            team_id=row.project.team.public_id,
+            project_title=row.project.title,
+            track_name=row.project.track.name if row.project.track_id else "",
+        )
+        for row in assignments
+        if getattr(row, "review", None) is None and row.project.track_id
+    ]
+    return {
+        "forecast": rows,
+        "proposal": forecast.propose_rebalance(receivers, movables, max_load),
+        "roles": {role.public_id: role for role in judge_roles},
+    }
+
+
+def command_center(actor: User, event: Event) -> dict:
+    """Read side of the command center: the pace forecast and what to do about it."""
+    data = _command_center_data(actor, event)
+    return {
+        "event": event.slug,
+        "forecast": data["forecast"].as_dict(),
+        "proposal": data["proposal"].as_dict(),
+    }
+
+
+@transaction.atomic
+def rebalance(actor: User, event: Event, dry_run: bool = True,
+              max_load: int | None = None) -> dict:
+    """Move untouched assignments off at-risk judges, atomically and audited.
+
+    ``dry_run`` previews the same plan the apply would run: the plan is
+    recomputed under the event lock with the same code, and every row is
+    re-validated before it changes hands, so nothing drafted or submitted ever
+    moves and a judge who starts work mid-plan aborts the whole run (409)
+    rather than having half of it applied.
+    """
+    if not isinstance(dry_run, bool):
+        raise ApiError("invalid", "dry_run must be a boolean.",
+                       fields={"dry_run": ["Expected true or false."]})
+    if max_load is not None and (isinstance(max_load, bool) or not isinstance(max_load, int)
+                                 or max_load < 1):
+        raise ApiError("invalid", "max_load must be a positive integer.",
+                       fields={"max_load": ["Must be positive."]})
+    if dry_run:
+        proposal = _command_center_data(actor, event, max_load=max_load)["proposal"]
+        return {"dry_run": True, "moved": 0, "batch_created": False, **proposal.as_dict()}
+    locked_event = Event.objects.select_for_update().get(pk=event.pk)
+    data = _command_center_data(actor, locked_event, for_update=True, max_load=max_load)
+    proposal = data["proposal"]
+    roles = data["roles"]
+    batch = None
+    if proposal.moves:
+        batch = AssignmentBatch.objects.create(
+            event=locked_event, method=AssignmentMethod.REBALANCE, created_by=actor,
+            params={"max_load": proposal.max_load, "moves": len(proposal.moves)},
+        )
+    moved = 0
+    for move in proposal.moves:
+        row = Assignment.objects.select_for_update().filter(
+            event=locked_event, public_id=move.assignment_id
+        ).select_related("judge__user", "project__team", "project__track").first()
+        if row is None:
+            raise ApiError("rebalance_changed", "An assignment in this rebalance no longer exists.",
+                           status_code=409)
+        if hasattr(row, "review"):
+            raise ApiError("rebalance_started",
+                           f"A judge has already started {row.project.title}; nothing was moved.",
+                           status_code=409)
+        target = roles.get(move.to_judge)
+        if (target is None
+                or not target.tracks.filter(pk=row.project.track_id).exists()
+                or Conflict.objects.filter(event=locked_event, judge=target,
+                                          team=row.project.team).exists()
+                or Assignment.objects.filter(event=locked_event, judge=target,
+                                             project=row.project).exists()):
+            raise ApiError("rebalance_changed",
+                           "Eligibility changed while applying the rebalance plan.",
+                           status_code=409)
+        previous = row.judge
+        audit.services.record(
+            actor, "judging.assignment_rebalanced", event=locked_event, target=row,
+            summary=f"{_name(actor)} moved {row.project.title} from {_name(previous.user)} to "
+                    f"{_name(target.user)} to rebalance judging.",
+            data={"from_judge": previous.public_id, "to_judge": target.public_id,
+                  "project": row.project.public_id},
+        )
+        row.judge = target
+        row.batch = batch
+        row.save(update_fields=["judge", "batch"])
+        moved += 1
+    if batch is not None:
+        audit.services.record(
+            actor, "judging.assignment_batch_created", event=locked_event, target=locked_event,
+            summary=f"{_name(actor)} rebalanced assignments for {locked_event.name}.",
+            data={"method": AssignmentMethod.REBALANCE.value, "moved": moved,
+                  "max_load": proposal.max_load},
+        )
+    return {
+        "dry_run": False,
+        "moved": moved,
+        "batch_created": batch is not None,
+        **proposal.as_dict(),
     }
 
 

@@ -8,6 +8,7 @@ import json
 from decimal import Decimal
 
 from django.core.exceptions import PermissionDenied
+from django.core.serializers.json import DjangoJSONEncoder
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -17,7 +18,7 @@ from core.clock import now
 from core.errors import ApiError
 from events.models import Event, EventRole
 from events.policy import is_judge, judge_role, judging_window_open, visible_events
-from judging import policy
+from judging import policy, services
 from judging.models import JudgeInvite, ReviewStatus
 from projects.models import Project, ProjectStatus
 from projects.policy import visible_answers, visible_images
@@ -226,6 +227,34 @@ def judge_review(request, slug: str, public_id: str):
         "review_url": reverse("judge-review", args=[event.slug, project.public_id]),
         "draft_url": f"/api/v1/events/{event.slug}/judge/reviews/{project.public_id}",
         "submit_url": f"/api/v1/events/{event.slug}/judge/reviews/{project.public_id}/submit",
+    })
+
+
+def command_center(request, slug: str):
+    """/manage/{slug}/command-center: is judging going to finish in time?
+
+    Read-only like every page: the table, the timeline bars and the proposal are
+    rendered from the same payload the JSON API serves, and command-center.js
+    re-reads that API every 30 s. The only write is the rebalance button, which
+    posts through api-forms.js to the same endpoint.
+    """
+    if not request.user.is_authenticated:
+        return _login_redirect(request)
+    event: Event = get_object_or_404(visible_events(), slug=slug)
+    try:
+        payload = services.command_center(request.user, event)
+    except ApiError as error:
+        _refuse(error)
+    return render(request, "manage/command_center.html", {
+        "event": event,
+        "command_center_json": json.dumps(payload, cls=DjangoJSONEncoder),
+        "api_url": f"/api/v1/events/{event.slug}/command-center",
+        "rebalance_url": f"/api/v1/events/{event.slug}/assignments/rebalance",
+        "forecast": payload["forecast"],
+        "proposal": payload["proposal"],
+        "at_risk_count": payload["forecast"]["at_risk_count"],
+        "reviews_left": sum(judge["remaining"] for judge in payload["forecast"]["judges"]),
+        "judging_open": judging_window_open(event),
     })
 
 

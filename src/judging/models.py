@@ -38,6 +38,7 @@ class AssignmentMethod(models.TextChoices):
     MANUAL = "manual", "Manual"
     AUTO = "auto", "Automatic"
     IMPORT = "import", "Import"
+    REBALANCE = "rebalance", "Rebalance"
 
 
 class Rubric(models.Model):

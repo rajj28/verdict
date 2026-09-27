@@ -6,7 +6,8 @@ from django.urls import path
 
 from judging.api import (
     AcceptJudgeInviteView, AutoAssignmentsView, EventAssignmentDetailView, EventAssignmentsView,
-    EventConflictsView, EventJudgeDetailView, EventJudgesView, EventProgressView, EventRubricView,
+    EventCommandCenterView, EventConflictsView, EventJudgeDetailView, EventJudgesView,
+    EventProgressView, EventRebalanceView, EventRubricView,
     JudgeAssignmentsView, JudgeComparisonView, JudgeConflictView, JudgeInvitesView, JudgeReviewView,
     JudgeScoresView, ReviewExclusionView, SubmitJudgeReviewView, EventJudgeScoresView,
     NextPairView,
@@ -25,6 +26,9 @@ urlpatterns = [
     path("events/<slug:slug>/judge/conflicts", JudgeConflictView.as_view(), name="judge-conflict"),
     path("events/<slug:slug>/assignments", EventAssignmentsView.as_view(), name="event-assignments"),
     path("events/<slug:slug>/assignments/auto", AutoAssignmentsView.as_view(), name="auto-assignments"),
+    # Before the <assignment_id> route: "rebalance" would otherwise be read as an id.
+    path("events/<slug:slug>/assignments/rebalance", EventRebalanceView.as_view(),
+         name="event-rebalance"),
     path("events/<slug:slug>/assignments/<str:assignment_id>", EventAssignmentDetailView.as_view(),
          name="assignment-detail"),
     path("judge/assignments", JudgeAssignmentsView.as_view(), name="judge-assignments"),
@@ -35,6 +39,8 @@ urlpatterns = [
     path("events/<slug:slug>/judge/comparisons", JudgeComparisonView.as_view(),
          name="judge-comparisons"),
     path("events/<slug:slug>/progress", EventProgressView.as_view(), name="event-progress"),
+    path("events/<slug:slug>/command-center", EventCommandCenterView.as_view(),
+         name="event-command-center"),
     path("events/<slug:slug>/reviews/<str:review_id>/exclusion", ReviewExclusionView.as_view(),
          name="review-exclusion"),
 ]

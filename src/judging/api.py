@@ -98,6 +98,73 @@ class ExclusionWriteSerializer(serializers.Serializer):
     reason = serializers.CharField(max_length=300)
 
 
+class RebalanceWriteSerializer(serializers.Serializer):
+    dry_run = serializers.BooleanField(default=True)
+    max_load = serializers.IntegerField(required=False, min_value=1)
+
+
+class RebalanceMoveSerializer(serializers.Serializer):
+    assignment = serializers.CharField()
+    from_judge = serializers.CharField()
+    from_judge_name = serializers.CharField()
+    to_judge = serializers.CharField()
+    to_judge_name = serializers.CharField()
+    project = serializers.CharField()
+    project_title = serializers.CharField()
+    track = serializers.CharField()
+    track_name = serializers.CharField()
+
+
+class RebalanceProposalSerializer(serializers.Serializer):
+    max_load = serializers.IntegerField()
+    moves = RebalanceMoveSerializer(many=True)
+    skipped = serializers.ListField(child=serializers.DictField())
+
+
+class RebalanceResponseSerializer(serializers.Serializer):
+    dry_run = serializers.BooleanField()
+    moved = serializers.IntegerField()
+    batch_created = serializers.BooleanField()
+    max_load = serializers.IntegerField()
+    moves = RebalanceMoveSerializer(many=True)
+    skipped = serializers.ListField(child=serializers.DictField())
+
+
+class JudgeForecastSerializer(serializers.Serializer):
+    judge = serializers.CharField()
+    name = serializers.CharField()
+    tracks = serializers.ListField(child=serializers.CharField())
+    assigned = serializers.IntegerField()
+    submitted = serializers.IntegerField()
+    drafts = serializers.IntegerField()
+    remaining = serializers.IntegerField()
+    status = serializers.CharField()
+    pace_minutes = serializers.FloatField(allow_null=True)
+    minutes_left = serializers.FloatField(allow_null=True)
+    projected_finish = serializers.DateTimeField(allow_null=True)
+    first_assigned_at = serializers.DateTimeField(allow_null=True)
+    first_submitted_at = serializers.DateTimeField(allow_null=True)
+    last_submitted_at = serializers.DateTimeField(allow_null=True)
+    at_risk = serializers.BooleanField()
+    reasons = serializers.ListField(child=serializers.CharField())
+
+
+class ForecastSerializer(serializers.Serializer):
+    now = serializers.DateTimeField()
+    judging_close_at = serializers.DateTimeField(allow_null=True)
+    stalled_hours = serializers.FloatField()
+    judges = JudgeForecastSerializer(many=True)
+    projected_finish = serializers.DateTimeField(allow_null=True)
+    at_risk = serializers.BooleanField()
+    at_risk_count = serializers.IntegerField()
+
+
+class CommandCenterSerializer(serializers.Serializer):
+    event = serializers.CharField()
+    forecast = ForecastSerializer()
+    proposal = RebalanceProposalSerializer()
+
+
 class ComparisonWriteSerializer(serializers.Serializer):
     left = serializers.CharField()
     right = serializers.CharField()
@@ -546,6 +613,59 @@ class EventProgressView(APIView):
         event = _event(slug)
         policy.require_manager(request.user, event)
         return Response(policy.progress(event))
+
+
+class EventCommandCenterView(APIView):
+    """``GET /api/v1/events/{slug}/command-center``: the pace forecast and proposal.
+
+    200 for organizers of the event, 403 for a judge or participant, 401
+    anonymous, 404 for an unknown slug. The payload is read-only: it changes
+    nothing, so the page can poll it without writing.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        operation_id="event_command_center",
+        summary="Judge pace forecast, projected finish and rebalance proposal.",
+        description="Per judge: assigned/submitted/drafts, median minutes per review from live "
+                    "submissions, remaining work, projected finish and at-risk reasons. The "
+                    "proposal moves only untouched assignments off at-risk judges.",
+        responses={200: CommandCenterSerializer, 401: None, 403: None, 404: None},
+        tags=["judging"],
+    )
+    def get(self, request, slug: str):
+        event = _event(slug)
+        policy.require_manager(request.user, event)
+        return Response(services.command_center(request.user, event))
+
+
+class EventRebalanceView(APIView):
+    """``POST /api/v1/events/{slug}/assignments/rebalance``: preview or apply.
+
+    ``{"dry_run": true}`` previews; ``{"dry_run": false}`` applies the same plan
+    in one transaction and records an AssignmentBatch with method "rebalance".
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        operation_id="event_rebalance",
+        summary="Preview or apply a rebalance of untouched assignments.",
+        description="Only assignments with no draft and no submission move, and only onto an "
+                    "in-track, non-conflicted judge under max_load. 403 for anyone but an "
+                    "organizer, 409 when a judge started work while the plan was being applied.",
+        request=RebalanceWriteSerializer,
+        responses={200: RebalanceResponseSerializer, 401: None, 403: None, 404: None, 409: None},
+        tags=["judging"],
+    )
+    def post(self, request, slug: str):
+        event = _event(slug)
+        policy.require_manager(request.user, event)
+        serializer = RebalanceWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        result = services.rebalance(request.user, event, **serializer.validated_data)
+        return Response(result)
 
 
 class ReviewExclusionView(APIView):

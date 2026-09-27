@@ -12,4 +12,5 @@ urlpatterns = [
     # The token is a query parameter, never a path segment: the gunicorn access log
     # format records %(U)s, so a path token would be written to disk (section 16).
     path("judge-invite", views.judge_invite, name="judge-invite"),
+    path("manage/<slug:slug>/command-center", views.command_center, name="manage-command-center"),
 ]

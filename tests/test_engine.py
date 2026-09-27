@@ -14,6 +14,7 @@ from results.engine import (  # noqa: E402
     ReviewInput,
     ScoredReview,
     bradley_terry,
+    bradley_terry_raw,
     components,
     derived_comparisons,
     diagnostics,
@@ -21,11 +22,17 @@ from results.engine import (  # noqa: E402
     explain,
     fit_additive,
     judge_table,
+    kendall_tau,
+    leave_one_out,
+    offset_variance,
     outliers,
+    permutation_test,
     rank,
+    rank_agreement,
     raw_scores,
     review_score,
     score_reviews,
+    spearman,
     spread,
 )
 
@@ -229,6 +236,39 @@ class BradleyTerryTests(unittest.TestCase):
         self.assertEqual(len(comps), 2)
         self.assertAlmostEqual(sum(c.weight for c in comps), 1.0)
 
+    def test_raw_fixed_point_satisfies_mm_equations(self):
+        # The plain MM iteration (no in-loop rescaling) converges to the
+        # exact MAP: raw strengths satisfy s_i * denom_i == W_i to 1e-9.
+        comps = [
+            Comparison("A", "B"),
+            Comparison("A", "B"),
+            Comparison("B", "C"),
+            Comparison("A", "C"),
+            Comparison("C", "B"),
+        ]
+        raw = bradley_terry_raw(comps, ["A", "B", "C"])
+        wins: dict[str, float] = {"A": 0.0, "B": 0.0, "C": 0.0}
+        games: dict[tuple[str, str], float] = {}
+        for c in comps:
+            wins[c.winner] += c.weight
+            key = tuple(sorted((c.winner, c.loser)))
+            games[key] = games.get(key, 0.0) + c.weight
+        for i in ("A", "B", "C"):
+            denom = 2.0 / (raw[i] + 1.0)
+            for (a, b), n in games.items():
+                o = b if a == i else (a if b == i else None)
+                if o is not None:
+                    denom += n / (raw[i] + raw[o])
+            self.assertAlmostEqual(raw[i] * denom, wins[i] + 1.0, delta=1e-9)
+
+    def test_log_output_normalizes_raw(self):
+        comps = [Comparison("A", "B"), Comparison("B", "C")]
+        raw = bradley_terry_raw(comps, ["A", "B", "C"])
+        out = bradley_terry(comps, ["A", "B", "C"])
+        total = sum(raw.values())
+        for i in ("A", "B", "C"):
+            self.assertAlmostEqual(out[i], math.log(raw[i] / total))
+
 
 class DiagnosticsTests(unittest.TestCase):
     def test_flags(self):
@@ -330,6 +370,87 @@ class EvaluateTests(unittest.TestCase):
         self.assertEqual(res.method, "normalized")
         with self.assertRaises(ValueError):
             evaluate(reviews, CRIT_0_100, method="zscore")
+
+
+class LeaveOneOutTests(unittest.TestCase):
+    def test_additive_beats_project_mean_on_offset_only_data(self):
+        # Noiseless s = mu_p + b_j on a complete design: the additive fit
+        # predicts a held-out review almost exactly, the project mean errs
+        # by the held-out judge's offset.
+        mu = {"A": 70, "B": 60, "C": 50, "D": 40}
+        b = {"j1": 8, "j2": -3, "j3": -5}
+        reviews = [
+            scored(j, p, mu[p] + b[j]) for j in sorted(b) for p in sorted(mu)
+        ]
+        s = score_reviews(reviews, CRIT_0_100)
+        report = leave_one_out(s, (0.0, 2.0))
+        self.assertEqual(report.skipped, 0)
+        self.assertEqual(report.mean_only.n, len(s))
+        self.assertGreater(report.mean_only.rmse, 1.0)
+        self.assertLess(report.additive[0.0].rmse, 1e-6)
+        self.assertLess(report.additive[0.0].rmse, report.mean_only.rmse)
+        self.assertLess(report.additive[2.0].rmse, report.mean_only.rmse)
+
+    def test_skips_reviews_that_carry_their_only_level_signal(self):
+        # Holding out "solo"'s only review leaves that judge with no data;
+        # holding out J1->B leaves project B with no mate. Only J1->A is
+        # predictable (project mate via "solo", judge kept via B).
+        reviews = [
+            scored("solo", "A", 60),
+            scored("J1", "A", 50),
+            scored("J1", "B", 40),
+        ]
+        report = leave_one_out(score_reviews(reviews, CRIT_0_100), (2.0,))
+        self.assertEqual(report.skipped, 2)
+        self.assertEqual(report.mean_only.n, 1)
+
+
+class PermutationTests(unittest.TestCase):
+    def _two_judge_design(self, bump):
+        # Both judges review the same 8 projects; `bump` is judge A's offset.
+        reviews = []
+        for i in range(8):
+            reviews.append(scored("A", f"P{i}", 50 + bump))
+            reviews.append(scored("B", f"P{i}", 50 - bump))
+        groups = {f"P{i}": "trk" for i in range(8)}
+        return score_reviews(reviews, CRIT_0_100), groups
+
+    def test_small_p_value_when_offsets_injected(self):
+        s, groups = self._two_judge_design(10)
+        self.assertGreater(offset_variance(s, 2.0), 1.0)
+        res = permutation_test(s, groups, n_perm=200, seed=97531, lam=2.0)
+        self.assertEqual(res.n_perm, 200)
+        self.assertLess(res.p_value, 0.05)
+
+    def test_large_p_value_without_judge_effects(self):
+        s, groups = self._two_judge_design(0)
+        res = permutation_test(s, groups, n_perm=200, seed=97531, lam=2.0)
+        self.assertEqual(res.observed, 0.0)
+        self.assertGreater(res.p_value, 0.5)
+
+
+class AgreementTests(unittest.TestCase):
+    def test_identical_rankings_agree_perfectly(self):
+        norm = {"a": 3.0, "b": 2.0, "c": 1.0}
+        strengths = {"a": 30.0, "b": 20.0, "c": 10.0}
+        agr = rank_agreement(norm, strengths)
+        self.assertEqual(agr.n, 3)
+        self.assertAlmostEqual(agr.rho, 1.0)
+        self.assertAlmostEqual(agr.tau, 1.0)
+        self.assertEqual(agr.movers, ())
+
+    def test_reversed_rankings_disagree(self):
+        agr = rank_agreement(
+            {"a": 3.0, "b": 2.0, "c": 1.0}, {"a": 10.0, "b": 20.0, "c": 30.0}
+        )
+        self.assertAlmostEqual(agr.rho, -1.0)
+        self.assertAlmostEqual(agr.tau, -1.0)
+
+    def test_stats_helpers_reject_bad_input(self):
+        with self.assertRaises(ValueError):
+            spearman([1.0], [1.0, 2.0])
+        with self.assertRaises(ValueError):
+            kendall_tau([], [])
 
 
 if __name__ == "__main__":

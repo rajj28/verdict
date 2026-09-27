@@ -323,3 +323,7 @@ Assume each reviewer spends limited time, checks claims adversarially, and has a
 - **Screenshots** of the key screens (organizer overview with data issues, judge console, results with rank movement, decision record Verify) in `docs/screenshots/`, linked from README.
 - **Fresh-clone rehearsal on a clean volume** before freeze, with the exact commands and timings recorded in README (first build, boot to healthy, run.py, verify_tiers.py).
 - Every number in the docs must be reproducible from a command in the repo; no hand-typed results.
+
+
+## 19. Decision: adaptive λ (2026-09-27)
+The locked scoring policy fixes the *procedure*: λ is chosen by seeded 5-fold cross-validation over the grid (0.5, 1, 2, 5, 10, 20, 50, 100), ties to the larger λ, computed at preview/publication time and stored in the publication params. `Event.shrinkage_lambda` becomes nullable, null = auto (default; the fixture event uses auto). A fixed number may still be predeclared before the scoring lock. Evidence: on the fixture, leave-one-review-out RMSE is 19.28 for project means, 19.86 for λ=2, 19.17 for λ=10; permutation test p = 0.381 (no detectable judge effect), so a fixed λ=2 over-corrects; simulations show strong gains from normalization when judges are biased. The migration for the nullable field lands with P2-RX (after P1-EV, which owns src/events/ now).

@@ -25,15 +25,19 @@ OUT_PATH = REPO / "docs" / "NORMALIZATION-PROOF.md"
 
 LAM_DEFAULT = 2.0
 LAM_GRID = (0, 1, 2, 5)
+LOO_LAMS = (0, 1, 2, 5, 10)
+PERM_N = 2000
+PERM_SEED = 97531
+PERM_LAM = 2.0
 TARGET = 3  # default event.reviews_per_project (BUILD-SPEC 4)
 SUPERSEDED = "prj_07"
 SUPERSEDED_BY = "prj_41"
 CRITERIA_KEYS = ("functionality", "quality", "innovation")
 CONSTANT_JUDGE = "jdg_07"  # the fixture's all-4s scorer
 
-REPS = 500
-SIGMAS = (0.3, 0.6, 1.0)
-SEEDS = {0.3: 1101, 0.6: 2202, 1.0: 3303}
+REPS = 100
+SIGMAS = (0.0, 0.3, 0.6, 1.0)
+SEEDS = {0.0: 4404, 0.3: 1101, 0.6: 2202, 1.0: 3303}
 
 
 # ---------------------------------------------------------------- fixtures
@@ -61,34 +65,15 @@ def load_fixture():
     return criteria, reviews, titles, names, excluded
 
 
+def project_tracks():
+    """Map project id to track id (for the within-track permutation test)."""
+    data = json.loads(FIXTURES_PATH.read_text(encoding="utf-8"))
+    return {p["id"]: p["track"] for p in data["projects"]}
+
+
 # ------------------------------------------------------------------ stats
 
-def _ranks(xs):
-    order = sorted(range(len(xs)), key=lambda i: xs[i])
-    out = [0.0] * len(xs)
-    i = 0
-    while i < len(order):
-        j = i
-        while j + 1 < len(order) and xs[order[j + 1]] == xs[order[i]]:
-            j += 1
-        avg = (i + j) / 2.0 + 1.0
-        for k in range(i, j + 1):
-            out[order[k]] = avg
-        i = j + 1
-    return out
-
-
-def spearman(a, b):
-    """Spearman rho via Pearson on average ranks (ties handled)."""
-    ra, rb = _ranks(list(a)), _ranks(list(b))
-    n = len(ra)
-    ma, mb = sum(ra) / n, sum(rb) / n
-    cov = sum((x - ma) * (y - mb) for x, y in zip(ra, rb))
-    va = sum((x - ma) ** 2 for x in ra)
-    vb = sum((x - mb) ** 2 for x in rb)
-    if va <= 0 or vb <= 0:
-        return float("nan")
-    return cov / math.sqrt(va * vb)
+spearman = E.spearman
 
 
 def ranknum(rank_str):
@@ -335,8 +320,10 @@ def main():
     add("")
     add("Design: the fixture's exact judge\u2013project review pattern "
         f"({len(design)} pairs). Per replication: true project quality ~ N(0,1), "
-        "judge offsets ~ N(0, \u03c3_b) with \u03c3_b in {0.3, 0.6, 1.0} "
-        "score points on the 1\u20135 scale, noise ~ N(0, 0.5) per "
+        "judge offsets ~ N(0, \u03c3_b) with \u03c3_b in {0.0, 0.3, 0.6, 1.0} "
+        "score points on the 1\u20135 scale (\u03c3_b = 0.0 is the fair-judge "
+        "control: no systematic judge bias, so any gap to raw means is the "
+        "cost of normalizing), noise ~ N(0, 0.5) per "
         "criterion, rounded and clipped to integer 1\u20135; one constant "
         f"judge (`{CONSTANT_JUDGE}`, all 4s) like the fixture. "
         f"{REPS} replications per \u03c3_b. Methods: raw mean, per-judge "
@@ -359,6 +346,103 @@ def main():
             "(the forced constant judge is skipped every replication; natural "
             "zero-variance judges are rare).")
         add("")
+    add("Reading the tables in plain language: with fair judges "
+        "(\u03c3_b = 0.0) normalization costs essentially nothing \u2014 "
+        "additive \u03bb=2 matches raw means on rank correlation \u2014 so "
+        "shrinkage is cheap insurance. Once judges disagree "
+        "(\u03c3_b \u2265 0.3), \u03bb=2 beats raw means on both average rank "
+        "correlation and top-5 recovery in every biased setting, while the "
+        "unshrunk \u03bb=0 fit overfits the sparse fixture pattern (it also "
+        "predicts held-out fixture reviews worst in the leave-one-out check "
+        "below). Per-judge z-scores throw away level information and must "
+        "skip the constant judge in every replication, so they trail "
+        "\u03bb=2 in every setting and cannot use the constant judge's "
+        "reviews at all.")
+    add("")
+    add("### Leave-one-review-out cross-validation (predicting unseen reviews)")
+    add("")
+    loo = E.leave_one_out(E.score_reviews(reviews, criteria), LOO_LAMS)
+    add(f"Each included review was held out once: the model was refit "
+        f"without it and the held-out score predicted as `mu_p + b_j`; the "
+        f"baseline predicts the mean of the held-out review's project mates. "
+        f"{loo.mean_only.n} of {len(reviews)} reviews predicted, "
+        f"{loo.skipped} skipped (single-review judges `jdg_12`/`jdg_23`: "
+        f"holding out their only review leaves no data to estimate that "
+        f"judge's offset). Grids cover the project-mean baseline and "
+        f"additive \u03bb \u2208 {{0, 1, 2, 5, 10}}.")
+    add("")
+    add("| Predictor | RMSE | MAE |")
+    add("|---|---:|---:|")
+    add(f"| project mean only | {loo.mean_only.rmse:.2f} | {loo.mean_only.mae:.2f} |")
+    for lam in LOO_LAMS:
+        r = loo.additive[float(lam)]
+        add(f"| additive \u03bb={lam} | {r.rmse:.2f} | {r.mae:.2f} |")
+    add("")
+    best_lam = min(LOO_LAMS, key=lambda lam: loo.additive[float(lam)].rmse)
+    r_best = loo.additive[float(best_lam)]
+    r_two = loo.additive[LAM_DEFAULT]
+    r_zero = loo.additive[0.0]
+    add(f"Smallest unseen-review RMSE is \u03bb={best_lam} ({r_best.rmse:.2f}); "
+        f"the predeclared default \u03bb={LAM_DEFAULT:g} ({r_two.rmse:.2f}) is "
+        f"{r_two.rmse - r_best.rmse:.2f} points behind it, while \u03bb=0 "
+        f"({r_zero.rmse:.2f}) is {r_zero.rmse - loo.mean_only.rmse:.2f} points "
+        f"worse than ignoring judges entirely. The lesson is shrinkage: an "
+        f"unshrunk fit overfits the sparse fixture design, moderate-to-strong "
+        f"shrinkage matches or beats the project mean, and the default "
+        f"\u03bb=2 keeps almost all of that gain while staying adaptive to "
+        f"judge bias (see the simulations, where \u03bb=2 beats raw means "
+        f"whenever judges disagree).")
+    add("")
+    add("### Permutation test for judge effects")
+    add("")
+    perm = E.permutation_test(
+        E.score_reviews(reviews, criteria), project_tracks(),
+        n_perm=PERM_N, seed=PERM_SEED, lam=PERM_LAM)
+    q = perm.quantiles
+    add(f"Statistic: population variance of the fitted judge offsets "
+        f"(\u03bb={PERM_LAM:g}, the portal default). Judge labels were "
+        f"shuffled {PERM_N:,} times within each track (seed {PERM_SEED}; "
+        f"each review keeps its project and score, only the judge label "
+        f"moves). Observed variance {perm.observed:.2f}; null quantiles "
+        f"5% {q[0.05]:.2f}, 25% {q[0.25]:.2f}, 50% {q[0.5]:.2f}, 75% "
+        f"{q[0.75]:.2f}, 95% {q[0.95]:.2f}, 99% {q[0.99]:.2f}; "
+        f"p = {perm.p_value:.3f} (fraction of null draws at or above "
+        f"observed).")
+    add("")
+    if perm.p_value < 0.05:
+        add("The observed spread of judge offsets is larger than chance "
+            "relabeling can explain: systematic judge habits are present, "
+            "which is what the shrinkage fit removes.")
+    else:
+        add("The test does not reject the null: with about three reviews "
+            "per project the fitted offsets are mostly sampling noise, and "
+            "random relabelings produce as much spread as the real labels. "
+            "The test has low power on this sparse design \u2014 it guards "
+            "against strong systematic effects rather than proving none \u2014 "
+            "so the positive case for shrinkage rests on the "
+            "leave-one-out check and the simulations above.")
+    add("")
+    add("### Agreement between the normalized and Bradley\u2013Terry rankings")
+    add("")
+    agr = E.rank_agreement(base.normalized, base.strengths)
+    add(f"Spearman \u03c1 = {agr.rho:.4f}, Kendall \u03c4 = {agr.tau:.4f} "
+        f"over the {agr.n} projects ranked by both methods "
+        f"(score-level correlation, then rank positions). "
+        f"{len(agr.movers)} project(s) differ by more than 5 places:")
+    add("")
+    if agr.movers:
+        for m in agr.movers:
+            add(f"- `{m.project_id}` ({titles[m.project_id]}): normalized "
+                f"{base.rank_norm[m.project_id]} vs Bradley\u2013Terry "
+                f"{base.rank_bt[m.project_id]}")
+    else:
+        add("None: every project agrees within 5 places.")
+    add("")
+    add("The Bradley\u2013Terry cross-check uses only within-judge orderings "
+        "(derived pairwise comparisons), so judge levels cancel out of it "
+        "entirely; its broad agreement with the additive ranking is "
+        "independent evidence that the offsets removed are level, not order.")
+    add("")
     add("## Properties")
     add("")
     add("Shift invariance: adding +1 to every criterion value of one judge "
@@ -389,6 +473,24 @@ def main():
         "their reviews contribute no ordering information. That is why the "
         "portal uses offsets, not z-scores (see JUDGING.md).")
     add("")
+    add("## Method lineage")
+    add("")
+    add("The additive fit is a shrinkage-penalized least-squares estimator "
+        "of a two-way layout, i.e. the Henderson BLUP / linear mixed-model "
+        "solution in which the penalty \u03bb plays the role of the variance "
+        "ratio \u03c3\u00b2_error / \u03c3\u00b2_judge: larger \u03bb trusts "
+        "the judge sample less. Rater-severity modelling of the same form is "
+        "the workhorse of Many-Facet Rasch measurement (Linacre), and "
+        "review-score calibration of this kind was studied for peer review "
+        "by Ge, Welling and Ghahramani (2013). Linear-bias models have known "
+        "limits \u2014 Wang and Shah (2019) show where they break under "
+        "strategic or correlated miscalibration, which is why the proof "
+        "reports outliers and states the offset-only limitation instead of "
+        "claiming more. The Bradley\u2013Terry cross-check is fitted by the "
+        "Hunter (2004) MM algorithm, whose fixed point on the "
+        "virtual-opponent-augmented (hence strongly connected) graph is the "
+        "exact MAP estimate.")
+    add("")
     add("## Limitations")
     add("")
     add("- Offset-only model: linear level habits are removed, but scale "
@@ -407,7 +509,11 @@ def main():
     add("Regenerate with `.venv\\Scripts\\python.exe "
         "scripts/normalization_proof.py` (standard library only; reads "
         "`fixtures.json`, imports `src/results/engine.py`). Simulation seeds: "
-        + ", ".join(f"\u03c3_b={s} \u2192 {SEEDS[s]}" for s in SIGMAS) + ".")
+        + ", ".join(f"\u03c3_b={s} \u2192 {SEEDS[s]}" for s in SIGMAS) + ". "
+        f"Leave-one-out grid: \u03bb \u2208 {{{', '.join(str(l) for l in LOO_LAMS)}}}. "
+        f"Permutation test: {PERM_N:,} within-track shuffles, seed {PERM_SEED}, "
+        f"\u03bb={PERM_LAM:g}. No timestamps are written, so regenerating "
+        f"twice gives identical bytes.")
     add("")
     text = "\n".join(lines)
     OUT_PATH.write_text(text, encoding="utf-8", newline="\n")

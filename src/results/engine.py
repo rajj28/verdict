@@ -14,6 +14,7 @@ shrinkage-penalized least-squares fit (BUILD-SPEC section 9).
 from __future__ import annotations
 
 import math
+import random
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Collection, Iterable, Mapping, Sequence
@@ -394,16 +395,88 @@ def rank(values: Mapping[str, float]) -> dict[str, str]:
     return out
 
 
-def bradley_terry(
+def _average_ranks(xs: Sequence[float]) -> list[float]:
+    """Average ranks (1-based, ties share the mean rank), in input order."""
+    order = sorted(range(len(xs)), key=lambda i: xs[i])
+    out = [0.0] * len(xs)
+    i = 0
+    while i < len(order):
+        j = i
+        while j + 1 < len(order) and xs[order[j + 1]] == xs[order[i]]:
+            j += 1
+        avg = (i + j) / 2.0 + 1.0
+        for k in range(i, j + 1):
+            out[order[k]] = avg
+        i = j + 1
+    return out
+
+
+def spearman(xs: Sequence[float], ys: Sequence[float]) -> float:
+    """Spearman rho: Pearson correlation of average ranks (ties averaged).
+
+    Returns NaN when either side is constant. Raises ``ValueError`` on
+    length mismatch or empty input.
+    """
+    xs, ys = list(xs), list(ys)
+    if len(xs) != len(ys) or not xs:
+        raise ValueError("spearman needs two non-empty equal-length inputs")
+    ra, rb = _average_ranks(xs), _average_ranks(ys)
+    n = len(ra)
+    ma, mb = sum(ra) / n, sum(rb) / n
+    cov = sum((x - ma) * (y - mb) for x, y in zip(ra, rb))
+    va = sum((x - ma) ** 2 for x in ra)
+    vb = sum((x - mb) ** 2 for x in rb)
+    if va <= 0 or vb <= 0:
+        return float("nan")
+    return cov / math.sqrt(va * vb)
+
+
+def kendall_tau(xs: Sequence[float], ys: Sequence[float]) -> float:
+    """Kendall tau-b between two score lists (ties corrected).
+
+    Pairs tied on both sides are ignored; pairs tied on one side count
+    in that side's denominator only. Returns NaN when undefined (fewer
+    than 2 items or no untied pair on a side). Raises ``ValueError`` on
+    length mismatch or empty input.
+    """
+    xs, ys = list(xs), list(ys)
+    if len(xs) != len(ys) or not xs:
+        raise ValueError("kendall_tau needs two non-empty equal-length inputs")
+    conc = disc = tie_x = tie_y = 0
+    n = len(xs)
+    for i in range(n):
+        for j in range(i + 1, n):
+            sx = (xs[i] > xs[j]) - (xs[i] < xs[j])
+            sy = (ys[i] > ys[j]) - (ys[i] < ys[j])
+            if sx != 0 and sy != 0:
+                if sx == sy:
+                    conc += 1
+                else:
+                    disc += 1
+            elif sx == 0 and sy == 0:
+                continue
+            elif sx == 0:
+                tie_x += 1
+            else:
+                tie_y += 1
+    denom = math.sqrt((conc + disc + tie_x) * (conc + disc + tie_y))
+    if denom <= 0:
+        return float("nan")
+    return (conc - disc) / denom
+
+
+def bradley_terry_raw(
     comparisons: Sequence[Comparison], items: Collection[str]
 ) -> dict[str, float | None]:
-    """Bradley-Terry strengths via Hunter (2004) MM, with a virtual-opponent prior.
+    """Unnormalized Bradley-Terry strengths at the exact MM fixed point.
 
-    Every item with at least one real comparison gets 1 extra win and 1
-    extra loss against a fixed average-strength virtual opponent, so
-    undefeated items stay finite. Output is log-strength (log of the
-    normalized strength); items with no comparisons map to None
-    (unranked). Converges at max change < 1e-10, cap 10 000.
+    Hunter (2004) MM update with a fixed virtual opponent of strength 1
+    (each item gets 1 extra win and 2 extra games against it, so
+    undefeated items stay finite). The virtual opponent already fixes the
+    scale, so the plain iteration converges to the exact MAP estimate on
+    the (augmented, hence strongly connected) graph: no in-loop
+    rescaling. Items with no comparisons map to None. Converges at max
+    change < 1e-10, cap 10 000.
     """
     items = list(items)
     known = set(items)
@@ -445,18 +518,32 @@ def bradley_terry(
             for o, games in opponents[i]:
                 denom += games / (strength[i] + strength[o])
             new[i] = total_wins[i] / denom if denom > 0 else strength[i]
-        scale = len(active) / (sum(new.values()) or 1.0)
-        change = 0.0
-        for i in active:
-            new[i] *= scale
-            change = max(change, abs(new[i] - strength[i]))
+        change = max(abs(new[i] - strength[i]) for i in active)
         strength = new
         if change < TOL:
             break
-    total = sum(strength.values())
     for i in active:
-        out[i] = math.log(strength[i] / total)
+        out[i] = strength[i]
     return out
+
+
+def bradley_terry(
+    comparisons: Sequence[Comparison], items: Collection[str]
+) -> dict[str, float | None]:
+    """Bradley-Terry strengths via Hunter (2004) MM, with a virtual-opponent prior.
+
+    Every item with at least one real comparison gets 1 extra win and 1
+    extra loss against a fixed average-strength virtual opponent, so
+    undefeated items stay finite. Output is log-strength (log of the
+    normalized strength); items with no comparisons map to None
+    (unranked). Converges at max change < 1e-10, cap 10 000.
+    """
+    raw = bradley_terry_raw(comparisons, items)
+    total = sum(s for s in raw.values() if s is not None)
+    return {
+        i: (math.log(s / total) if s is not None else None)
+        for i, s in raw.items()
+    }
 
 
 def derived_comparisons(scored: Sequence[ScoredReview]) -> list[Comparison]:
@@ -547,6 +634,199 @@ def spread(scored: Sequence[ScoredReview], fit: Fit) -> Spread:
         for rs in by_judge.values()
     ]
     return Spread(before=_pstdev(raw_means), after=_pstdev(adj_means))
+
+
+@dataclass(frozen=True)
+class LooResult:
+    """LOO prediction error for one predictor: RMSE, MAE over ``n`` held-out reviews."""
+
+    rmse: float
+    mae: float
+    n: int
+
+
+@dataclass(frozen=True)
+class LooReport:
+    """Leave-one-review-out cross-validation: project-mean baseline plus additive fits."""
+
+    mean_only: LooResult
+    additive: dict[float, LooResult]
+    skipped: int
+
+
+def leave_one_out(
+    scored: Sequence[ScoredReview],
+    lambdas: Sequence[float] = (0.0, 1.0, 2.0, 5.0, 10.0),
+) -> LooReport:
+    """Refit without each review and predict it as ``mu_p + b_j``.
+
+    The baseline predicts the mean of the held-out review's project
+    mates. Reviews whose project or judge has no other review are
+    skipped and counted (their level cannot be estimated without them).
+    Iteration follows the input order, so results are deterministic.
+    """
+    scored = list(scored)
+    lambdas = tuple(float(lam) for lam in lambdas)
+    se_mean = ae_mean = 0.0
+    se = {lam: 0.0 for lam in lambdas}
+    ae = {lam: 0.0 for lam in lambdas}
+    n = skipped = 0
+    for i, held in enumerate(scored):
+        rest = scored[:i] + scored[i + 1 :]
+        mates = [r.score for r in rest if r.project_id == held.project_id]
+        judge_kept = any(r.judge_id == held.judge_id for r in rest)
+        if not mates or not judge_kept:
+            skipped += 1
+            continue
+        n += 1
+        pred_mean = sum(mates) / len(mates)
+        se_mean += (pred_mean - held.score) ** 2
+        ae_mean += abs(pred_mean - held.score)
+        for lam in lambdas:
+            fit = fit_additive(rest, lam)
+            pred = fit.mu[held.project_id] + fit.offset[held.judge_id]
+            se[lam] += (pred - held.score) ** 2
+            ae[lam] += abs(pred - held.score)
+
+    def pack(s: float, a: float) -> LooResult:
+        if n == 0:
+            return LooResult(rmse=float("nan"), mae=float("nan"), n=0)
+        return LooResult(rmse=math.sqrt(s / n), mae=a / n, n=n)
+
+    return LooReport(
+        mean_only=pack(se_mean, ae_mean),
+        additive={lam: pack(se[lam], ae[lam]) for lam in lambdas},
+        skipped=skipped,
+    )
+
+
+def offset_variance(scored: Sequence[ScoredReview], lam: float) -> float:
+    """Population variance of the fitted judge offsets (the permutation statistic)."""
+    fit = fit_additive(list(scored), lam)
+    if not fit.offset:
+        return 0.0
+    xs = sorted(fit.offset.values())
+    mean = sum(xs) / len(xs)
+    return sum((x - mean) ** 2 for x in xs) / len(xs)
+
+
+#: Quantile levels reported for the permutation null distribution.
+PERM_QUANTILES = (0.05, 0.25, 0.5, 0.75, 0.95, 0.99)
+
+
+@dataclass(frozen=True)
+class PermutationResult:
+    """Judge-effect permutation test: observed offset variance vs the relabelled null."""
+
+    observed: float
+    quantiles: dict[float, float]
+    p_value: float  # fraction of null draws >= observed
+    n_perm: int
+
+
+def permutation_test(
+    scored: Sequence[ScoredReview],
+    project_group: Mapping[str, str],
+    n_perm: int = 2000,
+    seed: int = 0,
+    lam: float = 2.0,
+) -> PermutationResult:
+    """Shuffle judge labels within groups and refit (seeded, deterministic).
+
+    Each review keeps its project and score; judge labels are permuted
+    among reviews in the same ``project_group`` (projects missing from
+    the map form singleton groups, so their labels never move). The
+    statistic is :func:`offset_variance`: real judge habits inflate the
+    observed value, while relabelling destroys them. Groups iterate in
+    sorted order and labels shuffle in review order from ``seed``.
+    """
+    scored = list(scored)
+    observed = offset_variance(scored, lam)
+    by_group: dict[str, list[int]] = {}
+    for i, r in enumerate(scored):
+        by_group.setdefault(project_group.get(r.project_id, r.project_id), []).append(
+            i
+        )
+    ordered = [by_group[g] for g in sorted(by_group)]
+    rng = random.Random(seed)
+    nulls: list[float] = []
+    for _ in range(n_perm):
+        new_judge = [""] * len(scored)
+        for idxs in ordered:
+            labels = [scored[i].judge_id for i in idxs]
+            rng.shuffle(labels)
+            for i, lab in zip(idxs, labels):
+                new_judge[i] = lab
+        shuffled = [
+            ScoredReview(r.review_id, new_judge[i], r.project_id, r.score)
+            for i, r in enumerate(scored)
+        ]
+        nulls.append(offset_variance(shuffled, lam))
+    nulls.sort()
+    quantiles = (
+        {q: nulls[min(n_perm - 1, int(q * n_perm))] for q in PERM_QUANTILES}
+        if n_perm
+        else {}
+    )
+    p_value = sum(1 for v in nulls if v >= observed) / n_perm if n_perm else float(
+        "nan"
+    )
+    return PermutationResult(
+        observed=observed, quantiles=quantiles, p_value=p_value, n_perm=n_perm
+    )
+
+
+@dataclass(frozen=True)
+class RankMover:
+    """A project ranked far apart by the normalized and Bradley-Terry orders."""
+
+    project_id: str
+    norm_pos: int
+    bt_pos: int
+    gap: int
+
+
+@dataclass(frozen=True)
+class Agreement:
+    """Normalized vs Bradley-Terry ranking agreement over projects ranked by both."""
+
+    rho: float
+    tau: float
+    n: int
+    movers: tuple[RankMover, ...]
+
+
+def rank_agreement(
+    normalized: Mapping[str, float],
+    strengths: Mapping[str, float | None],
+    threshold: int = 5,
+) -> Agreement:
+    """Spearman rho / Kendall tau between normalized scores and BT strengths.
+
+    Only projects with a BT strength take part in the correlations.
+    ``movers`` lists projects whose competition-rank positions (see
+    :func:`rank`) differ by more than ``threshold`` places, worst first.
+    """
+    paired = sorted(
+        (p, mu, strengths[p]) for p, mu in normalized.items() if strengths.get(p) is not None
+    )
+    xs = [mu for _, mu, _ in paired]
+    ys = [s for _, _, s in paired]
+    r_norm = {p: int(r.lstrip("=")) for p, r in rank({p: mu for p, mu, _ in paired}).items()}
+    r_bt = {p: int(r.lstrip("=")) for p, r in rank({p: s for p, _, s in paired}).items()}
+    movers = sorted(
+        (
+            RankMover(p, r_norm[p], r_bt[p], abs(r_norm[p] - r_bt[p]))
+            for p, _, _ in paired
+            if abs(r_norm[p] - r_bt[p]) > threshold
+        ),
+        key=lambda m: (-m.gap, m.project_id),
+    )
+    if not paired:
+        return Agreement(rho=float("nan"), tau=float("nan"), n=0, movers=())
+    return Agreement(
+        rho=spearman(xs, ys), tau=kendall_tau(xs, ys), n=len(paired), movers=tuple(movers)
+    )
 
 
 def evaluate(

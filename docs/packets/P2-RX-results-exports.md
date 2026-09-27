@@ -25,3 +25,6 @@ Tests: unranked handling, acknowledge requirement, verify identical after publis
 ## Winning items (BUILD-SPEC 17) in this packet
 - Feedback release: `POST|DELETE /events/{slug}/feedback-release` (organizer, only after a publication, audited); `GET /events/{slug}/projects/{id}/feedback` returns the official score, rank, per-criterion averages and de-attributed comments (shuffled, no judge ids) to that team's members after release and to organizers always; 403 for other teams, judges and visitors.
 - Tests: team sees own feedback only after release; other team 403; judge 403; payload contains no judge id/name.
+
+## Decision (BUILD-SPEC 19)
+- Migration: `Event.shrinkage_lambda` nullable, null = auto (default); fixture event and demo event set to null. Results services call `engine.evaluate(..., lam='auto')` when null and store the chosen λ and CV table in publication params; the results page shows 'λ chosen by 5-fold cross-validation = X'.

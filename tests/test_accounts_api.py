@@ -528,7 +528,8 @@ class PageTests(TestCase):
         self.assertEqual(response.context["stats"]["events"], 2)
         self.assertEqual(response.context["stats"]["projects"], 45)
         self.assertEqual(response.context["stats"]["judges"], 33)
-        self.assertContains(response, "stat-tile")
+        self.assertContains(response, 'class="ledger"')
+        self.assertContains(response, '<span class="v">45</span>', html=False)
         self.assertContains(response, "Submissions open")
 
     def test_the_home_page_is_a_fixed_number_of_queries(self):

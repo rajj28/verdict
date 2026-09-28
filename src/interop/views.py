@@ -83,8 +83,9 @@ def certificate_page(request, slug, kind, public_id):
 
 def verify_certificate(request, slug, kind, public_id):
     event = _event(slug)
-    valid = certificates.verify_code(event, kind, public_id, request.GET.get("code", ""))
-    return JsonResponse({"valid": valid, "kind": kind})
+    return JsonResponse(certificates.verification_result(
+        event, kind, public_id, request.GET.get("code", "")
+    ))
 
 
 def public_keys(request):

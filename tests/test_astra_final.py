@@ -5,6 +5,9 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 
 from events import services as event_services
+from events.models import Prize
+from interop.certificates import verification_code
+from projects import services as project_services
 from results import services as results_services
 from results.models import ResultPublication
 from tests import test_publication_policy as publication_tests
@@ -62,3 +65,25 @@ class FinalPublicationTests(TestCase):
         self.assertFalse(result["unchanged_since_publication"]["matches"])
         self.assertIn("reviews_per_project changed after publication",
                       result["unchanged_since_publication"]["differences"])
+
+    def test_public_certificate_verification_reports_superseding_award(self):
+        prize = Prize.objects.create(event=self.event, name="Grand Prize")
+        first = self.publish()
+        certificate_id = f"{first.public_id}.{prize.public_id}.1"
+        code = verification_code(self.event, "winner", certificate_id)
+        url = f"/certificates/verify/{self.event.slug}/winner/{certificate_id}"
+        client = APIClient()
+        initial = client.get(url, {"code": code}).json()
+        self.assertTrue(initial["valid"])
+        self.assertEqual(initial.get("publication_version"), first.version)
+        self.assertIsNone(initial.get("superseded_by_version"))
+        project_services.disqualify_project(self.organizer, self.project, "Correction")
+        second = self.publish("Corrected award")
+        replaced = client.get(url, {"code": code}).json()
+        self.assertTrue(replaced["valid"])
+        self.assertEqual(replaced["publication_version"], first.version)
+        self.assertEqual(replaced["superseded_by_version"], second.version)
+        self.assertEqual(client.get(url, {"code": "wrong"}).json(),
+                         {"valid": False, "kind": "winner"})
+        self.assertNotIn("people", replaced)
+        self.assertNotIn("owner_ids", replaced)

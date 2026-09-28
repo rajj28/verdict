@@ -12,11 +12,22 @@ def verification_code(event, kind: str, public_id: str) -> str:
 
 
 def verify_code(event, kind: str, public_id: str, supplied: str) -> bool:
-    if not isinstance(supplied, str) or not supplied.isascii():
-        return False
-    if certificate_data(event, kind, public_id) is None:
-        return False
-    return code_matches(verification_code(event, kind, public_id), supplied)
+    return verification_result(event, kind, public_id, supplied)["valid"]
+
+
+def verification_result(event, kind: str, public_id: str, supplied: str) -> dict:
+    """A valid capability reveals award version status, never recipient data."""
+    result = {"valid": False, "kind": kind}
+    if not code_matches(verification_code(event, kind, public_id), supplied):
+        return result
+    data = certificate_data(event, kind, public_id)
+    if data is None:
+        return result
+    result["valid"] = True
+    if kind == "winner":
+        result["publication_version"] = data["publication_version"]
+        result["superseded_by_version"] = data["superseded_by_version"]
+    return result
 
 
 def code_matches(expected: str, supplied: str) -> bool:

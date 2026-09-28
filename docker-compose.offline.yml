@@ -1,0 +1,10 @@
+# Network-off check. Proves the seeded portal needs nothing outside the laptop:
+#   docker compose down -v
+#   docker compose -f docker-compose.yml -f docker-compose.offline.yml up -d --wait
+#   docker compose exec web python -c "import urllib.request; urllib.request.urlopen('https://pypi.org', timeout=5)"   # fails: no internet
+#   docker compose exec web python run.py .dogfood.toml                                                                 # 7/7 PASS
+# The default network becomes internal (no route out). Docker Desktop may then stop
+# publishing port 8080 to the host, which is why the checks run inside the container.
+networks:
+  default:
+    internal: true

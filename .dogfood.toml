@@ -2,8 +2,8 @@
 base_url = "http://localhost:8080"
 
 [tiers]
-claimed = ["T1", "T2"]
-pitch = "A one-command hackathon portal where deadlines, judge isolation and score normalization are enforced in the backend and explained to organizers."
+claimed = ["T1", "T2", "T3", "T4"]
+pitch = "A one-command, offline hackathon portal whose judging you can check: NIPS-style judge-bias correction, honest rank uncertainty, consequence previews and results anyone can re-verify."
 
 [auth]
 organizer   = "Authorization: Bearer vd_demo_organizer_7f2a91c4e0b3"

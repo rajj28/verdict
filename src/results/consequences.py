@@ -272,9 +272,18 @@ def _sentence(
         "publish": "Publishing results",
     }[action]
     sentence = f"{subject} changes {phrase}"
-    if winner_before != winner_after and winner_before and winner_after:
+    if awards:
+        # Name the real prize; never invent one the event does not have.
+        first = awards[0]
+        before = ", ".join(item["title"] for item in first["before"]) or "no one"
+        after = ", ".join(item["title"] for item in first["after"]) or "no one"
+        sentence += f": {first['prize_name']} moves from {before} to {after}"
+        if len(awards) > 1:
+            more = len(awards) - 1
+            sentence += f" (and {more} more award{'s' if more != 1 else ''})"
+    elif winner_before != winner_after and winner_before and winner_after:
         sentence += (
-            f": Best overall moves from {winner_before['title']} "
+            f": first place moves from {winner_before['title']} "
             f"to {winner_after['title']}"
         )
     return sentence + "."

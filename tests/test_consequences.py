@@ -212,6 +212,58 @@ class ConsequencesTests(TestCase):
         self.assertContains(response, "data-publish-form")
         self.assertContains(response, "consequence-dialog")
 
+    def test_sentence_names_real_prizes_only(self):
+        """Without prizes the sentence says 'first place', never an invented award."""
+        from results.consequences import _sentence
+        winner_a = {"project": "prj_a", "title": "Alpha"}
+        winner_b = {"project": "prj_b", "title": "Beta"}
+        ranks = [{"project": "prj_a", "title": "Alpha", "before": "1", "after": "2"}]
+        no_prizes = _sentence("disqualify", "prj_a", ranks, [], winner_a, winner_b)
+        self.assertIn("0 awards: first place moves from Alpha to Beta", no_prizes)
+        self.assertNotIn("Best overall", no_prizes)
+        awards = [{"prize": "prz_1", "prize_name": "Most useful",
+                   "before": [{"project": "prj_a", "title": "Alpha"}],
+                   "after": [{"project": "prj_b", "title": "Beta"}]}]
+        with_prize = _sentence("disqualify", "prj_a", ranks, awards, winner_a, winner_b)
+        self.assertIn("1 award: Most useful moves from Alpha to Beta", with_prize)
+
+    def test_consequence_dialog_is_not_inside_any_tab_pane(self):
+        """A modal inside a hidden tab pane can never be shown.
+
+        The dialog opens from the Ranking and Data issues tabs (disqualify,
+        exclude, put back) as well as from Publish, so it must live outside
+        every tab pane.
+        """
+        from html.parser import HTMLParser
+
+        class Finder(HTMLParser):
+            VOID = {"br", "img", "input", "meta", "link", "hr", "source", "col", "wbr"}
+
+            def __init__(self):
+                super().__init__()
+                self.stack, self.ancestors = [], None
+
+            def handle_starttag(self, tag, attrs):
+                attrs = dict(attrs)
+                if attrs.get("id") == "consequence-dialog":
+                    self.ancestors = [a.get("class") or "" for a in self.stack]
+                if tag not in self.VOID:
+                    self.stack.append(attrs)
+
+            def handle_endtag(self, tag):
+                if tag not in self.VOID and self.stack:
+                    self.stack.pop()
+
+        self.client.force_login(self.organizer)
+        page = self.client.get(f"/manage/{self.event.slug}/results").content.decode()
+        finder = Finder()
+        finder.feed(page)
+        self.assertIsNotNone(finder.ancestors, "consequence dialog not rendered")
+        self.assertFalse(
+            [cls for cls in finder.ancestors if "tab-pane" in cls.split()],
+            "the consequence dialog sits inside a tab pane",
+        )
+
     def test_consequences_reject_unknown_and_inapplicable_targets(self):
         with self.assertRaises(ApiError) as missing:
             consequences.consequences(self.event, "disqualify", "prj_missing")

@@ -9,8 +9,10 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from collections import Counter
+from collections import Counter, OrderedDict
 from collections.abc import Callable
+from copy import deepcopy
+from threading import RLock
 from typing import Any
 
 from django.core.cache import cache
@@ -28,6 +30,17 @@ from projects.models import Project, ProjectStatus
 from results import engine, prizes
 from results.models import ResultPublication
 
+_PREVIEW_CACHE_SIZE = 16
+_PREVIEW_ENGINE_VERSION = 1
+_PREVIEW_CACHE: OrderedDict[str, dict] = OrderedDict()
+_PREVIEW_CACHE_LOCK = RLock()
+
+
+
+def clear_preview_cache() -> None:
+    """Forget memoized previews (the test runner calls this before every test)."""
+    with _PREVIEW_CACHE_LOCK:
+        _PREVIEW_CACHE.clear()
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -321,10 +334,10 @@ def _preview_from(
     eligible_project_ids: list[str],
     *,
     project_status_overrides: dict[str, str] | None = None,
+    include_robustness: bool = True,
 ) -> dict:
-    """Run the official computation from explicit inputs for live and hypothetical data."""
+    """Return a memoized official computation for this complete input snapshot."""
     comparisons = _comparison_inputs(event)
-    live_enabled = _uses_live_pairwise(event, comparisons)
     criteria = engine_criteria(event)
     if not criteria and event.ranking_method != "pairwise":
         raise ApiError(
@@ -334,6 +347,85 @@ def _preview_from(
         )
     lam_val = _lam_for_event(event)
     rubric_version = _rubric_version(event)
+    prize_specs = _prize_specs(event)
+    params = {
+        "method": event.ranking_method,
+        "lam": lam_val,
+        "lambda_source": "auto" if lam_val == "auto" else "fixed",
+        "rubric_version": rubric_version,
+        "criteria": _criteria_snapshot(event),
+        **_comparison_params(
+            event, criteria, _uses_live_pairwise(event, comparisons)
+        ),
+    }
+    canonical = _canonical_inputs(
+        event,
+        inc,
+        exc,
+        params,
+        comparisons,
+        eligible_project_ids=eligible_project_ids,
+        project_status_overrides=project_status_overrides,
+    )
+    cache_key = _digest({
+        "input_digest": _digest(canonical),
+        "event_id": event.pk,
+        "judging_mode": event.judging_mode,
+        "pairwise_min_comparisons": event.pairwise_min_comparisons,
+        "prize_values": [
+            {
+                "prize_id": spec.prize_id,
+                "value": spec.value,
+            }
+            for spec in prize_specs
+        ],
+        "project_status_overrides": project_status_overrides or {},
+        "engine_version": _PREVIEW_ENGINE_VERSION,
+        "include_robustness": include_robustness,
+    })
+    with _PREVIEW_CACHE_LOCK:
+        cached = _PREVIEW_CACHE.get(cache_key)
+        if cached is not None:
+            _PREVIEW_CACHE.move_to_end(cache_key)
+            return deepcopy(cached)
+
+    result = _preview_from_uncached(
+        event,
+        inc,
+        exc,
+        eligible_project_ids,
+        project_status_overrides=project_status_overrides,
+        include_robustness=include_robustness,
+        comparisons=comparisons,
+        criteria=criteria,
+        lam_val=lam_val,
+        rubric_version=rubric_version,
+        prize_specs=prize_specs,
+    )
+    with _PREVIEW_CACHE_LOCK:
+        _PREVIEW_CACHE[cache_key] = deepcopy(result)
+        _PREVIEW_CACHE.move_to_end(cache_key)
+        while len(_PREVIEW_CACHE) > _PREVIEW_CACHE_SIZE:
+            _PREVIEW_CACHE.popitem(last=False)
+    return result
+
+
+def _preview_from_uncached(
+    event: Event,
+    inc: list[dict],
+    exc: list[dict],
+    eligible_project_ids: list[str],
+    *,
+    project_status_overrides: dict[str, str] | None,
+    include_robustness: bool,
+    comparisons: list[dict],
+    criteria: list[engine.Criterion],
+    lam_val: float | str,
+    rubric_version: int,
+    prize_specs: list[prizes.PrizeSpec],
+) -> dict:
+    """Compute the preview without memoization for cache misses and verification tests."""
+    live_enabled = _uses_live_pairwise(event, comparisons)
 
     review_inputs = [
         engine.ReviewInput(
@@ -358,6 +450,7 @@ def _preview_from(
         method=event.ranking_method,
         projects=all_submitted,
         comparisons=_engine_comparisons(comparisons) if live_enabled else None,
+        include_robustness=include_robustness,
     )
     if result.method == "pairwise" and len(result.pairwise_components) > 1:
         result.rank = {project: "unranked" for project in all_submitted}
@@ -382,7 +475,6 @@ def _preview_from(
         project_status_overrides=project_status_overrides,
     ))
     snapshot = _project_snapshot(result, event, project_status_overrides)
-    prize_specs = _prize_specs(event)
     allocation = _allocate(result, event, snapshot, prize_specs)
     top_k = _uncertainty_top_k(prize_specs)
     if result.method == "normalized":

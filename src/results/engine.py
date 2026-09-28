@@ -1336,6 +1336,7 @@ def evaluate(
     method: str = "normalized",
     projects: Collection[str] | None = None,
     comparisons: Sequence[Comparison] | None = None,
+    include_robustness: bool = True,
 ) -> Result:
     """Bundle every engine output for a results preview.
 
@@ -1344,9 +1345,10 @@ def evaluate(
     ``lam`` is a shrinkage penalty or ``"auto"`` for the predeclared
     :func:`select_lambda` procedure; the chosen value is stored on
     ``Result.lam`` and the full choice on ``Result.lambda_choice``.
-    ``Result.robustness`` always carries the :func:`robustness`
-    certificate for the official rule, or an explicit unavailable result
-    for pairwise sensitivity. Normalized sensitivity holds lambda fixed.
+    ``Result.robustness`` carries the :func:`robustness` certificate for
+    the official rule, or an explicit unavailable result for pairwise
+    sensitivity, unless a caller explicitly skips that optional analysis.
+    Normalized sensitivity holds lambda fixed.
 
     Explicit ``comparisons`` selects the live source for a pairwise official
     ranking, including an empty list (all unranked). ``None`` preserves the
@@ -1408,7 +1410,7 @@ def evaluate(
     judges = judge_table(scored, fit)
     diag = diagnostics(reviews, target, known)
     sp = spread(scored, fit)
-    rob = robustness(reviews, criteria, lam_value, method=method)
+    rob = robustness(reviews, criteria, lam_value, method=method) if include_robustness else None
     return Result(
         method=method,
         lam=lam_value,

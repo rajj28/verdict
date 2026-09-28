@@ -78,7 +78,12 @@ def what_if(
             })
 
     return services._preview_from(
-        event, inc, exc, eligible, project_status_overrides=status_overrides
+        event,
+        inc,
+        exc,
+        eligible,
+        project_status_overrides=status_overrides,
+        include_robustness=False,
     )
 
 

@@ -1,5 +1,6 @@
 """Regressions found during the final PostgreSQL integrity audit."""
 import copy
+from unittest import mock
 
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
@@ -68,6 +69,18 @@ class FinalPublicationTests(TestCase):
         self.assertFalse(result["unchanged_since_publication"]["matches"])
         self.assertIn("reviews_per_project changed after publication",
                       result["unchanged_since_publication"]["differences"])
+
+    def test_verify_recomputes_instead_of_using_preview_cache(self):
+        publication = self.publish()
+        results_services.preview(self.event)
+        with mock.patch.object(
+            results_services.engine,
+            "evaluate",
+            wraps=results_services.engine.evaluate,
+        ) as evaluate:
+            result = results_services.verify_publication(publication)
+        self.assertEqual(result["verdict"], "identical")
+        self.assertEqual(evaluate.call_count, 1)
 
     def test_public_certificate_verification_reports_superseding_award(self):
         prize = Prize.objects.create(event=self.event, name="Grand Prize")

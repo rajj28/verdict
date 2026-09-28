@@ -1,5 +1,6 @@
 from datetime import timedelta
 from decimal import Decimal
+from unittest import mock
 
 from django.db import connection
 from django.test import TestCase
@@ -129,6 +130,78 @@ class ConsequencesTests(TestCase):
         self.assertEqual(current["rows"], hypothetical["rows"])
         self.assertEqual(current["awards"], hypothetical["awards"])
         self.assertEqual(current["input_digest"], hypothetical["input_digest"])
+
+    def test_cached_preview_matches_fresh_computation_field_for_field(self):
+        cached = results_services.preview(self.event)
+        included, excluded = results_services._build_input_lists(self.event)
+        eligible = list(
+            Project.objects.filter(event=self.event, status=ProjectStatus.SUBMITTED)
+            .values_list("public_id", flat=True)
+        )
+        fresh = results_services._preview_from_uncached(
+            self.event,
+            included,
+            excluded,
+            eligible,
+            project_status_overrides=None,
+            include_robustness=True,
+            comparisons=results_services._comparison_inputs(self.event),
+            criteria=results_services.engine_criteria(self.event),
+            lam_val=results_services._lam_for_event(self.event),
+            rubric_version=results_services._rubric_version(self.event),
+            prize_specs=results_services._prize_specs(self.event),
+        )
+        self.assertEqual(cached, fresh)
+        cached["rows"][0]["title"] = "mutated by caller"
+        self.assertNotEqual(
+            results_services.preview(self.event)["rows"][0]["title"],
+            "mutated by caller",
+        )
+
+    def test_hypothetical_consequence_skips_robustness_but_keeps_uncertainty(self):
+        with mock.patch.object(
+            results_services.engine,
+            "robustness",
+            wraps=results_services.engine.robustness,
+        ) as robustness:
+            hypothetical = consequences.what_if(
+                self.event, disqualify=(self.leader.public_id,)
+            )
+        robustness.assert_not_called()
+        self.assertIn("uncertainty", hypothetical)
+        self.assertIn("available", hypothetical["uncertainty"])
+
+    def test_preview_cache_misses_when_reviews_prizes_or_project_status_change(self):
+        with results_services._PREVIEW_CACHE_LOCK:
+            results_services._PREVIEW_CACHE.clear()
+        with mock.patch.object(
+            results_services,
+            "_preview_from_uncached",
+            wraps=results_services._preview_from_uncached,
+        ) as compute:
+            first = results_services.preview(self.event)
+            results_services.preview(self.event)
+            self.assertEqual(compute.call_count, 1)
+
+            self._set_score(self.reviews[(1, self.leader.public_id)], 3)
+            after_review = results_services.preview(self.event)
+            self.assertNotEqual(first["input_digest"], after_review["input_digest"])
+            self.assertEqual(compute.call_count, 2)
+
+            Prize.objects.filter(pk=self.prize.pk).update(name="New prize name")
+            after_prize = results_services.preview(self.event)
+            self.assertNotEqual(after_review["input_digest"], after_prize["input_digest"])
+            self.assertEqual(compute.call_count, 3)
+
+            Project.objects.filter(pk=self.leader.pk).update(status=ProjectStatus.WITHDRAWN)
+            after_status = results_services.preview(self.event)
+            self.assertNotEqual(after_prize["input_digest"], after_status["input_digest"])
+            self.assertEqual(compute.call_count, 4)
+            leader_row = next(
+                row for row in after_status["rows"]
+                if row["project_id"] == self.leader.public_id
+            )
+            self.assertEqual(leader_row["status"], "withdrawn")
 
     def test_disqualifying_leader_is_exact_and_read_only(self):
         before = results_services.preview(self.event)

@@ -279,6 +279,8 @@ FILE_UPLOAD_MAX_MEMORY_SIZE = 6 * 1024 * 1024
 if len(sys.argv) > 1 and sys.argv[1] == "test":
     # PBKDF2 hashing 120+ fixture users would dominate the suite runtime.
     PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
+    # Each test starts with an empty results preview cache (see results.services).
+    TEST_RUNNER = "core.test_runner.PreviewCacheIsolatingRunner"
 
 LOGGING = {
     "version": 1,

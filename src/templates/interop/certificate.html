@@ -25,6 +25,11 @@
   {% if certificate.people %}<p>{{ certificate.people|join:", " }}</p>{% endif %}
   {% if certificate.project %}<p>For {{ certificate.project }}</p>{% endif %}
   {% if certificate.detail %}<p>{{ certificate.detail }}</p>{% endif %}
+  {% if kind == "winner" and certificate.superseded_by_version %}
+    <p class="alert alert-light border">
+      Superseded by publication version {{ certificate.superseded_by_version }}.
+    </p>
+  {% endif %}
   <p>{{ event.name }}{% if certificate.issued_at %} &middot; {{ certificate.issued_at|date:"F j, Y" }}{% endif %}</p>
   <hr>
   <p class="mb-1">Verification code: <strong>{{ verification_code }}</strong></p>

@@ -33,7 +33,7 @@ ranking from the stored inputs with the current engine (BUILD-SPEC section 16).
 <section class="card-verdict p-3 mb-4">
   <dl class="row mb-0">
     <dt class="col-sm-3">Publication</dt>
-    <dd class="col-sm-9 mono">{{ publication.public_id }}</dd>
+    <dd class="col-sm-9 mono">Version {{ publication.version }} · {{ publication.public_id }}</dd>
     <dt class="col-sm-3">Published</dt>
     <dd class="col-sm-9">
       <time datetime="{{ publication.published_at|date:'c' }}">{{ publication.published_at|utc }}</time>
@@ -72,23 +72,37 @@ ranking from the stored inputs with the current engine (BUILD-SPEC section 16).
 <section class="mb-4">
   <h2 class="h4">Verify</h2>
   <p class="form-hint">
-    Recomputes the ranking from the stored inputs with the current engine, and
-    re-hashes the live database. Both must match: the same inputs must give the
-    same rows, and the data behind them must not have moved.
+    The first verdict replays only the stored inputs using the current engine.
+    The second compares the current live inputs with the published snapshot;
+    changed inputs may be an authorized correction awaiting a new version.
   </p>
   <button class="btn btn-primary" type="button"
           data-api-method="POST" data-api-url="{{ verify_api }}"
-          data-response-field="verdict" data-response-target="#verify-verdict"
+          data-response-field="reproducible_verdict" data-response-target="#verify-reproducible"
           data-response-reveal="#verify-box">
     Verify this publication
   </button>
   <div class="mt-3" id="verify-box" hidden>
-    <p class="lead" id="verify-verdict"></p>
-    <p class="form-hint" id="verify-detail"></p>
+    <h3 class="h5">Reproducible</h3>
+    <p class="lead" id="verify-reproducible"></p>
+    <p class="form-hint" id="verify-reproducible-detail"></p>
+    <h3 class="h5">Unchanged since publication</h3>
+    <p class="lead" id="verify-unchanged"></p>
+    <p class="form-hint" id="verify-differences"></p>
     <button class="btn btn-sm btn-outline-secondary" type="button"
             data-api-method="POST" data-api-url="{{ verify_api }}"
-            data-response-field="detail" data-response-target="#verify-detail">
-      Show which checks ran
+            data-response-field="reproducible_detail" data-response-target="#verify-reproducible-detail">
+      Show replay details
+    </button>
+    <button class="btn btn-sm btn-outline-secondary" type="button"
+            data-api-method="POST" data-api-url="{{ verify_api }}"
+            data-response-field="unchanged_verdict" data-response-target="#verify-unchanged">
+      Check current inputs
+    </button>
+    <button class="btn btn-sm btn-outline-secondary" type="button"
+            data-api-method="POST" data-api-url="{{ verify_api }}"
+            data-response-field="difference_text" data-response-target="#verify-differences">
+      Show field differences
     </button>
   </div>
 </section>
@@ -119,6 +133,44 @@ ranking from the stored inputs with the current engine (BUILD-SPEC section 16).
           </tr>
         {% empty %}
           <tr><td colspan="5" class="form-hint">No review was included.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="mb-4">
+  <h2 class="h4">Project fields recorded at publication</h2>
+  {% if record.project_snapshot_backfilled %}
+    <p class="form-hint">
+      This legacy publication's project snapshot was backfilled from the best available records.
+    </p>
+  {% endif %}
+  <div class="table-responsive">
+    <table class="data-table">
+      <caption class="visually-hidden">Stored public project projection</caption>
+      <thead>
+        <tr>
+          <th scope="col">Project</th>
+          <th scope="col">Title</th>
+          <th scope="col">Team</th>
+          <th scope="col">Track</th>
+          <th scope="col">Status</th>
+          <th scope="col">Status reason</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in record.project_snapshot %}
+          <tr>
+            <td><code>{{ row.project_id }}</code></td>
+            <td>{{ row.title }}</td>
+            <td>{{ row.team }}</td>
+            <td>{{ row.track|default:"—" }}</td>
+            <td>{{ row.status }}</td>
+            <td>{{ row.status_reason|default:"—" }}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="6" class="form-hint">No project snapshot is available.</td></tr>
         {% endfor %}
       </tbody>
     </table>

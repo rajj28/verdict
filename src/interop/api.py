@@ -20,6 +20,151 @@ from interop import policy, services
 from interop.exports import EXPORT_KINDS, event_json, export_csv
 from interop.certificates import certificate_index, verification_code
 from core.csvutil import write_csv
+from rest_framework import serializers
+
+from core.schema import error_responses
+
+TAGS = ["interop"]
+
+
+# --- serializers ---------------------------------------------------------
+
+
+class ImportRequestSerializer(serializers.Serializer):
+    """A fixtures-shaped document, as an object.
+
+    Field-by-field keys depend on the source document, so the body is documented
+    as the free-form object it is; the import report is what says what happened.
+    """
+
+    event = serializers.DictField(
+        required=False, help_text="Event document; its id seeds the slug."
+    )
+    users = serializers.ListField(child=serializers.DictField(), required=False)
+    teams = serializers.ListField(child=serializers.DictField(), required=False)
+    projects = serializers.ListField(child=serializers.DictField(), required=False)
+    reviews = serializers.ListField(child=serializers.DictField(), required=False)
+    assignments = serializers.ListField(child=serializers.DictField(), required=False)
+    criteria = serializers.ListField(child=serializers.DictField(), required=False)
+
+
+class ImportReportSerializer(serializers.Serializer):
+    """What one import did. Compared by meaning, not only by counts."""
+
+    source_id = serializers.CharField(help_text="Public id of the source document.")
+    slug = serializers.CharField(help_text="Slug the event was created under; suffixed on collision.")
+    counts = serializers.DictField(
+        help_text="Row counts per table, so a caller can check meaning rather than totals."
+    )
+    superseded = serializers.ListField(
+        child=serializers.DictField(), help_text="Objects replaced by this import."
+    )
+    constant_scorers = serializers.ListField(child=serializers.DictField())
+    under_reviewed = serializers.ListField(child=serializers.DictField())
+    notes = serializers.ListField(
+        child=serializers.CharField(), help_text="Anything the importer refused or adjusted."
+    )
+    fixture_sha256 = serializers.CharField(
+        help_text="Digest of the exact bytes imported, so the source can be identified later."
+    )
+    fixture_bytes = serializers.IntegerField()
+
+
+class WebhookEndpointSerializer(serializers.Serializer):
+    """A subscriber. The signing secret is never returned by the list or the delete."""
+
+    public_id = serializers.CharField()
+    url = serializers.CharField(help_text="Absolute https URL the deliveries are posted to.")
+    event_types = serializers.ListField(
+        child=serializers.CharField(),
+        help_text="Subscribed action names, or ['*'] for everything emitted.",
+    )
+    is_active = serializers.BooleanField()
+
+
+class WebhookEndpointListSerializer(serializers.Serializer):
+    endpoints = WebhookEndpointSerializer(many=True)
+
+
+class WebhookEndpointCreatedSerializer(serializers.Serializer):
+    """The only time the signing secret is returned; store it now or not at all."""
+
+    public_id = serializers.CharField()
+    url = serializers.CharField()
+    event_types = serializers.ListField(child=serializers.CharField())
+    secret = serializers.CharField(
+        help_text="HMAC signing secret. Shown once; deliveries carry "
+                  "'X-Verdict-Signature' derived from it."
+    )
+
+
+class WebhookEndpointCreateSerializer(serializers.Serializer):
+    url = serializers.CharField(
+        help_text="Absolute https URL. Plain http, loopback, link-local and private ranges "
+                  "are refused as unsafe_webhook_url."
+    )
+    event_types = serializers.ListField(
+        child=serializers.CharField(), required=False,
+        help_text="Action names to subscribe to. Defaults to every emitted event.",
+    )
+
+
+class WebhookEndpointDisabledSerializer(serializers.Serializer):
+    public_id = serializers.CharField()
+    is_active = serializers.BooleanField(
+        help_text="Always false: an endpoint is disabled, never deleted, so its delivery "
+                  "history stays auditable."
+    )
+
+
+class WebhookDeliveryAckSerializer(serializers.Serializer):
+    delivery_id = serializers.CharField(help_text="Public id of the queued delivery.")
+    status = serializers.CharField(
+        help_text="'pending' now. Delivery happens on a worker with retries, leasing and "
+                  "duplicate suppression; 202 means accepted, not delivered."
+    )
+
+
+class CertificateIndexRowSerializer(serializers.Serializer):
+    kind = serializers.CharField(help_text="'participation', 'judge' or 'award'.")
+    public_id = serializers.CharField()
+    label = serializers.CharField(allow_blank=True)
+    subject = serializers.CharField(allow_blank=True)
+    people = serializers.ListField(child=serializers.CharField())
+    detail = serializers.CharField(required=False, allow_blank=True)
+    project = serializers.CharField(required=False, allow_blank=True)
+
+
+class JudgeRecordsIssuedSerializer(serializers.Serializer):
+    records = serializers.ListField(
+        child=serializers.CharField(), help_text="Judge record ids that now exist."
+    )
+    count = serializers.IntegerField()
+
+
+class JudgeRecordRevokedSerializer(serializers.Serializer):
+    record_id = serializers.CharField()
+    revoked = serializers.BooleanField(
+        help_text="Always true. A revocation is recorded and verifiable; it does not "
+                  "erase the record or the reviews behind it."
+    )
+
+
+class SignedRecordSerializer(serializers.Serializer):
+    """One half of a verifiable record: the claims, and the signature over them."""
+
+    record = serializers.DictField(
+        help_text="kid, record_id, event and judge sub-objects, and issued_at."
+    )
+    signature = serializers.CharField(help_text="Base64 Ed25519 signature over the record.")
+
+
+class RecordVerificationSerializer(serializers.Serializer):
+    valid = serializers.BooleanField()
+    reason = serializers.CharField(
+        help_text="Why it failed, or 'Signature is valid.' This checks the signature "
+                  "against the published key, not who issued the record."
+    )
 
 
 def _get_event(slug: str):
@@ -62,10 +207,10 @@ class EventExportView(APIView):
                 enum=list(EXPORT_KINDS),
             ),
         ],
+        tags=TAGS,
         responses={
             (200, "text/csv"): OpenApiTypes.STR,
-            403: OpenApiResponse(description="Not an organizer of this event."),
-            404: OpenApiResponse(description="No such event or export kind."),
+            **error_responses(401, 403, 404),
         },
     )
     def get(self, request: Request, slug: str, kind: str) -> HttpResponse:
@@ -92,10 +237,10 @@ class EventJsonExportView(APIView):
         parameters=[
             OpenApiParameter("slug", str, OpenApiParameter.PATH, description="Event slug."),
         ],
+        tags=TAGS,
         responses={
             (200, "application/json"): OpenApiTypes.STR,
-            403: OpenApiResponse(description="Not an organizer of this event."),
-            404: OpenApiResponse(description="No such event."),
+            **error_responses(401, 403, 404),
         },
     )
     def get(self, request: Request, slug: str) -> HttpResponse:
@@ -120,12 +265,14 @@ class ImportView(APIView):
     @extend_schema(
         operation_id="import_fixture",
         summary="Import a fixtures-shaped JSON as a new event (admin/host).",
-        responses={
-            201: OpenApiResponse(description="Import report."),
-            400: OpenApiResponse(description="Invalid fixture."),
-            403: OpenApiResponse(description="Not an admin or host."),
-            409: OpenApiResponse(description="Already imported or slug taken."),
-        },
+        description="Admins and hosts only. Accepts a JSON body or a multipart file upload. "
+                    "A taken slug gets a numeric suffix rather than overwriting anything. The "
+                    "report records the sha256 of the exact bytes, so the same import can be "
+                    "recognised later; an already-imported source is refused rather than "
+                    "applied twice.",
+        request={"application/json": ImportRequestSerializer},
+        tags=TAGS,
+        responses={201: ImportReportSerializer, **error_responses(400, 401, 403, 409, 413)},
     )
     def post(self, request: Request) -> Response:
         user = request.user
@@ -179,6 +326,18 @@ class ImportView(APIView):
 class WebhookCollectionView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        operation_id="event_webhooks",
+        summary="List the event's webhook subscribers.",
+        description="Organizer only. Subscribers see only action names and URLs; a signing "
+                    "secret is never returned here.",
+        parameters=[
+            OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                             description="Event slug."),
+        ],
+        responses={200: WebhookEndpointListSerializer, **error_responses(401, 403, 404)},
+        tags=TAGS,
+    )
     def get(self, request: Request, slug: str) -> Response:
         event = _get_event(slug)
         _require_organizer(request.user, event)
@@ -191,6 +350,22 @@ class WebhookCollectionView(APIView):
             "created_at": endpoint.created_at,
         } for endpoint in rows]})
 
+    @extend_schema(
+        operation_id="event_webhook_subscribe",
+        summary="Subscribe a URL to an event's webhooks.",
+        description="Organizer only. The target is validated as a safe absolute https URL. "
+                    "The signing secret is returned once here. Deliveries carry scoped "
+                    "payloads only: no private score or judge note ever leaves the portal, "
+                    "whatever the subscription says.",
+        request=WebhookEndpointCreateSerializer,
+        parameters=[
+            OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                             description="Event slug."),
+        ],
+        responses={201: WebhookEndpointCreatedSerializer,
+                   **error_responses(400, 401, 403, 404)},
+        tags=TAGS,
+    )
     def post(self, request: Request, slug: str) -> Response:
         event = _get_event(slug)
         body = request.data
@@ -210,6 +385,24 @@ class WebhookCollectionView(APIView):
 class WebhookEndpointDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        operation_id="event_webhook_unsubscribe",
+        summary="Disable a webhook subscriber.",
+        description="Organizer only. The endpoint is disabled rather than deleted, and its "
+                    "still-pending deliveries are failed, so the subscription history is not "
+                    "silently erased.",
+        request=None,
+        parameters=[
+            OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                             description="Event slug."),
+
+            OpenApiParameter("public_id", str, OpenApiParameter.PATH,
+                             description="Webhook endpoint public id."),
+        ],
+        responses={200: WebhookEndpointDisabledSerializer,
+                   **error_responses(401, 403, 404)},
+        tags=TAGS,
+    )
     def delete(self, request: Request, slug: str, public_id: str) -> Response:
         event = _get_event(slug)
         endpoint = policy.visible_endpoints(request.user, event).filter(public_id=public_id).first()
@@ -224,6 +417,24 @@ class WebhookEndpointDetailView(APIView):
 class WebhookEndpointTestView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        operation_id="event_webhook_test",
+        summary="Queue a signed test delivery for one subscriber.",
+        description="Organizer only. 202 means the delivery is queued, not that the "
+                    "subscriber answered; read the delivery's status for that. A disabled "
+                    "endpoint is 409 endpoint_disabled.",
+        request=None,
+        parameters=[
+            OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                             description="Event slug."),
+
+            OpenApiParameter("public_id", str, OpenApiParameter.PATH,
+                             description="Webhook endpoint public id."),
+        ],
+        responses={202: WebhookDeliveryAckSerializer,
+                   **error_responses(400, 401, 403, 404, 409)},
+        tags=TAGS,
+    )
     def post(self, request: Request, slug: str, public_id: str) -> Response:
         event = _get_event(slug)
         endpoint = policy.visible_endpoints(request.user, event).filter(public_id=public_id).first()
@@ -238,6 +449,24 @@ class WebhookEndpointTestView(APIView):
 class WebhookDeliveryReplayView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        operation_id="event_webhook_replay",
+        summary="Re-queue one delivery that already went out.",
+        description="Organizer only. A replay is a new delivery row against the same payload, "
+                    "so a subscriber that deduplicates on the original id will ignore it; "
+                    "nothing is rewritten in place.",
+        request=None,
+        parameters=[
+            OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                             description="Event slug."),
+
+            OpenApiParameter("public_id", str, OpenApiParameter.PATH,
+                             description="Webhook delivery public id."),
+        ],
+        responses={202: WebhookDeliveryAckSerializer,
+                   **error_responses(401, 403, 404)},
+        tags=TAGS,
+    )
     def post(self, request: Request, slug: str, public_id: str) -> Response:
         event = _get_event(slug)
         delivery = policy.visible_deliveries(request.user, event).filter(public_id=public_id).first()
@@ -252,6 +481,24 @@ class WebhookDeliveryReplayView(APIView):
 class CertificateExportView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        operation_id="event_certificates_export",
+        summary="Download the certificate index with per-row verification links.",
+        description="Organizer only. Each row carries a verification code derived from the "
+                    "HMAC secret, which proves the portal issued the link. It is not the same "
+                    "thing as the Ed25519 signature on a judge record: a lost SECRET_KEY "
+                    "breaks these links too, so they are not a durable trust anchor.",
+        parameters=[
+            OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                             description="Event slug."),
+        ],
+        responses={200: OpenApiResponse(
+                      response=CertificateIndexRowSerializer(many=True),
+                      description="CSV file with kind, public_id, verification_code and url.",
+                  ),
+                  **error_responses(401, 403, 404)},
+        tags=TAGS,
+    )
     def get(self, request: Request, slug: str) -> HttpResponse:
         event = _get_event(slug)
         _require_organizer(request.user, event)
@@ -271,6 +518,21 @@ class CertificateExportView(APIView):
 class JudgeRecordBulkIssueView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        operation_id="event_judge_records_issue",
+        summary="Issue signed participation records for every judge who reviewed.",
+        description="Organizer only, and only after judging has closed (403 judging_open "
+                    "before that). Judges with no submitted review get no record. Re-issuing "
+                    "refreshes the existing records rather than minting duplicates.",
+        request=None,
+        parameters=[
+            OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                             description="Event slug."),
+        ],
+        responses={200: JudgeRecordsIssuedSerializer,
+                   **error_responses(401, 403, 404)},
+        tags=TAGS,
+    )
     def post(self, request: Request, slug: str) -> Response:
         event = _get_event(slug)
         rows = services.issue_judge_records(request.user, event)
@@ -280,6 +542,23 @@ class JudgeRecordBulkIssueView(APIView):
 class JudgeRecordRevokeView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        operation_id="event_judge_record_revoke",
+        summary="Revoke one signed judge record.",
+        description="Organizer only. The revocation is published in the key document, so a "
+                    "holder of the record can check that it was revoked; the record itself and "
+                    "the reviews behind it are kept.",
+        request=None,
+        parameters=[
+            OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                             description="Event slug."),
+            OpenApiParameter("record_id", str, OpenApiParameter.PATH,
+                             description="Judge record id, as issued."),
+        ],
+        responses={200: JudgeRecordRevokedSerializer,
+                   **error_responses(401, 403, 404)},
+        tags=TAGS,
+    )
     def post(self, request: Request, slug: str, record_id: str) -> Response:
         event = _get_event(slug)
         record = policy.visible_records(request.user, event).filter(record_id=record_id).first()
@@ -295,6 +574,18 @@ class RecordVerifyView(APIView):
     permission_classes = [AllowAny]
     authentication_classes = []
 
+    @extend_schema(
+        operation_id="record_verify",
+        summary="Verify a signed judge record against the published key.",
+        description="Public and unauthenticated, so a third party can check a record offline. "
+                    "The key is fetched locally: this makes no network call. It proves the "
+                    "signature matches the published key and that the record is not revoked. "
+                    "It does not prove who issued the record, and hashes alone would not "
+                    "detect a privileged actor who rewrote both data and digest.",
+        request=SignedRecordSerializer,
+        tags=TAGS,
+        responses={200: RecordVerificationSerializer, **error_responses(400, 415)},
+    )
     def post(self, request: Request) -> Response:
         valid, reason = services.verify_submission(request.data)
         return Response({"valid": valid, "reason": reason})

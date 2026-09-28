@@ -15,6 +15,8 @@ from teams import services
 from teams.models import Team, TeamMember
 from teams.policy import team_by_public_id, team_for_read, team_members, visible_team, visible_teams
 
+from core.schema import error_responses
+
 User = get_user_model()
 TAGS = ["teams"]
 
@@ -81,7 +83,7 @@ class TeamListCreate(APIView):
         description="A participant sees only the team they are in; an organizer sees every "
                     "team in the event. Creating registers the caller as a participant and "
                     "makes them the owner. Names are unique per event, case-insensitively.",
-        responses={200: TeamSerializer(many=True), 403: None, 404: None},
+        responses={200: TeamSerializer(many=True), **error_responses(401, 403, 404)},
         tags=TAGS,
     )
     def get(self, request, slug: str):
@@ -95,8 +97,7 @@ class TeamListCreate(APIView):
         operation_id="event_team_create",
         summary="Create your own team (you become its owner).",
         request=TeamCreateSerializer,
-        responses={201: TeamSerializer, 400: None, 401: None, 403: None, 404: None,
-                   409: None},
+        responses={201: TeamSerializer, **error_responses(400, 401, 403, 404, 409)},
         tags=TAGS,
     )
     def post(self, request, slug: str):
@@ -112,7 +113,7 @@ class TeamDetail(APIView):
     @extend_schema(
         operation_id="event_team_detail",
         summary="Read one team you are a member of (organizers may read any).",
-        responses={200: TeamSerializer, 404: None},
+        responses={200: TeamSerializer, **error_responses(401, 404)},
         tags=TAGS,
     )
     def get(self, request, slug: str, public_id: str):
@@ -123,18 +124,27 @@ class TeamDetail(APIView):
         return Response(team_payload(team))
 
 
-@extend_schema(
-    operation_id="event_team_invite",
-    summary="Mint a team invite link, revoking the one it replaces.",
-    description="Members only. The response carries the full link, which is shown once "
-                "in the UI; the token is a query parameter so it never lands in an "
-                "access log path.",
-    responses={201: None, 403: None, 404: None},
-    tags=TAGS,
-)
+class TeamInviteSerializer(serializers.Serializer):
+    """Response of a freshly minted invite link; the plaintext is shown once."""
+
+    team = serializers.CharField(help_text="Team public id the link points at.")
+    url = serializers.CharField(help_text="Full invite link, including the one-time token.")
+    expires_at = serializers.DateTimeField()
+
+
 class TeamInviteView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        operation_id="event_team_invite",
+        summary="Mint a team invite link, revoking the one it replaces.",
+        description="Members only. The response carries the full link, which is shown once "
+                    "in the UI; the token is a query parameter so it never lands in an "
+                    "access log path.",
+        request=None,
+        responses={201: TeamInviteSerializer, **error_responses(401, 403, 404)},
+        tags=TAGS,
+    )
     def post(self, request, slug: str, public_id: str):
         event = event_or_404(slug)
         team = team_by_public_id(event, public_id)
@@ -148,18 +158,28 @@ class TeamInviteView(APIView):
         }, status=201)
 
 
-@extend_schema(
-    operation_id="invite_accept",
-    summary="Join the team an invite link points at.",
-    description="Refused with 410 invite_invalid when the link was replaced, revoked or "
-                "has expired; 409 already_in_team, role_conflict or team_full when the "
-                "window is open but the join does not fit.",
-    responses={200: None, 401: None, 403: None, 409: None, 410: None},
-    tags=TAGS,
-)
+class InviteAcceptSerializer(serializers.Serializer):
+    """The team a caller joined through an invite link."""
+
+    team = serializers.CharField(help_text="Team public id now joined.")
+    event = serializers.CharField(help_text="Event slug the team belongs to.")
+    is_owner = serializers.BooleanField(help_text="True when the caller became the owner.")
+
+
 class InviteAcceptView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        operation_id="invite_accept",
+        summary="Join the team an invite link points at.",
+        description="Refused with 410 invite_invalid when the link was replaced, revoked or "
+                    "has expired; 409 already_in_team, role_conflict or team_full when the "
+                    "window is open but the join does not fit.",
+        request=None,
+        responses={201: InviteAcceptSerializer,
+                   **error_responses(400, 401, 403, 409, 410)},
+        tags=TAGS,
+    )
     def post(self, request, token: str):
         member = services.accept_invite(request.user, token)
         return Response({
@@ -169,18 +189,23 @@ class InviteAcceptView(APIView):
         }, status=201)
 
 
-@extend_schema(
-    operation_id="event_team_leave",
-    summary="Leave your team; the owner passes ownership to the earliest member.",
-    description="A team whose last member leaves is deleted, unless it holds a submitted "
-                "project (409 withdraw_first) or a withdrawn or disqualified one "
-                "(409 team_not_deletable), because that history is kept.",
-    responses={200: None, 401: None, 403: None, 409: None},
-    tags=TAGS,
-)
+class TeamLeaveSerializer(serializers.Serializer):
+    left = serializers.CharField(help_text="Public id of the team the caller left.")
+
+
 class TeamLeaveView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        operation_id="event_team_leave",
+        summary="Leave your team; the owner passes ownership to the earliest member.",
+        description="A team whose last member leaves is deleted, unless it holds a submitted "
+                    "project (409 withdraw_first) or a withdrawn or disqualified one "
+                    "(409 team_not_deletable), because that history is kept.",
+        request=None,
+        responses={200: TeamLeaveSerializer, **error_responses(400, 401, 403, 404, 409)},
+        tags=TAGS,
+    )
     def post(self, request, slug: str, public_id: str):
         event = event_or_404(slug)
         team = team_by_public_id(event, public_id)
@@ -190,15 +215,19 @@ class TeamLeaveView(APIView):
         return Response({"left": team.public_id})
 
 
-@extend_schema(
-    operation_id="event_team_remove_member",
-    summary="Remove a member from your team (owner only).",
-    responses={200: None, 401: None, 403: None, 404: None},
-    tags=TAGS,
-)
+class TeamMemberRemovedSerializer(serializers.Serializer):
+    removed = serializers.CharField(help_text="Public id of the account removed from the team.")
+
+
 class TeamMemberDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        operation_id="event_team_remove_member",
+        summary="Remove a member from your team (owner only).",
+        responses={200: TeamMemberRemovedSerializer, **error_responses(401, 403, 404, 409)},
+        tags=TAGS,
+    )
     def delete(self, request, slug: str, public_id: str, user_public_id: str):
         event = event_or_404(slug)
         team = team_by_public_id(event, public_id)

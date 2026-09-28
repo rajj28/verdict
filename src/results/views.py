@@ -23,7 +23,12 @@ from judging import policy as judging_policy
 from judging.models import JudgeInvite
 from projects.models import Project, ProjectStatus
 from results import engine, services
-from results.policy import get_publication, latest_publication, visible_publications
+from results.policy import (
+    get_publication,
+    latest_publication,
+    public_publications,
+    visible_publications,
+)
 from teams.models import Team
 
 #: One line per CSV so an organizer knows what they get before downloading.
@@ -519,6 +524,15 @@ def results_public(request, slug: str):
     publication = latest_publication(event)
     if publication is None:
         return render(request, "events/results_public.html", {"event": event})
+    version_history = [
+        {
+            "version": item.version,
+            "published_at": item.published_at,
+            "note": item.note,
+            "input_digest": item.input_digest,
+        }
+        for item in public_publications(event)
+    ]
     rows = publication.rows
     by_track: dict[str, list[dict]] = {}
     for row in rows:
@@ -526,6 +540,7 @@ def results_public(request, slug: str):
     return render(request, "events/results_public.html", {
         "event": event,
         "publication": publication,
+        "version_history": version_history,
         "rows": rows,
         "ranked": [row for row in rows if row.get("status") == "ranked"],
         "unranked": [row for row in rows if row.get("status") != "ranked"],

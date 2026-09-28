@@ -33,6 +33,7 @@ from accounts.services import (
 from accounts.throttles import LoginThrottle
 from core.errors import ApiError
 from core.pagination import VerdictPagination
+from core.schema import error_responses
 
 User = get_user_model()
 
@@ -114,6 +115,107 @@ class UserPatchSerializer(serializers.Serializer):
     is_active = serializers.BooleanField(required=False)
 
 
+class EventRefSerializer(serializers.Serializer):
+    """The two event fields a role reference carries."""
+
+    slug = serializers.CharField()
+    name = serializers.CharField()
+
+
+class TrackRefSerializer(serializers.Serializer):
+    public_id = serializers.CharField()
+    name = serializers.CharField()
+
+
+class UserBriefSerializer(serializers.Serializer):
+    """A user as anyone but themselves may see them. Never carries an email."""
+
+    public_id = serializers.CharField()
+    display_name = serializers.CharField(allow_null=True)
+    is_admin = serializers.BooleanField()
+    is_host = serializers.BooleanField()
+    is_active = serializers.BooleanField()
+    date_joined = serializers.DateTimeField(allow_null=True)
+
+
+class UserSelfSerializer(UserBriefSerializer):
+    """A user as they may see themselves: adds their own email address."""
+
+    email = serializers.EmailField(help_text="Only ever returned for the caller's own account.")
+
+
+class AdminUserSerializer(UserBriefSerializer):
+    """Admin view of an account; adds the email the admin manages."""
+
+    email = serializers.EmailField()
+
+
+class EventRoleSerializer(serializers.Serializer):
+    public_id = serializers.CharField()
+    role = serializers.CharField(help_text="participant, judge, organizer, host or admin.")
+    event = EventRefSerializer()
+    tracks = TrackRefSerializer(many=True)
+
+
+class MeSerializer(serializers.Serializer):
+    """GET /api/v1/me: the caller and the role they hold in every event."""
+
+    user = UserSelfSerializer()
+    roles = EventRoleSerializer(many=True)
+
+
+class LoginResponseSerializer(serializers.Serializer):
+    user = UserSelfSerializer()
+    redirect_to = serializers.CharField(help_text="Safe same-host path to land on.")
+
+
+class OkRedirectSerializer(serializers.Serializer):
+    ok = serializers.BooleanField()
+    redirect_to = serializers.CharField()
+
+
+class ChangePasswordResponseSerializer(serializers.Serializer):
+    ok = serializers.BooleanField()
+
+
+class TokenSerializer(serializers.Serializer):
+    """A token row. The secret is never part of it, only the lookup prefix."""
+
+    prefix = serializers.CharField(help_text="12-character public prefix; what DELETE takes.")
+    name = serializers.CharField()
+    is_demo = serializers.BooleanField(help_text="True for the shared seeded demo token.")
+    created_at = serializers.DateTimeField()
+    last_used_at = serializers.DateTimeField(allow_null=True)
+    revoked_at = serializers.DateTimeField(allow_null=True)
+
+
+class TokenRowSerializer(serializers.Serializer):
+    token = TokenSerializer()
+
+
+class TokenListSerializer(serializers.Serializer):
+    tokens = TokenSerializer(many=True)
+
+
+class TokenCreatedSerializer(serializers.Serializer):
+    """The one and only time the plaintext token exists in a response."""
+
+    token = TokenSerializer()
+    plaintext = serializers.CharField(help_text="Send as 'Authorization: Bearer <plaintext>'.")
+
+
+class ResetLinkSerializer(serializers.Serializer):
+    user = UserBriefSerializer()
+    reset_url = serializers.CharField(help_text="Relative single-use link to hand to the user.")
+    expires_at = serializers.DateTimeField()
+
+
+class ResetPasswordResponseSerializer(serializers.Serializer):
+    ok = serializers.BooleanField()
+    user = UserBriefSerializer()
+    redirect_to = serializers.CharField()
+
+
 def user_brief(user: User) -> dict:
     """Never the password hash, never the email unless the caller owns the record."""
     return {
@@ -162,7 +264,8 @@ class LoginView(APIView):
                     "endpoint cannot be used to find out which addresses exist. "
                     "Rate limited to 10 attempts per 15 minutes per IP and email.",
         request=LoginSerializer,
-        responses={200: None, 400: None, 403: None, 429: None},
+        responses={200: LoginResponseSerializer,
+                   **error_responses(400, 401, 403, 429)},
         tags=TAGS,
     )
     def post(self, request):
@@ -185,7 +288,8 @@ class LogoutView(APIView):
     permission_classes = [IsAuthenticated]
 
     @extend_schema(operation_id="logout", summary="End the current session.",
-                   request=None, responses={200: None}, tags=TAGS)
+                   request=None, responses={200: OkRedirectSerializer,
+                                             **error_responses(401)}, tags=TAGS)
     def post(self, request):
         end_session(request)
         return Response({"ok": True, "redirect_to": "/"})
@@ -204,7 +308,7 @@ class RegisterView(APIView):
                     "pass Django's password checks. Field errors come back under "
                     "error.fields so the form can paint them inline.",
         request=RegisterSerializer,
-        responses={201: None, 400: None, 403: None},
+        responses={201: LoginResponseSerializer, **error_responses(400, 403)},
         tags=TAGS,
     )
     def post(self, request):
@@ -228,7 +332,7 @@ class DemoLoginView(APIView):
         description="Answers 404 when DEMO_MODE is off: the shortcut is not part of a "
                     "production portal at all, not merely disabled.",
         request=DemoLoginSerializer,
-        responses={200: None, 400: None, 403: None, 404: None},
+        responses={200: LoginResponseSerializer, **error_responses(400, 403, 404)},
         tags=TAGS,
     )
     def post(self, request):
@@ -246,7 +350,7 @@ class MeView(APIView):
     permission_classes = [IsAuthenticated]
 
     @extend_schema(operation_id="me", summary="Your profile and your roles.",
-                   responses={200: None, 401: None}, tags=TAGS)
+                   responses={200: MeSerializer, **error_responses(401)}, tags=TAGS)
     def get(self, request):
         roles = visible_roles(request.user)
         return Response({
@@ -272,7 +376,8 @@ class ChangePasswordView(APIView):
     @extend_schema(operation_id="change_password",
                    summary="Change your own password (current password required).",
                    request=ChangePasswordSerializer,
-                   responses={200: None, 400: None, 401: None}, tags=TAGS)
+                   responses={200: ChangePasswordResponseSerializer,
+                              **error_responses(400, 401)}, tags=TAGS)
     def post(self, request):
         serializer = ChangePasswordSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -289,7 +394,7 @@ class TokenListCreateView(APIView):
     @extend_schema(operation_id="my_tokens", summary="List your API tokens.",
                    description="The list never contains a secret: a token is addressed by "
                                "its 12-character prefix, which is also what DELETE takes.",
-                   responses={200: None, 401: None}, tags=TAGS)
+                   responses={200: TokenListSerializer, **error_responses(401)}, tags=TAGS)
     def get(self, request):
         return Response({"tokens": [token_row(token) for token in visible_tokens(request.user)]})
 
@@ -297,7 +402,8 @@ class TokenListCreateView(APIView):
                    description="The plaintext is in the response exactly once; only its "
                                "sha256 is stored, so it cannot be shown again.",
                    request=TokenCreateSerializer,
-                   responses={201: None, 400: None, 401: None}, tags=TAGS)
+                   responses={201: TokenCreatedSerializer, **error_responses(400, 401)},
+                   tags=TAGS)
     def post(self, request):
         serializer = TokenCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -311,7 +417,8 @@ class TokenDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     @extend_schema(operation_id="revoke_token", summary="Revoke one of your API tokens.",
-                   responses={204: None, 401: None, 404: None}, tags=TAGS)
+                   responses={200: TokenRowSerializer, **error_responses(401, 404)},
+                   tags=TAGS)
     def delete(self, request, prefix: str):
         token = revoke_api_token(request.user, prefix)
         return Response({"token": token_row(token)}, status=200)
@@ -328,7 +435,8 @@ class ResetLinkView(APIView):
                                "to hand over. Valid 24 hours, single use, stored hashed, and "
                                "issuing a new link retires any outstanding one.",
                    request=None,
-                   responses={201: None, 403: None, 404: None}, tags=TAGS)
+                   responses={201: ResetLinkSerializer, **error_responses(403, 404)},
+                   tags=TAGS)
     def post(self, request, public_id: str):
         target = User.objects.filter(public_id=public_id).first()
         if target is None:
@@ -351,7 +459,8 @@ class AdminUserListView(GenericAPIView):
     pagination_class = VerdictPagination
 
     @extend_schema(operation_id="admin_users", summary="Every account (admin only).",
-                   responses={200: None, 401: None, 403: None}, tags=TAGS)
+                   responses={200: AdminUserSerializer(many=True),
+                              **error_responses(401, 403)}, tags=TAGS)
     def get(self, request):
         users = visible_users(request.query_params.get("q", ""))
         page = self.paginate_queryset(users)
@@ -369,7 +478,8 @@ class AdminUserDetailView(APIView):
                    description="An admin cannot remove their own administrator flag: "
                                "409 cannot_demote_self. Every change is audited.",
                    request=UserPatchSerializer,
-                   responses={200: None, 401: None, 403: None, 404: None, 409: None},
+                   responses={200: AdminUserSerializer,
+                              **error_responses(400, 401, 403, 404, 409)},
                    tags=TAGS)
     def patch(self, request, public_id: str):
         target = User.objects.filter(public_id=public_id).first()
@@ -396,7 +506,8 @@ class ResetPasswordView(APIView):
                                "are all refused, and the password itself still has to pass "
                                "the same checks as registration.",
                    request=ResetPasswordSerializer,
-                   responses={200: None, 400: None, 403: None}, tags=TAGS)
+                   responses={200: ResetPasswordResponseSerializer,
+                              **error_responses(400, 403)}, tags=TAGS)
     def post(self, request):
         require_csrf(request)
         serializer = ResetPasswordSerializer(data=request.data)

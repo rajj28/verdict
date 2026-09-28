@@ -16,6 +16,10 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from core.schema import error_responses
+
+TAGS = ["judging"]
+
 
 class ProjectRefSerializer(serializers.Serializer):
     """The project as a score listing shows it: public id and title, nothing else."""
@@ -165,6 +169,295 @@ class CommandCenterSerializer(serializers.Serializer):
     proposal = RebalanceProposalSerializer()
 
 
+class TeamRefSerializer(serializers.Serializer):
+    public_id = serializers.CharField()
+    name = serializers.CharField()
+
+
+class JudgeTrackRefSerializer(serializers.Serializer):
+    public_id = serializers.CharField()
+    name = serializers.CharField()
+
+
+class JudgeAnswerSerializer(serializers.Serializer):
+    question = serializers.CharField(help_text="Custom question public id.")
+    prompt = serializers.CharField()
+    value = serializers.CharField(allow_null=True)
+    is_public = serializers.BooleanField(help_text="Whether the gallery may show this answer.")
+
+
+class JudgeProjectSerializer(serializers.Serializer):
+    """The project as a judge or a manager reads it: everything a rubric needs."""
+
+    public_id = serializers.CharField()
+    title = serializers.CharField()
+    summary = serializers.CharField(allow_blank=True)
+    description = serializers.CharField(allow_blank=True)
+    team = TeamRefSerializer()
+    track = JudgeTrackRefSerializer(allow_null=True)
+    repo_url = serializers.CharField(allow_null=True, allow_blank=True)
+    live_url = serializers.CharField(allow_null=True, allow_blank=True)
+    demo_video_url = serializers.CharField(allow_null=True, allow_blank=True)
+    answers = JudgeAnswerSerializer(many=True)
+
+
+class PairwiseJudgeProjectSerializer(JudgeProjectSerializer):
+    """Project detail plus the media a pairwise comparison shows side by side."""
+
+    images = serializers.ListField(child=serializers.DictField())
+    thumbnail = serializers.CharField(allow_null=True)
+
+
+class CriterionSerializer(serializers.Serializer):
+    key = serializers.CharField()
+    name = serializers.CharField()
+    description = serializers.CharField(allow_blank=True)
+    weight = serializers.CharField(help_text="Decimal as sent, for example '0.400'.")
+    min_score = serializers.IntegerField()
+    max_score = serializers.IntegerField()
+    position = serializers.IntegerField()
+
+
+class RubricSerializer(serializers.Serializer):
+    """The active rubric. ``version`` increments on every replacement."""
+
+    version = serializers.IntegerField()
+    criteria = CriterionSerializer(many=True)
+
+
+class JudgeTrackSerializer(serializers.Serializer):
+    public_id = serializers.CharField()
+    name = serializers.CharField()
+
+
+class JudgeListEntrySerializer(serializers.Serializer):
+    """A judge as a roster shows them: a display name, never an email address."""
+
+    public_id = serializers.CharField()
+    name = serializers.CharField()
+    tracks = JudgeTrackSerializer(many=True)
+
+
+class JudgeListSerializer(serializers.Serializer):
+    judges = JudgeListEntrySerializer(many=True)
+
+
+class JudgeCreatedSerializer(serializers.Serializer):
+    public_id = serializers.CharField()
+    name = serializers.CharField()
+    tracks = serializers.ListField(child=serializers.CharField())
+
+
+class JudgeTracksSerializer(serializers.Serializer):
+    public_id = serializers.CharField()
+    tracks = serializers.ListField(child=serializers.CharField())
+
+
+class ReviewDetailSerializer(serializers.Serializer):
+    """One review. Null fields mean the judge has not started it yet."""
+
+    review_id = serializers.CharField(allow_null=True)
+    status = serializers.CharField(allow_null=True, help_text="null, 'draft' or 'submitted'.")
+    criteria = serializers.DictField(child=serializers.IntegerField())
+    comment = serializers.CharField(allow_blank=True, allow_null=True)
+    submitted_at = serializers.DateTimeField(allow_null=True)
+    rubric_version = serializers.IntegerField(allow_null=True)
+    project_revision = serializers.IntegerField(allow_null=True)
+
+
+class JudgeReviewSerializer(serializers.Serializer):
+    project = JudgeProjectSerializer()
+    rubric = CriterionSerializer(many=True)
+    review = ReviewDetailSerializer()
+
+
+class ReviewWriteSerializer(serializers.Serializer):
+    scores = serializers.DictField(
+        child=serializers.IntegerField(),
+        required=False,
+        help_text="Criterion key to score, inside that criterion's own min and max.",
+    )
+    comment = serializers.CharField(required=False, allow_blank=True, max_length=4000)
+
+
+class JudgeInviteSerializer(serializers.Serializer):
+    """One minted judge invite. The token is returned once, inside the URL."""
+
+    token = serializers.CharField()
+    email = serializers.EmailField()
+    url = serializers.CharField(help_text="Relative /judge-invite?token=... link.")
+    expires_at = serializers.DateTimeField()
+
+
+class JudgeInvitesCreatedSerializer(serializers.Serializer):
+    invites = JudgeInviteSerializer(many=True)
+
+
+class JudgeInviteAcceptedSerializer(serializers.Serializer):
+    event = serializers.CharField()
+    judge = serializers.CharField(help_text="Public id of the judge role just created.")
+
+
+class ConflictSerializer(serializers.Serializer):
+    judge = serializers.CharField()
+    judge_name = serializers.CharField()
+    team = serializers.CharField()
+    team_name = serializers.CharField()
+    reason = serializers.CharField(allow_blank=True)
+    source = serializers.CharField(help_text="'organizer' when recorded by staff, "
+                                        "'judge' when self-declared.")
+
+
+class ConflictListSerializer(serializers.Serializer):
+    conflicts = ConflictSerializer(many=True)
+
+
+class ConflictCreatedSerializer(serializers.Serializer):
+    judge = serializers.CharField(required=False,
+                                  help_text="Absent when the judge declared it themself.")
+    team = serializers.CharField()
+    reason = serializers.CharField(allow_blank=True)
+    source = serializers.CharField()
+
+
+class AssignmentSerializer(serializers.Serializer):
+    public_id = serializers.CharField()
+    event = serializers.CharField()
+    judge = serializers.CharField()
+    project = JudgeProjectSerializer()
+    review_status = serializers.CharField(allow_null=True)
+
+
+class AssignmentListSerializer(serializers.Serializer):
+    assignments = AssignmentSerializer(many=True)
+
+
+class AssignmentCreatedSerializer(serializers.Serializer):
+    public_id = serializers.CharField()
+    judge = serializers.CharField()
+    project = serializers.CharField()
+
+
+class AssignmentSkippedSerializer(serializers.Serializer):
+    judge = serializers.CharField()
+    project = serializers.CharField()
+    reason = serializers.CharField(help_text="The eligibility rule that refused this pair.")
+
+
+class AssignmentBatchResultSerializer(serializers.Serializer):
+    created = AssignmentCreatedSerializer(many=True)
+    skipped = AssignmentSkippedSerializer(many=True)
+
+
+class AutoAssignmentProposedSerializer(serializers.Serializer):
+    judge = serializers.CharField()
+    project = serializers.CharField()
+
+
+class AutoAssignmentUnfilledSerializer(serializers.Serializer):
+    project = serializers.CharField()
+    target = serializers.IntegerField()
+    assigned = serializers.IntegerField()
+    reason = serializers.CharField(
+        help_text="Why the planner could not fill this slot. 'unfilled by this planner' "
+                  "is a valid, and common, answer."
+    )
+
+
+class AutoAssignmentResultSerializer(serializers.Serializer):
+    dry_run = serializers.BooleanField(help_text="True when nothing was written.")
+    created = AssignmentCreatedSerializer(many=True)
+    proposed = AutoAssignmentProposedSerializer(many=True)
+    unfilled = AutoAssignmentUnfilledSerializer(many=True)
+    batch_created = serializers.BooleanField()
+
+
+class PairProgressSerializer(serializers.Serializer):
+    assigned_projects = serializers.IntegerField()
+    comparisons = serializers.IntegerField()
+    total_pairs = serializers.IntegerField()
+    target_per_project = serializers.IntegerField()
+    projects_complete = serializers.IntegerField()
+    project_counts = serializers.DictField(child=serializers.IntegerField())
+    done = serializers.BooleanField()
+    reason = serializers.CharField(
+        help_text="'in_progress', 'coverage_reached' or 'pairs_exhausted'."
+    )
+
+
+class ComparisonSerializer(serializers.Serializer):
+    public_id = serializers.CharField()
+    left = serializers.CharField()
+    right = serializers.CharField()
+    winner = serializers.CharField(allow_null=True, help_text="Null records an abstention.")
+    created_at = serializers.DateTimeField()
+    retracted_at = serializers.DateTimeField(allow_null=True)
+
+
+class ComparisonListSerializer(serializers.Serializer):
+    comparisons = ComparisonSerializer(many=True)
+
+
+class NextPairSerializer(serializers.Serializer):
+    """The next pair this judge should compare, or null when there is none left."""
+
+    pair = serializers.DictField(allow_null=True, help_text="left and right when a pair exists.")
+    left = PairwiseJudgeProjectSerializer(allow_null=True)
+    right = PairwiseJudgeProjectSerializer(allow_null=True)
+    done = serializers.BooleanField()
+    progress = PairProgressSerializer()
+    latest = ComparisonSerializer(
+        allow_null=True,
+        help_text="The caller's own most recent comparison, echoed for 30 seconds so an "
+                  "optimistic UI can reconcile; null otherwise.",
+    )
+
+
+class ProgressJudgeSerializer(serializers.Serializer):
+    judge = serializers.CharField()
+    name = serializers.CharField()
+    tracks = serializers.ListField(child=serializers.CharField())
+    assigned = serializers.IntegerField()
+    submitted = serializers.IntegerField()
+    drafts = serializers.IntegerField()
+    remaining = serializers.IntegerField()
+    last_activity = serializers.DateTimeField(allow_null=True)
+    status = serializers.CharField(
+        help_text="'no assignments', 'not started', 'in progress' or 'done'."
+    )
+
+
+class ProgressProjectSerializer(serializers.Serializer):
+    project = serializers.CharField()
+    title = serializers.CharField()
+    track = serializers.CharField(allow_null=True)
+    submitted = serializers.IntegerField(help_text="Reviews actually submitted.")
+    target = serializers.IntegerField(help_text="reviews_per_project for this event.")
+    under_covered = serializers.BooleanField()
+
+
+class ProgressTrackSerializer(serializers.Serializer):
+    track = serializers.CharField()
+    name = serializers.CharField()
+    projects = serializers.IntegerField()
+    submitted = serializers.IntegerField()
+    target = serializers.IntegerField()
+    coverage_percent = serializers.FloatField()
+
+
+class EventProgressSerializer(serializers.Serializer):
+    """Coverage counted from submitted reviews, not from assignment counts alone."""
+
+    judges = ProgressJudgeSerializer(many=True)
+    projects = ProgressProjectSerializer(many=True)
+    tracks = ProgressTrackSerializer(many=True)
+
+
+class ReviewExclusionSerializer(serializers.Serializer):
+    review = serializers.CharField(help_text="Public id of the excluded review.")
+    reason = serializers.CharField(help_text="Recorded reason; the review is not deleted.")
+
+
 class ComparisonWriteSerializer(serializers.Serializer):
     left = serializers.CharField()
     right = serializers.CharField()
@@ -219,8 +512,8 @@ class JudgeScoresView(APIView):
         parameters=[OpenApiParameter(
             "judge", str, OpenApiParameter.QUERY, required=False,
             description="Judge public_id; only the caller's own ids are accepted.")],
-        responses={200: JudgeScoresSerializer, 401: None, 403: None},
-        tags=["judging"],
+        responses={200: JudgeScoresSerializer, **error_responses(401, 403)},
+        tags=TAGS,
     )
     def get(self, request):
         roles = list(judge_roles(request.user).order_by("event__slug", "public_id"))
@@ -257,8 +550,13 @@ class EventJudgeScoresView(APIView):
         description="200 for that judge themself and for organizers of the event, "
                     "403 for everyone else including other judges, 404 for an unknown "
                     "judge id once the caller may know it exists.",
-        responses={200: JudgeScoresSerializer, 401: None, 403: None, 404: None},
-        tags=["judging"],
+        parameters=[
+            OpenApiParameter("slug", str, OpenApiParameter.PATH, description="Event slug."),
+            OpenApiParameter("judge_id", str, OpenApiParameter.PATH,
+                             description="Judge role public id."),
+        ],
+        responses={200: JudgeScoresSerializer, **error_responses(401, 403, 404)},
+        tags=TAGS,
     )
     def get(self, request, slug: str, judge_id: str):
         event = get_event_by_slug(slug)
@@ -332,6 +630,16 @@ def _project_detail(project: Project) -> dict:
 class EventRubricView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        operation_id="event_rubric",
+        summary="Read the event's active judging rubric.",
+        description="Judges and managers only. The version is what a review records so a "
+                    "later rubric change cannot silently reinterpret an old score.",
+        parameters=[OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                                     description="Event slug.")],
+        responses={200: RubricSerializer, **error_responses(401, 403, 404)},
+        tags=TAGS,
+    )
     def get(self, request, slug: str):
         event = _event(slug)
         policy.require_judge_or_manager(request.user, event)
@@ -340,6 +648,18 @@ class EventRubricView(APIView):
         return Response({"version": rubric.version if rubric else 0,
                          "criteria": [_criterion_payload(item) for item in criteria]})
 
+    @extend_schema(
+        operation_id="event_rubric_replace",
+        summary="Replace the event's rubric with a new versioned one.",
+        description="Manager only. The whole rubric is replaced in one transaction and the "
+                    "version increments; existing reviews keep the version they were scored "
+                    "against.",
+        request=RubricWriteSerializer,
+        parameters=[OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                                     description="Event slug.")],
+        responses={200: RubricSerializer, **error_responses(400, 401, 403, 404)},
+        tags=TAGS,
+    )
     def put(self, request, slug: str):
         event = _event(slug)
         policy.require_manager(request.user, event)
@@ -354,6 +674,16 @@ class EventRubricView(APIView):
 class EventJudgesView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        operation_id="event_judges",
+        summary="List the judges of an event with their tracks.",
+        description="A judge sees the roster so they can declare conflicts; a participant "
+                    "does not. No email address is ever returned.",
+        parameters=[OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                                     description="Event slug.")],
+        responses={200: JudgeListSerializer, **error_responses(401, 403, 404)},
+        tags=TAGS,
+    )
     def get(self, request, slug: str):
         event = _event(slug)
         roles = policy.visible_judges(request.user, event)
@@ -363,6 +693,18 @@ class EventJudgesView(APIView):
             for row in roles
         ]})
 
+    @extend_schema(
+        operation_id="event_judge_add",
+        summary="Add a judge to the event, creating the account if needed.",
+        description="Manager only. An address that already has an account gains a judge role; "
+                    "an unknown one creates a placeholder account that cannot sign in until "
+                    "an invite is accepted. Every change is audited.",
+        request=JudgeWriteSerializer,
+        parameters=[OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                                     description="Event slug.")],
+        responses={201: JudgeCreatedSerializer, **error_responses(400, 401, 403, 404, 409)},
+        tags=TAGS,
+    )
     def post(self, request, slug: str):
         event = _event(slug)
         policy.require_manager(request.user, event)
@@ -377,6 +719,20 @@ class EventJudgesView(APIView):
 class EventJudgeDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        operation_id="event_judge_update",
+        summary="Change which tracks a judge may review.",
+        description="Manager only. Widening a judge's tracks never invalidates existing "
+                    "assignments or reviews.",
+        request=TracksWriteSerializer,
+        parameters=[
+            OpenApiParameter("slug", str, OpenApiParameter.PATH, description="Event slug."),
+            OpenApiParameter("judge_id", str, OpenApiParameter.PATH,
+                             description="Judge role public id."),
+        ],
+        responses={200: JudgeTracksSerializer, **error_responses(400, 401, 403, 404)},
+        tags=TAGS,
+    )
     def patch(self, request, slug: str, judge_id: str):
         event = _event(slug)
         policy.require_manager(request.user, event)
@@ -386,6 +742,20 @@ class EventJudgeDetailView(APIView):
         return Response({"public_id": role.public_id,
                          "tracks": list(role.tracks.values_list("public_id", flat=True))})
 
+    @extend_schema(
+        operation_id="event_judge_remove",
+        summary="Remove a judge role from the event.",
+        description="Manager only. Submitted reviews are kept and stay attributable; "
+                    "unsubmitted assignments for the judge are removed with the role.",
+        request=None,
+        parameters=[
+            OpenApiParameter("slug", str, OpenApiParameter.PATH, description="Event slug."),
+            OpenApiParameter("judge_id", str, OpenApiParameter.PATH,
+                             description="Judge role public id."),
+        ],
+        responses={204: None, **error_responses(401, 403, 404, 409)},
+        tags=TAGS,
+    )
     def delete(self, request, slug: str, judge_id: str):
         event = _event(slug)
         policy.require_manager(request.user, event)
@@ -396,6 +766,19 @@ class EventJudgeDetailView(APIView):
 class JudgeInvitesView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        operation_id="event_judge_invites",
+        summary="Mint judge invite links for a list of email addresses.",
+        description="Manager only. Each link is single use, expires in 14 days, and is "
+                    "queued to the event's private outbox for the organizer to hand over. "
+                    "Re-inviting retires the previous link for that address.",
+        request=InviteWriteSerializer,
+        parameters=[OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                                     description="Event slug.")],
+        responses={201: JudgeInvitesCreatedSerializer,
+                   **error_responses(400, 401, 403, 404)},
+        tags=TAGS,
+    )
     def post(self, request, slug: str):
         event = _event(slug)
         policy.require_manager(request.user, event)
@@ -411,6 +794,18 @@ class JudgeInvitesView(APIView):
 class AcceptJudgeInviteView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        operation_id="judge_invite_accept",
+        summary="Accept a judge invite and gain the judge role.",
+        description="Refused with 410 judge_invite_invalid when the link was replaced, "
+                    "revoked or has expired, and 409 when the caller already holds a "
+                    "conflicting role in the event.",
+        request=None,
+        parameters=[OpenApiParameter("token", str, OpenApiParameter.PATH,
+                                     description="One-time invite token.")],
+        responses={201: JudgeInviteAcceptedSerializer, **error_responses(401, 409, 410)},
+        tags=TAGS,
+    )
     def post(self, request, token: str):
         role = services.accept_judge_invite(request.user, token)
         return Response({"event": role.event.slug, "judge": role.public_id}, status=201)
@@ -419,6 +814,16 @@ class AcceptJudgeInviteView(APIView):
 class EventConflictsView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        operation_id="event_conflicts",
+        summary="List the recorded conflicts of interest in an event.",
+        description="Judges see their own; organizers see every conflict. Declared and "
+                    "organizer-recorded conflicts both appear, distinguished by source.",
+        parameters=[OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                                     description="Event slug.")],
+        responses={200: ConflictListSerializer, **error_responses(401, 403, 404)},
+        tags=TAGS,
+    )
     def get(self, request, slug: str):
         event = _event(slug)
         rows = policy.visible_conflicts(request.user, event)
@@ -429,6 +834,18 @@ class EventConflictsView(APIView):
             for row in rows
         ]})
 
+    @extend_schema(
+        operation_id="event_conflict_create",
+        summary="Record a conflict between a judge and a team (manager).",
+        description="Manager only. The assignment planner refuses every judge/team pair "
+                    "that appears here; declaring one is not a disqualification and is not "
+                    "visible to the team.",
+        request=ConflictWriteSerializer,
+        parameters=[OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                                     description="Event slug.")],
+        responses={201: ConflictCreatedSerializer, **error_responses(400, 401, 403, 404, 409)},
+        tags=TAGS,
+    )
     def post(self, request, slug: str):
         event = _event(slug)
         policy.require_manager(request.user, event)
@@ -447,6 +864,17 @@ class EventConflictsView(APIView):
 class JudgeConflictView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        operation_id="judge_conflict_declare",
+        summary="Declare your own conflict with a team.",
+        description="A judge only. Recording a conflict is not a zero score and carries no "
+                    "judgement on the team; the planner stops assigning the pair immediately.",
+        request=ConflictWriteSerializer,
+        parameters=[OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                                     description="Event slug.")],
+        responses={201: ConflictCreatedSerializer, **error_responses(400, 401, 403, 404, 409)},
+        tags=TAGS,
+    )
     def post(self, request, slug: str):
         event = _event(slug)
         policy.require_judge(request.user, event)
@@ -473,6 +901,17 @@ def _assignment_payload(row: Assignment) -> dict:
 class JudgeAssignmentsView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        operation_id="judge_assignments",
+        summary="The caller's own review queue across every event.",
+        description="A judge sees only their own queue. There is no parameter that widens "
+                    "this: another judge's workload is not this judge's business.",
+        parameters=[OpenApiParameter("judge", str, OpenApiParameter.QUERY, required=False,
+                                     description="Judge public_id; only the caller's own id "
+                                                 "is accepted.")],
+        responses={200: AssignmentListSerializer, **error_responses(401, 403)},
+        tags=TAGS,
+    )
     def get(self, request):
         wanted = (request.query_params.get("judge") or "").strip()
         rows = policy.visible_assignments(request.user, judge_public_id=wanted or None).prefetch_related(
@@ -484,6 +923,18 @@ class JudgeAssignmentsView(APIView):
 class EventAssignmentsView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        operation_id="event_assignments",
+        summary="Read the assignment table of an event.",
+        description="An organizer sees every assignment; a judge sees their own rows only.",
+        parameters=[
+            OpenApiParameter("slug", str, OpenApiParameter.PATH, description="Event slug."),
+            OpenApiParameter("judge", str, OpenApiParameter.QUERY, required=False,
+                             description="Filter to one judge public id, where permitted."),
+        ],
+        responses={200: AssignmentListSerializer, **error_responses(401, 403, 404)},
+        tags=TAGS,
+    )
     def get(self, request, slug: str):
         event = _event(slug)
         wanted = (request.query_params.get("judge") or "").strip()
@@ -492,6 +943,19 @@ class EventAssignmentsView(APIView):
         ).prefetch_related("project__answers__question", "review")
         return Response({"assignments": [_assignment_payload(row) for row in rows]})
 
+    @extend_schema(
+        operation_id="event_assignments_create",
+        summary="Create assignments for explicit judge/project pairs.",
+        description="Manager only. Every pair is re-checked under lock against track, "
+                    "conflict and duplicate rules; a refused pair comes back in skipped "
+                    "with the reason and does not stop the rest of the batch.",
+        request=AssignmentBatchWriteSerializer,
+        parameters=[OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                                     description="Event slug.")],
+        responses={201: AssignmentBatchResultSerializer,
+                   **error_responses(400, 401, 403, 404)},
+        tags=TAGS,
+    )
     def post(self, request, slug: str):
         event = _event(slug)
         policy.require_manager(request.user, event)
@@ -509,6 +973,20 @@ class EventAssignmentsView(APIView):
 class EventAssignmentDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        operation_id="event_assignment_delete",
+        summary="Delete one assignment.",
+        description="Manager only. A submitted review for the assignment is kept and stays "
+                    "attributable; deleting the assignment does not erase the judgment.",
+        request=None,
+        parameters=[
+            OpenApiParameter("slug", str, OpenApiParameter.PATH, description="Event slug."),
+            OpenApiParameter("assignment_id", str, OpenApiParameter.PATH,
+                             description="Assignment public id."),
+        ],
+        responses={204: None, **error_responses(401, 403, 404)},
+        tags=TAGS,
+    )
     def delete(self, request, slug: str, assignment_id: str):
         event = _event(slug)
         policy.require_manager(request.user, event)
@@ -519,6 +997,20 @@ class EventAssignmentDetailView(APIView):
 class AutoAssignmentsView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        operation_id="event_assignments_auto",
+        summary="Preview or apply the automatic assignment planner.",
+        description="Manager only. dry_run defaults to true, so the default call changes "
+                    "nothing and only reports a proposal. Slots the planner could not fill "
+                    "come back in unfilled with a reason; a free slot count is never a "
+                    "claim that a feasible assignment exists.",
+        request=AutoAssignmentWriteSerializer,
+        parameters=[OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                                     description="Event slug.")],
+        responses={200: AutoAssignmentResultSerializer,
+                   **error_responses(400, 401, 403, 404)},
+        tags=TAGS,
+    )
     def post(self, request, slug: str):
         event = _event(slug)
         policy.require_manager(request.user, event)
@@ -544,6 +1036,19 @@ class JudgeReviewView(APIView):
         review = visible_reviews(request.user, event).filter(project=project).first()
         return event, project, review
 
+    @extend_schema(
+        operation_id="judge_review",
+        summary="Read one project with its rubric and the caller's review of it.",
+        description="An assigned judge only. Answers marked non-public are shown to the "
+                    "judge for context but are not part of the public gallery.",
+        parameters=[
+            OpenApiParameter("slug", str, OpenApiParameter.PATH, description="Event slug."),
+            OpenApiParameter("prj_id", str, OpenApiParameter.PATH,
+                             description="Project public id."),
+        ],
+        responses={200: JudgeReviewSerializer, **error_responses(401, 403, 404)},
+        tags=TAGS,
+    )
     def get(self, request, slug: str, prj_id: str):
         event, project, review = self._project_and_review(request, slug, prj_id)
         criteria = policy.rubric_criteria(event)
@@ -551,6 +1056,21 @@ class JudgeReviewView(APIView):
                          "rubric": [_criterion_payload(item) for item in criteria],
                          "review": _review_detail(review)})
 
+    @extend_schema(
+        operation_id="judge_review_draft",
+        summary="Save or update your draft review without submitting it.",
+        description="A draft is not a score in the results. The write is refused with 409 "
+                    "after the judging window closes, and the server rechecks that rule "
+                    "under lock rather than trusting the clock on the page.",
+        request=ReviewWriteSerializer,
+        parameters=[
+            OpenApiParameter("slug", str, OpenApiParameter.PATH, description="Event slug."),
+            OpenApiParameter("prj_id", str, OpenApiParameter.PATH,
+                             description="Project public id."),
+        ],
+        responses={200: ReviewDetailSerializer, **error_responses(400, 401, 403, 404, 409)},
+        tags=TAGS,
+    )
     def put(self, request, slug: str, prj_id: str):
         event = _event(slug)
         project = policy.judge_project(request.user, event, prj_id)
@@ -565,6 +1085,22 @@ class JudgeReviewView(APIView):
 class SubmitJudgeReviewView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        operation_id="judge_review_submit",
+        summary="Submit your review of one project for the results.",
+        description="A submitted review is final for scoring purposes and is recorded "
+                    "against the rubric version it was scored under. The window is "
+                    "re-checked under lock, so a submit that races the close is refused "
+                    "with 409 rather than silently accepted.",
+        request=ReviewWriteSerializer,
+        parameters=[
+            OpenApiParameter("slug", str, OpenApiParameter.PATH, description="Event slug."),
+            OpenApiParameter("prj_id", str, OpenApiParameter.PATH,
+                             description="Project public id."),
+        ],
+        responses={200: ReviewDetailSerializer, **error_responses(400, 401, 403, 404, 409)},
+        tags=TAGS,
+    )
     def post(self, request, slug: str, prj_id: str):
         event = _event(slug)
         project = policy.judge_project(request.user, event, prj_id)
@@ -579,6 +1115,18 @@ class SubmitJudgeReviewView(APIView):
 class NextPairView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        operation_id="judge_pair_next",
+        summary="The next pair this judge should compare (pairwise mode).",
+        description="Judge only, and only in pairwise mode. Selection is coverage-first and "
+                    "deterministic for a given event, judge and comparison set, so a reload "
+                    "returns the same pair. A null pair with done true means the graph is "
+                    "exhausted or the per-project target is met, not that judging is over.",
+        parameters=[OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                                     description="Event slug.")],
+        responses={200: NextPairSerializer, **error_responses(401, 403, 404)},
+        tags=TAGS,
+    )
     def get(self, request, slug: str):
         event = _event(slug)
         state = services.pairwise_state(request.user, event)
@@ -609,6 +1157,16 @@ def _comparison_payload(comparison):
 class JudgeComparisonView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        operation_id="judge_comparisons",
+        summary="Your own pairwise comparisons in an event.",
+        description="Judge only. Reading someone else's comparisons is 403, and a retracted "
+                    "comparison stays listed with retracted_at set rather than disappearing.",
+        parameters=[OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                                     description="Event slug.")],
+        responses={200: ComparisonListSerializer, **error_responses(401, 403, 404)},
+        tags=TAGS,
+    )
     def get(self, request, slug: str):
         event = _event(slug)
         role = policy.require_judge(request.user, event)
@@ -617,6 +1175,18 @@ class JudgeComparisonView(APIView):
         return Response({"comparisons": [_comparison_payload(item)
                                         for item in policy.visible_comparisons(request.user, event)]})
 
+    @extend_schema(
+        operation_id="judge_comparison_create",
+        summary="Record one pairwise comparison, or an abstention.",
+        description="Judge only, pairwise mode only. Send a null winner to record a skip; "
+                    "an abstention counts as the pair having been seen by the selector. "
+                    "Retracting later does not delete the record.",
+        request=ComparisonWriteSerializer,
+        parameters=[OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                                     description="Event slug.")],
+        responses={201: ComparisonSerializer, **error_responses(400, 401, 403, 404, 409)},
+        tags=TAGS,
+    )
     def post(self, request, slug: str):
         event = _event(slug)
         policy.require_judge(request.user, event)
@@ -632,6 +1202,21 @@ class JudgeComparisonView(APIView):
 class UndoComparisonView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        operation_id="judge_comparison_undo",
+        summary="Retract your most recent pairwise comparison.",
+        description="Judge only, and only for your own comparison. The row is marked "
+                    "retracted with a timestamp rather than deleted, so the record of what "
+                    "was answered stays auditable.",
+        request=None,
+        parameters=[
+            OpenApiParameter("slug", str, OpenApiParameter.PATH, description="Event slug."),
+            OpenApiParameter("comparison_id", str, OpenApiParameter.PATH,
+                             description="Comparison public id."),
+        ],
+        responses={200: ComparisonSerializer, **error_responses(401, 403, 404, 409)},
+        tags=TAGS,
+    )
     def post(self, request, slug: str, comparison_id: str):
         comparison = services.undo_comparison(request.user, _event(slug), comparison_id)
         return Response(_comparison_payload(comparison))
@@ -640,6 +1225,17 @@ class UndoComparisonView(APIView):
 class EventProgressView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        operation_id="event_progress",
+        summary="Judging coverage of an event, counted from submitted reviews.",
+        description="Manager only. Submitted reviews count as evidence; assignment counts do "
+                    "not. under_covered marks a project that still has fewer submitted "
+                    "reviews than reviews_per_project.",
+        parameters=[OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                                     description="Event slug.")],
+        responses={200: EventProgressSerializer, **error_responses(401, 403, 404)},
+        tags=TAGS,
+    )
     def get(self, request, slug: str):
         event = _event(slug)
         policy.require_manager(request.user, event)
@@ -662,8 +1258,8 @@ class EventCommandCenterView(APIView):
         description="Per judge: assigned/submitted/drafts, median minutes per review from live "
                     "submissions, remaining work, projected finish and at-risk reasons. The "
                     "proposal moves only untouched assignments off at-risk judges.",
-        responses={200: CommandCenterSerializer, 401: None, 403: None, 404: None},
-        tags=["judging"],
+        responses={200: CommandCenterSerializer, **error_responses(401, 403, 404)},
+        tags=TAGS,
     )
     def get(self, request, slug: str):
         event = _event(slug)
@@ -687,8 +1283,8 @@ class EventRebalanceView(APIView):
                     "in-track, non-conflicted judge under max_load. 403 for anyone but an "
                     "organizer, 409 when a judge started work while the plan was being applied.",
         request=RebalanceWriteSerializer,
-        responses={200: RebalanceResponseSerializer, 401: None, 403: None, 404: None, 409: None},
-        tags=["judging"],
+        responses={200: RebalanceResponseSerializer, **error_responses(400, 401, 403, 404, 409)},
+        tags=TAGS,
     )
     def post(self, request, slug: str):
         event = _event(slug)
@@ -702,6 +1298,21 @@ class EventRebalanceView(APIView):
 class ReviewExclusionView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        operation_id="review_exclusion_create",
+        summary="Exclude one review from the results, with a recorded reason.",
+        description="Manager only. The review is kept and stays attributable; the reason is "
+                    "audited. Excluding is an explicit authorized action, never a silent "
+                    "rewrite of a published result.",
+        request=ExclusionWriteSerializer,
+        parameters=[
+            OpenApiParameter("slug", str, OpenApiParameter.PATH, description="Event slug."),
+            OpenApiParameter("review_id", str, OpenApiParameter.PATH,
+                             description="Review public id."),
+        ],
+        responses={201: ReviewExclusionSerializer, **error_responses(400, 401, 403, 404)},
+        tags=TAGS,
+    )
     def post(self, request, slug: str, review_id: str):
         event = _event(slug)
         policy.require_manager(request.user, event)
@@ -713,6 +1324,20 @@ class ReviewExclusionView(APIView):
         exclusion = services.exclude_review(request.user, review, serializer.validated_data["reason"])
         return Response({"review": review.public_id, "reason": exclusion.reason}, status=201)
 
+    @extend_schema(
+        operation_id="review_exclusion_delete",
+        summary="Put an excluded review back into the results.",
+        description="Manager only. Clears the exclusion and is audited; the review itself "
+                    "was never deleted, so re-including restores it unchanged.",
+        request=None,
+        parameters=[
+            OpenApiParameter("slug", str, OpenApiParameter.PATH, description="Event slug."),
+            OpenApiParameter("review_id", str, OpenApiParameter.PATH,
+                             description="Review public id."),
+        ],
+        responses={204: None, **error_responses(401, 403, 404)},
+        tags=TAGS,
+    )
     def delete(self, request, slug: str, review_id: str):
         event = _event(slug)
         policy.require_manager(request.user, event)

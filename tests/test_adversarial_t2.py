@@ -231,7 +231,10 @@ class MalformedStoredPublicationTests(ResultsTestCase):
         self.assertTrue(result["digest_match"])
         self.assertIs(result.get("stored_inputs_match"), False)
         self.assertEqual(result["verdict"], "differs")
-        self.assertIn("stored inputs no longer hash", result["detail"].lower())
+        self.assertIn("stored inputs do not hash to the stored digest", result["detail"].lower())
+        # The live database was not touched, so the verdict must not blame it.
+        self.assertIn("the stored copy was altered", result["detail"].lower())
+        self.assertNotIn("live inputs changed", result["detail"].lower())
 
     def test_rehashed_malformed_inputs_fail_explicitly(self):
         for label, tamper in REHASHED_MALFORMED:

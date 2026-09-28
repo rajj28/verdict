@@ -4,6 +4,7 @@ from django.urls import path
 from community.api import (
     BallotView,
     EmailVotingVerifyView,
+    EventBallotDetailView,
     EmailVotingView,
     ModerateBallotView,
     ModerateCommentView,
@@ -18,7 +19,7 @@ from community.api import (
 urlpatterns = [
     path("events/<slug:slug>/votes/ballot", BallotView.as_view(), name="community-ballot"),
     path("events/<slug:slug>/votes/ballot/<str:public_id>",
-         BallotView.as_view(), name="community-ballot-detail"),
+         EventBallotDetailView.as_view(), name="community-ballot-detail"),
     path("events/<slug:slug>/votes/email", EmailVotingView.as_view(),
          name="community-vote-email"),
     path("events/<slug:slug>/votes/email/verify", EmailVotingVerifyView.as_view(),

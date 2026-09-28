@@ -95,16 +95,51 @@ def _canonical_inputs(
         "reviews_per_project": event.reviews_per_project,
         "included": sorted(included, key=lambda r: r["review_id"]),
         "excluded": sorted(excluded, key=lambda r: r["review_id"]),
+        "projects": sorted(
+            Project.objects.filter(event=event, status=ProjectStatus.SUBMITTED)
+            .values_list("public_id", flat=True)
+        ),
+        "project_snapshot": _public_project_snapshot(event),
         "prizes": _prize_config(event),
         "one_prize_per_team": event.one_prize_per_team,
         "params": params,
     }
     if params.get("comparison_source") == "live":
         inputs["comparisons"] = comparisons if comparisons is not None else _comparison_inputs(event)
-        inputs["projects"] = sorted(Project.objects.filter(
-            event=event, status=ProjectStatus.SUBMITTED,
-        ).values_list("public_id", flat=True))
     return inputs
+
+
+def _public_project_snapshot(event: Event) -> list[dict]:
+    """Public display and status fields needed to replay and compare a publication."""
+    return [
+        {
+            "project_id": project.public_id,
+            "title": project.title,
+            "team": project.team.name,
+            "team_id": project.team.public_id,
+            "track": project.track.name if project.track_id else None,
+            "track_id": project.track.public_id if project.track_id else None,
+            "status": project.status,
+            "status_reason": project.status_reason or None,
+        }
+        for project in Project.objects.filter(event=event)
+        .exclude(status=ProjectStatus.DRAFT)
+        .select_related("team", "track")
+        .order_by("public_id")
+    ]
+
+
+def _criteria_snapshot(event: Event) -> list[dict]:
+    """Store scoring scales and weights so verification needs no live rubric."""
+    return [
+        {
+            "key": criterion.key,
+            "weight": float(criterion.weight),
+            "min_score": criterion.min_score,
+            "max_score": criterion.max_score,
+        }
+        for criterion in engine_criteria(event)
+    ]
 
 
 def _comparison_inputs(event: Event) -> list[dict]:
@@ -298,6 +333,7 @@ def preview(event: Event) -> dict:
         "lam": result.lam,
         "lambda_source": "auto" if lam_val == "auto" else "fixed",
         "rubric_version": rubric_version,
+        "criteria": _criteria_snapshot(event),
         **_comparison_params(event, criteria, live_enabled),
     }
     if result.lambda_choice is not None:
@@ -595,6 +631,7 @@ def publish(actor, event: Event, note: str = "", acknowledge_unranked: bool = Fa
         "lam": result.lam,
         "lambda_source": "auto" if lam_val == "auto" else "fixed",
         "rubric_version": rubric_version,
+        "criteria": _criteria_snapshot(event_locked),
         **_comparison_params(event_locked, criteria, live_enabled),
     }
     if result.lambda_choice is not None:
@@ -618,7 +655,7 @@ def publish(actor, event: Event, note: str = "", acknowledge_unranked: bool = Fa
 
     previous = (
         ResultPublication.objects.filter(event=event_locked)
-        .order_by("-published_at")
+        .order_by("-version")
         .first()
     )
     if previous and not note:
@@ -628,8 +665,16 @@ def publish(actor, event: Event, note: str = "", acknowledge_unranked: bool = Fa
             status_code=400,
         )
 
+    version = (
+        ResultPublication.objects.filter(event=event_locked)
+        .order_by("-version")
+        .values_list("version", flat=True)
+        .first()
+        or 0
+    ) + 1
     pub = ResultPublication.objects.create(
         event=event_locked,
+        version=version,
         method=event_locked.ranking_method,
         params=params,
         inputs=inputs,
@@ -679,7 +724,7 @@ def public_results(event: Event) -> dict:
     """
     pub = (
         ResultPublication.objects.filter(event=event)
-        .order_by("-published_at")
+        .order_by("-version")
         .first()
     )
     if pub is None:
@@ -688,6 +733,15 @@ def public_results(event: Event) -> dict:
             "Results have not been published yet.",
             status_code=404,
         )
+    history = [
+        {
+            "version": item.version,
+            "published_at": item.published_at.isoformat(),
+            "note": item.note,
+            "input_digest": item.input_digest,
+        }
+        for item in ResultPublication.objects.filter(event=event).order_by("-version")
+    ]
     # Strip judge data from rows – public rows only carry ranked fields.
     public_rows = []
     for row in pub.rows:
@@ -706,16 +760,21 @@ def public_results(event: Event) -> dict:
             "rank_live": row.get("rank_live"),
             "n_comparisons": row.get("n_comparisons", 0),
             "status": row.get("status"),
+            "status_reason": row.get("status_reason"),
         })
     return {
         "pub_id": pub.public_id,
+        "version": pub.version,
         "published_at": pub.published_at.isoformat(),
+        "supersedes_version": pub.supersedes.version if pub.supersedes_id else None,
+        "note": pub.note,
         "method": pub.method,
         "lam": pub.params.get("lam"),
         "lambda_source": pub.params.get("lambda_source"),
         "rows": public_rows,
         "awards": pub.awards,
         "unawarded": pub.unawarded,
+        "history": history,
     }
 
 
@@ -762,6 +821,7 @@ def decision_record(pub: ResultPublication) -> dict:
     )
     return {
         "pub_id": pub.public_id,
+        "version": pub.version,
         "published_at": pub.published_at.isoformat(),
         "published_by": pub.published_by.display_name if pub.published_by else None,
         "method": pub.method,
@@ -770,6 +830,8 @@ def decision_record(pub: ResultPublication) -> dict:
         "rule_plain": rule_plain,
         "included_reviews": pub.inputs.get("included", []),
         "excluded_reviews": pub.inputs.get("excluded", []),
+        "project_snapshot": pub.inputs.get("project_snapshot", []),
+        "project_snapshot_backfilled": pub.project_snapshot_backfilled,
         "prizes": pub.inputs.get("prizes", []),
         "one_prize_per_team": pub.inputs.get("one_prize_per_team"),
         "awards": pub.awards,
@@ -852,12 +914,17 @@ def _malformed_inputs(pub: ResultPublication) -> str | None:
     if "lam" not in params or not (params["lam"] is None or _is_number(params["lam"])):
         return "params.lam is not a number"
     checks = [
-        ("params.criteria", "criteria" not in params or _records(
+        ("params.criteria", "criteria" in params and _records(
             params["criteria"], key=_is_text, weight=_is_number, min_score=_is_int, max_score=_is_int)),
+        ("reviews_per_project", _is_int(inputs.get("reviews_per_project"))),
         ("included reviews", _records(inputs.get("included", []), review_id=_is_text, judge_id=_is_text,
                                       project_id=_is_text, criteria=_is_values)),
         ("projects", "projects" not in inputs or (
             isinstance(inputs["projects"], list) and all(map(_is_text, inputs["projects"])))),
+        ("project snapshot", _records(
+            inputs.get("project_snapshot", []), project_id=_is_text, title=_is_text,
+            team=_is_text, status=_is_text, status_reason=_is_optional_text,
+        )),
         ("comparisons", inputs.get("comparisons") is None or _records(
             inputs["comparisons"], left=_is_text, right=_is_text, winner=_is_optional_text)),
         ("prizes", inputs.get("prizes") is None or _records(
@@ -874,6 +941,16 @@ def _unverifiable(pub: ResultPublication, reason: str) -> dict:
         "pub_id": pub.public_id,
         "verdict": "differs",
         "detail": f"Stored publication cannot be recomputed: {reason}.",
+        "reproducible": {
+            "verdict": "not reproducible",
+            "matches": False,
+            "detail": f"Stored publication cannot be recomputed: {reason}.",
+        },
+        "unchanged_since_publication": {
+            "verdict": "not checked",
+            "matches": False,
+            "differences": [],
+        },
         "rows_match": False,
         "awards_match": False,
         "digest_match": False,
@@ -901,24 +978,227 @@ def _row_projection(rows: list[dict], live_pairwise: bool) -> list[dict]:
     Duplicates are kept, so a repeated row cannot pass for one; the display
     order of the stored rows is not compared.
     """
-    fields = ("project_id", "rank", "normalized", "status", *(("live_strength",) if live_pairwise else ()))
+    fields = (
+        "project_id", "title", "team", "track", "n_reviews", "raw_mean", "normalized",
+        "rank", "rank_raw", "rank_norm", "rank_bt", "live_strength", "rank_live",
+        "n_comparisons", "status", "status_reason",
+    )
     return sorted(({name: row.get(name) for name in fields} for row in rows), key=lambda row: row["project_id"])
 
 
+def _stored_project_status(result: engine.Result, project: dict) -> str:
+    """Result status from stored public status plus recomputed scores."""
+    status = project["status"]
+    if status != ProjectStatus.SUBMITTED:
+        return status
+    project_id = project["project_id"]
+    if result.method == "pairwise" and result.live_strengths is not None:
+        if result.live_strengths.get(project_id) is None:
+            return "unranked_no_reviews"
+        if len(result.pairwise_components) > 1:
+            return "unranked_disconnected"
+        return "ranked"
+    return "unranked_no_reviews" if project_id not in result.raw else "ranked"
+
+
+def _rows_from_stored_snapshot(
+    result: engine.Result, project_snapshot: list[dict], comparisons: list[dict]
+) -> list[dict]:
+    """Build result rows without consulting the current Project or Team roster."""
+    comparison_counts = Counter(
+        project_id
+        for item in comparisons if item.get("winner") is not None
+        for project_id in (item["left"], item["right"])
+    )
+    rows = []
+    for project in project_snapshot:
+        if project["status"] == ProjectStatus.DRAFT:
+            continue
+        project_id = project["project_id"]
+        raw_tuple = result.raw.get(project_id)
+        status = _stored_project_status(result, project)
+        rows.append({
+            "project_id": project_id,
+            "title": project["title"],
+            "team": project["team"],
+            "track": project.get("track"),
+            "n_reviews": raw_tuple[1] if raw_tuple else 0,
+            "raw_mean": raw_tuple[0] if raw_tuple else None,
+            "normalized": result.normalized.get(project_id),
+            "rank": result.rank.get(project_id),
+            "rank_raw": result.rank_raw.get(project_id),
+            "rank_norm": result.rank_norm.get(project_id),
+            "rank_bt": result.rank_bt.get(project_id),
+            "live_strength": result.live_strengths.get(project_id)
+            if result.live_strengths is not None else None,
+            "rank_live": result.rank_live.get(project_id),
+            "n_comparisons": comparison_counts[project_id],
+            "status": status,
+            "status_reason": project.get("status_reason"),
+        })
+    rows.sort(key=lambda row: _rank_order(row["rank"], row["title"]))
+    return rows
+
+
+def _allocation_inputs_from_snapshot(
+    result: engine.Result, project_snapshot: list[dict]
+) -> list[prizes.RankedProject]:
+    rows = []
+    for project in project_snapshot:
+        project_id = project["project_id"]
+        status = _stored_project_status(result, project)
+        rows.append(prizes.RankedProject(
+            project_id=project_id,
+            title=project["title"],
+            team_id=project.get("team_id") or project_id,
+            team_name=project["team"],
+            track_id=project.get("track_id"),
+            track_name=project.get("track"),
+            score=_official_score(result, project_id) if status == "ranked" else None,
+            rank=result.rank.get(project_id),
+            status=status,
+        ))
+    rows.sort(key=lambda row: _rank_order(row.rank, row.title))
+    return rows
+
+
+def _projected_differences(stored: dict, live: dict) -> list[str]:
+    """Describe canonical field changes without treating corrections as tampering."""
+    differences: list[str] = []
+    stored_reviews = {
+        row.get("review_id"): (section, row)
+        for section in ("included", "excluded")
+        for row in stored.get(section, [])
+    }
+    live_reviews = {
+        row.get("review_id"): (section, row)
+        for section in ("included", "excluded")
+        for row in live.get(section, [])
+    }
+    for review_id in sorted(set(stored_reviews) | set(live_reviews)):
+        old = stored_reviews.get(review_id)
+        new = live_reviews.get(review_id)
+        if old is None:
+            differences.append(f"review {review_id} added after publication")
+        elif new is None:
+            project_id = old[1].get("project_id")
+            live_project = next(
+                (project for project in live.get("project_snapshot", [])
+                 if project.get("project_id") == project_id),
+                None,
+            )
+            if live_project and live_project.get("status") in (
+                ProjectStatus.DISQUALIFIED, ProjectStatus.WITHDRAWN, ProjectStatus.SUPERSEDED
+            ):
+                differences.append(f"review {review_id} excluded after publication")
+            else:
+                differences.append(f"review {review_id} removed after publication")
+        elif old[0] != new[0]:
+            differences.append(
+                f"review {review_id} {'excluded' if new[0] == 'excluded' else 'included'} "
+                "after publication"
+            )
+        else:
+            for field in sorted(set(old[1]) | set(new[1])):
+                if field == "criteria" and old[1].get(field) != new[1].get(field):
+                    old_criteria = old[1].get(field) or {}
+                    new_criteria = new[1].get(field) or {}
+                    for key in sorted(set(old_criteria) | set(new_criteria)):
+                        if old_criteria.get(key) != new_criteria.get(key):
+                            differences.append(
+                                f"review {review_id} criterion {key} changed after publication"
+                            )
+                elif old[1].get(field) != new[1].get(field):
+                    differences.append(f"review {review_id} {field} changed after publication")
+
+    stored_projects = {row["project_id"]: row for row in stored.get("project_snapshot", [])}
+    live_projects = {row["project_id"]: row for row in live.get("project_snapshot", [])}
+    for project_id in sorted(set(stored_projects) | set(live_projects)):
+        old = stored_projects.get(project_id)
+        new = live_projects.get(project_id)
+        if old is None:
+            differences.append(f"project {project_id} added after publication")
+        elif new is None:
+            differences.append(f"project {project_id} removed after publication")
+        else:
+            if old.get("status") != new.get("status") and new.get("status") in (
+                ProjectStatus.DISQUALIFIED, ProjectStatus.WITHDRAWN, ProjectStatus.SUPERSEDED
+            ):
+                differences.append(
+                    f"project {project_id} {new['status']} after publication"
+                )
+            for field in ("title", "team", "track", "status", "status_reason"):
+                if old.get(field) != new.get(field):
+                    differences.append(f"project {project_id} {field} changed after publication")
+
+    ignored = {"included", "excluded", "project_snapshot"}
+    for key in sorted((set(stored) | set(live)) - ignored):
+        differences.extend(_canonical_field_differences(
+            stored.get(key), live.get(key), key
+        ))
+    return differences
+
+
+def _canonical_field_differences(old: Any, new: Any, path: str) -> list[str]:
+    """Flatten remaining canonical changes to their leaf fields."""
+    if old == new:
+        return []
+    if isinstance(old, dict) and isinstance(new, dict):
+        return [
+            difference
+            for key in sorted(set(old) | set(new))
+            for difference in _canonical_field_differences(
+                old.get(key), new.get(key), f"{path}.{key}"
+            )
+        ]
+    if isinstance(old, list) and isinstance(new, list):
+        identity = next(
+            (field for field in ("review_id", "project_id", "prize_id", "comparison_id", "key")
+             if old + new and all(isinstance(item, dict) and field in item for item in old + new)),
+            None,
+        )
+        if identity:
+            old_items = {item[identity]: item for item in old}
+            new_items = {item[identity]: item for item in new}
+            return [
+                difference
+                for key in sorted(set(old_items) | set(new_items))
+                for difference in _canonical_field_differences(
+                    old_items.get(key), new_items.get(key), f"{path}.{key}"
+                )
+            ]
+        return [
+            difference
+            for index in range(max(len(old), len(new)))
+            for difference in _canonical_field_differences(
+                old[index] if index < len(old) else None,
+                new[index] if index < len(new) else None,
+                f"{path}[{index}]",
+            )
+        ]
+    return [f"{path} changed after publication"]
+
+
+def _live_canonical_inputs(pub: ResultPublication) -> dict:
+    """Project current database inputs in the same shape as the stored snapshot."""
+    event = pub.event
+    included, excluded = _build_input_lists(event)
+    comparisons = _comparison_inputs(event)
+    params = dict(pub.inputs.get("params", {}))
+    params.update({
+        "method": event.ranking_method,
+        "rubric_version": _rubric_version(event),
+        "criteria": _criteria_snapshot(event),
+        "lambda_source": "auto" if _lam_for_event(event) == "auto" else "fixed",
+    })
+    live_lam = _lam_for_event(event)
+    if live_lam != "auto":
+        params["lam"] = live_lam
+    return _canonical_inputs(event, included, excluded, params, comparisons)
+
+
 def verify_publication(pub: ResultPublication) -> dict:
-    """Recompute results from stored inputs and compare.
-
-    Four checks (BUILD-SPEC 16):
-    1. Rerun the engine on the stored inputs → rank, score and status must
-       match the stored rows for exactly the live non-draft project roster.
-    2. Rerun the prize allocation from the stored prize config → awards
-       and unawarded prizes must be identical.
-    3. Hash the stored inputs → must equal the stored digest.
-    4. Hash the live database → digest must match the stored digest.
-
-    Rows and awards read live project metadata, so a roster change after
-    publication reports "differs" as well.
-    """
+    """Return independent historical-replay and live-projection verdicts."""
     problem = _malformed_inputs(pub)
     if problem is not None:
         return _unverifiable(pub, problem)
@@ -928,20 +1208,15 @@ def verify_publication(pub: ResultPublication) -> dict:
     params = stored_inputs.get("params", {})
     criteria_dicts = params.get("criteria", [])
 
-    # Rebuild engine criteria from the rubric at publication time.
-    # Fall back to current rubric if not stored (older publications).
-    if "criteria" in params:
-        criteria = [
-            engine.Criterion(
-                key=c["key"],
-                weight=float(c["weight"]),
-                min_score=int(c["min_score"]),
-                max_score=int(c["max_score"]),
-            )
-            for c in criteria_dicts
-        ]
-    else:
-        criteria = engine_criteria(pub.event)
+    criteria = [
+        engine.Criterion(
+            key=c["key"],
+            weight=float(c["weight"]),
+            min_score=int(c["min_score"]),
+            max_score=int(c["max_score"]),
+        )
+        for c in criteria_dicts
+    ]
     unscored = _unscored_review(inc, criteria)
     if unscored is not None:
         return _unverifiable(pub, f"included review {unscored} lacks a score for a criterion")
@@ -964,70 +1239,84 @@ def verify_publication(pub: ResultPublication) -> dict:
         )
         for r in inc
     ]
-    all_project_ids = stored_inputs.get("projects", list({r["project_id"] for r in inc}))
+    project_snapshot = stored_inputs.get("project_snapshot", [])
+    all_project_ids = stored_inputs.get(
+        "projects",
+        [project["project_id"] for project in project_snapshot
+         if project.get("status") == ProjectStatus.SUBMITTED],
+    )
     comparisons = stored_inputs.get("comparisons")
     try:
         result = engine.evaluate(
             review_inputs,
             criteria,
             lam=lam_val,
-            target=pub.event.reviews_per_project,
+            target=stored_inputs["reviews_per_project"],
             method=params.get("method", pub.method),
             projects=all_project_ids,
             comparisons=_engine_comparisons(comparisons) if comparisons is not None else None,
         )
         if not _finite_result(result):
             return _unverifiable(pub, "recomputed scores are not finite")
-        snapshot = _project_snapshot(result, pub.event)
-        # Awards: recompute from the stored prize configuration and the re-run
-        # engine, using the live project metadata (title, team, track) exactly as
-        # the rows check does. Publications made before prize allocation carry no
-        # prize configuration, so the check is skipped rather than failed.
-        awards_match = _verify_awards(pub, result, snapshot)
+        awards_match = _verify_awards(pub, result, project_snapshot)
     except ValueError as error:
         # Engine and allocator reject out-of-domain stored values (negative
         # lambda, unknown method, scores off the scale): fail, never crash.
         return _unverifiable(pub, str(error))
 
-    # Expected rows come from the live non-draft roster, not from pub.rows, so a
-    # removed, repeated or invented stored row cannot compare equal to itself.
     live_pairwise = comparisons is not None
-    rows_match = (_row_projection(_build_rows(result, snapshot, comparisons or ()), live_pairwise)
-                  == _row_projection(pub.rows, live_pairwise))
+    rows_match = (
+        _row_projection(
+            _rows_from_stored_snapshot(result, project_snapshot, comparisons or ()), live_pairwise
+        )
+        == _row_projection(pub.rows, live_pairwise)
+    )
     stored_inputs_match = _digest(stored_inputs) == pub.input_digest
 
-    # Live digest check: same params, but freshly built included/excluded lists.
-    # This checks whether the live data (reviews/exclusions/prizes) has changed
-    # since publication. The params are fixed at publication time and don't vary.
-    live_inc, live_exc = _build_input_lists(pub.event)
-    # Use the stored params to reconstruct the live digest – only the review
-    # data changes if there is tampering.
-    live_digest = _digest(_canonical_inputs(pub.event, live_inc, live_exc, params))
+    live_inputs = _live_canonical_inputs(pub)
+    live_digest = _digest(live_inputs)
     digest_match = live_digest == pub.input_digest
+    differences = _projected_differences(stored_inputs, live_inputs)
 
-    if rows_match and stored_inputs_match and digest_match and awards_match is not False:
-        verdict = "identical"
-        detail = ("Recomputed rows match, stored inputs hash to the stored digest "
-                  "and live data digest matches it.")
+    reproducible = rows_match and stored_inputs_match and awards_match is not False
+    if reproducible:
+        reproducible_detail = "Stored inputs reproduce the publication rows and awards."
     else:
-        parts = []
-        if not rows_match:
-            parts.append("recomputed rows differ from stored rows")
-        if awards_match is False:
-            parts.append("recomputed awards differ from stored awards")
-        if not stored_inputs_match:
-            parts.append("stored inputs no longer hash to the stored digest")
-        if not digest_match:
-            parts.append(
-                f"live data digest {live_digest[:12]}… differs from stored {pub.input_digest[:12]}…"
-            )
-        verdict = "differs"
-        detail = "; ".join(parts).capitalize() + "."
+        reasons = [
+            text for text, failed in (
+                ("recomputed rows differ from stored rows", not rows_match),
+                ("recomputed awards differ from stored awards", awards_match is False),
+                ("stored inputs do not hash to the stored digest", not stored_inputs_match),
+            ) if failed
+        ]
+        reproducible_detail = "; ".join(reasons).capitalize() + "."
+    if stored_inputs_match:
+        unchanged = digest_match and not differences
+        live_detail = "Unchanged since publication." if unchanged else "Live inputs changed since publication."
+    else:
+        # The stored copy failed its own digest, so stored-vs-live differences cannot be blamed
+        # on the live data; the live database is judged only against the published digest.
+        unchanged = digest_match
+        live_detail = (
+            "Live data still matches the published digest; the stored copy was altered."
+            if digest_match
+            else "Live data also differs from the published digest."
+        )
 
     return {
         "pub_id": pub.public_id,
-        "verdict": verdict,
-        "detail": detail,
+        "verdict": "identical" if reproducible and unchanged else "differs",
+        "detail": f"Reproducible: {reproducible_detail} {live_detail}",
+        "reproducible": {
+            "verdict": "reproducible" if reproducible else "not reproducible",
+            "matches": reproducible,
+            "detail": reproducible_detail,
+        },
+        "unchanged_since_publication": {
+            "verdict": "unchanged since publication" if unchanged else "changed since publication",
+            "matches": unchanged,
+            "differences": differences,
+        },
         "rows_match": rows_match,
         "awards_match": awards_match,
         "digest_match": digest_match,
@@ -1038,7 +1327,7 @@ def verify_publication(pub: ResultPublication) -> dict:
 
 
 def _verify_awards(
-    pub: ResultPublication, result: engine.Result, snapshot: list[tuple[Project, str, float | None]]
+    pub: ResultPublication, result: engine.Result, project_snapshot: list[dict]
 ) -> bool | None:
     """True when the re-run allocation equals the stored one, None when absent."""
     stored_prizes = pub.inputs.get("prizes")
@@ -1058,7 +1347,7 @@ def _verify_awards(
         for p in stored_prizes
     ]
     recomputed = prizes.allocate(
-        _allocation_inputs(result, snapshot),
+        _allocation_inputs_from_snapshot(result, project_snapshot),
         specs,
         one_per_team=bool(pub.inputs.get("one_prize_per_team", True)),
     )  # the stored policy, not today's
@@ -1179,17 +1468,12 @@ def project_feedback(event: Event, project: Project) -> dict:
         for r in pub.inputs.get("included", [])
         if r.get("project_id") == project.public_id
     }
-    criteria_keys = []
     per_criterion: dict[str, list[int]] = {}
-    from judging.models import CriterionScore, Review as JudgingReview
-    reviews = list(
-        JudgingReview.objects.filter(
-            event=event, public_id__in=review_ids
-        ).prefetch_related("scores__criterion")
-    )
-    for review in reviews:
-        for score in review.scores.all():
-            per_criterion.setdefault(score.criterion.key, []).append(score.value)
+    for review in pub.inputs.get("included", []):
+        if review.get("review_id") not in review_ids:
+            continue
+        for key, value in review.get("criteria", {}).items():
+            per_criterion.setdefault(key, []).append(value)
     criterion_averages = {
         key: sum(vals) / len(vals) for key, vals in per_criterion.items()
     }

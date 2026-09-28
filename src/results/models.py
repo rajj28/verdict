@@ -23,6 +23,8 @@ class ResultPublication(models.Model):
         related_name="result_publications",
     )
     public_id = models.CharField(max_length=32, default=_new_pub_id)
+    version = models.PositiveIntegerField(default=1)
+    project_snapshot_backfilled = models.BooleanField(default=False)
     method = models.CharField(max_length=16)
     params = models.JSONField(default=dict, blank=True)
     inputs = models.JSONField(default=dict, blank=True)
@@ -75,6 +77,10 @@ class ResultPublication(models.Model):
             models.UniqueConstraint(
                 fields=["event", "public_id"],
                 name="publication_unique_public_id_per_event",
+            ),
+            models.UniqueConstraint(
+                fields=["event", "version"],
+                name="publication_unique_version_per_event",
             ),
         ]
 

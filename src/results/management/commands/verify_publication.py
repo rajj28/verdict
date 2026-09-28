@@ -52,11 +52,14 @@ class Command(BaseCommand):
         result = verify_publication(pub)
 
         self.stdout.write("")
-        if result["verdict"] == "identical":
-            self.stdout.write(self.style.SUCCESS(f"✓ IDENTICAL — {result['detail']}"))
-        else:
-            self.stdout.write(self.style.ERROR(f"✗ DIFFERS — {result['detail']}"))
-            self.stdout.write(f"  rows_match:    {result['rows_match']}")
-            self.stdout.write(f"  digest_match:  {result['digest_match']}")
-            self.stdout.write(f"  stored digest: {result['stored_digest']}")
-            self.stdout.write(f"  live digest:   {result['live_digest']}")
+        reproducible = result["reproducible"]
+        unchanged = result["unchanged_since_publication"]
+        style = self.style.SUCCESS if reproducible["matches"] else self.style.ERROR
+        self.stdout.write(style(f"  Reproducible: {reproducible['verdict']}"))
+        self.stdout.write(f"    {reproducible['detail']}")
+        style = self.style.SUCCESS if unchanged["matches"] else self.style.WARNING
+        self.stdout.write(style(f"  Unchanged since publication: {unchanged['verdict']}"))
+        for difference in unchanged["differences"]:
+            self.stdout.write(f"    - {difference}")
+        self.stdout.write(f"  Stored digest: {result['stored_digest']}")
+        self.stdout.write(f"  Live digest:   {result['live_digest']}")

@@ -24,6 +24,9 @@
       {% if item.people %}<p>{{ item.people|join:", " }}</p>{% endif %}
       {% if item.project %}<p>For {{ item.project }}</p>{% endif %}
       {% if item.detail %}<p>{{ item.detail }}</p>{% endif %}
+      {% if item.kind == "winner" and item.superseded_by_version %}
+        <p>Superseded by publication version {{ item.superseded_by_version }}.</p>
+      {% endif %}
       <p>Verification code: <strong>{{ item.code }}</strong></p>
       <p class="small text-break">{{ item.url }}</p>
     </article>

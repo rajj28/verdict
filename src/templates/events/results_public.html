@@ -12,7 +12,7 @@ prizes. No judge name, id, offset or comment ever reaches this template
 {% block heading %}{{ event.name }} results{% endblock %}
 {% block lead %}
   {% if publication %}
-    Published
+    Official version {{ publication.version }} &middot; published
     <time datetime="{{ publication.published_at|date:'c' }}">{{ publication.published_at|utc }}</time>
     using {{ method_label }}{% if publication.params.lam %} with &lambda; {{ publication.params.lam|floatformat:2 }}{% endif %}.
     Scores are normalized: each judge&rsquo;s habit of scoring high or low is removed
@@ -72,6 +72,13 @@ prizes. No judge name, id, offset or comment ever reaches this template
         </div>
       {% endif %}
     </section>
+  {% endif %}
+
+  {% if publication.supersedes_id %}
+    <p class="alert alert-light border">
+      This version supersedes version {{ publication.supersedes.version }}.
+      {% if publication.note %}{{ publication.note }}{% endif %}
+    </p>
   {% endif %}
 
   <section class="mb-4">
@@ -161,6 +168,33 @@ prizes. No judge name, id, offset or comment ever reaches this template
     are recorded in a decision record the organizers can show you, including a Verify
     action that recomputes the result from the stored inputs.
   </p>
+
+  <section class="mb-4">
+    <h2 class="h4">Publication history</h2>
+    <div class="table-responsive">
+      <table class="data-table">
+        <caption class="visually-hidden">Public publication version history for {{ event.name }}</caption>
+        <thead>
+          <tr>
+            <th scope="col">Version</th>
+            <th scope="col">Published</th>
+            <th scope="col">Note</th>
+            <th scope="col">Input digest</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in version_history %}
+            <tr>
+              <td>{{ item.version }}{% if item.version == publication.version %} <span class="form-hint">(official)</span>{% endif %}</td>
+              <td><time datetime="{{ item.published_at|date:'c' }}">{{ item.published_at|utc }}</time></td>
+              <td>{{ item.note|default:"—" }}</td>
+              <td class="mono">{{ item.input_digest }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
 
 {% endif %}
 

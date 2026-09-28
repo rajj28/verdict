@@ -4,7 +4,7 @@ DRF serializers and viewsets. Thin: validate, delegate to services, return the e
 """
 from core.errors import ApiError
 from core.pagination import VerdictPagination
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
 from events.models import Event
 from events.policy import get_event_by_slug, is_organizer
 from projects import services
@@ -16,6 +16,8 @@ from rest_framework.generics import GenericAPIView
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+
+from core.schema import error_responses
 
 TAGS = ["projects"]
 
@@ -147,12 +149,66 @@ class DisqualifySerializer(serializers.Serializer):
 
 
 class AnswerSerializer(serializers.Serializer):
-    """Answers keyed by question public id: {q_abc123: "text"}."""
+    """Answers keyed by question public id: {"q_abc123": "text"}.
+
+    Declared as a free-form object because the keys are the event's question ids,
+    which are not known until the event is.
+    """
 
     def to_internal_value(self, data):
         if not isinstance(data, dict):
             raise serializers.ValidationError("Send the answers as an object keyed by question id.")
         return {str(key): value for key, value in data.items()}
+
+
+class ProjectAnswerSerializer(serializers.Serializer):
+    """One custom question answer as the project page shows it."""
+
+    question = serializers.CharField(help_text="Question public id.")
+    prompt = serializers.CharField()
+    is_public = serializers.BooleanField(
+        help_text="Public answers appear on the gallery page; private ones are asked of the "
+                  "team and shown to judges only."
+    )
+    value = serializers.CharField(allow_null=True)
+
+
+class ProjectImageSerializer(serializers.Serializer):
+    position = serializers.IntegerField(help_text="One-based slot in the gallery.")
+    caption = serializers.CharField(allow_blank=True)
+    url = serializers.CharField()
+
+
+class ProjectRevisionSerializer(serializers.Serializer):
+    """A submitted revision. ``receipt`` is a digest prefix, not a signature."""
+
+    number = serializers.IntegerField()
+    created_at = serializers.DateTimeField(help_text="Server timestamp of the submission.")
+    receipt = serializers.CharField(
+        help_text="First 8 characters of the revision digest. It is an internal checksum "
+                  "prefix and is not proof of external authorship."
+    )
+
+
+class ProjectImageCreatedSerializer(serializers.Serializer):
+    project = serializers.CharField()
+    position = serializers.IntegerField()
+    caption = serializers.CharField(allow_blank=True)
+    url = serializers.CharField()
+
+
+class ProjectImageDeletedSerializer(serializers.Serializer):
+    deleted = serializers.IntegerField(help_text="Position that was freed.")
+
+
+class ImageUploadSerializer(serializers.Serializer):
+    """multipart/form-data body of an image upload."""
+
+    image = serializers.FileField(
+        help_text="jpeg, png, webp or gif, at most 5 MB, at most six per project. Verified "
+                  "by decoding it, not by trusting the extension."
+    )
+    caption = serializers.CharField(required=False, allow_blank=True, max_length=300)
 
 
 def event_or_404(slug: str) -> Event:
@@ -192,7 +248,19 @@ class PublicGallery(GenericAPIView):
         description="Filters: q (title, summary or description), event (slug), track "
                     "(public id), tag (exact, lowercased), sort=title|newest. Page one is "
                     "sorted by title, which is what the acceptance checker reads.",
-        responses={200: GalleryProjectSerializer(many=True)},
+        parameters=[
+            OpenApiParameter("q", str, OpenApiParameter.QUERY, required=False,
+                             description="Free text over title, summary and description."),
+            OpenApiParameter("event", str, OpenApiParameter.QUERY, required=False,
+                             description="Restrict to one event slug."),
+            OpenApiParameter("track", str, OpenApiParameter.QUERY, required=False,
+                             description="Track public id."),
+            OpenApiParameter("tag", str, OpenApiParameter.QUERY, required=False,
+                             description="Exact tech tag, lowercased."),
+            OpenApiParameter("sort", str, OpenApiParameter.QUERY, required=False,
+                             description="'title' (default) or 'newest'."),
+        ],
+        responses={200: GalleryProjectSerializer(many=True), **error_responses(404)},
         tags=TAGS,
     )
     def get(self, request):
@@ -235,9 +303,19 @@ class EventProjectListCreate(GenericAPIView):
 
     @extend_schema(
         operation_id="event_projects",
-        summary="List the event's submitted projects (public) or start your team's draft.",
-        responses={200: ProjectSerializer(many=True), 201: ProjectSerializer,
-                   400: None, 401: None, 403: None, 404: None, 409: None},
+        summary="List the event's submitted projects.",
+        description="Public where the event's gallery is public; otherwise 404, so a private "
+                    "event is not discoverable through this route either. Drafts are never "
+                    "listed.",
+        parameters=[
+            OpenApiParameter("q", str, OpenApiParameter.QUERY, required=False,
+                             description="Free text filter."),
+            OpenApiParameter("track", str, OpenApiParameter.QUERY, required=False,
+                             description="Track public id."),
+            OpenApiParameter("tag", str, OpenApiParameter.QUERY, required=False,
+                             description="Exact tech tag."),
+        ],
+        responses={200: ProjectSerializer(many=True), **error_responses(404, 429)},
         tags=TAGS,
     )
     def get(self, request, slug: str):
@@ -258,8 +336,12 @@ class EventProjectListCreate(GenericAPIView):
                     "no team 403 not_a_participant; a second active project 409 "
                     "team_has_project.",
         request=ProjectWriteSerializer,
-        responses={201: ProjectSerializer, 400: None, 401: None, 403: None, 404: None,
-                   409: None},
+        parameters=[
+            OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                             description="Event slug."),
+        ],
+        responses={201: ProjectSerializer,
+                   **error_responses(400, 401, 403, 404, 409)},
         tags=TAGS,
     )
     def post(self, request, slug: str):
@@ -277,6 +359,8 @@ class ProjectDetail(GenericAPIView):
     submitted project in a public event is public, whoever asks. PATCH is not.
     """
 
+    serializer_class = ProjectDetailSerializer
+
     def get_permissions(self):
         if self.request.method == "GET":
             return [AllowAny()]
@@ -284,20 +368,42 @@ class ProjectDetail(GenericAPIView):
 
     @extend_schema(
         operation_id="event_project_detail",
-        summary="Read or edit one project.",
-        description="PATCH is refused with 403 window_closed once submissions close, 409 "
-                    "stale_edit when base_updated_at does not match the stored version, and "
-                    "400 cross_event for a track from another event. Editing a submitted "
-                    "project writes a new revision immediately.",
-        request=None,
-        responses={200: ProjectDetailSerializer, 400: None, 401: None, 403: None, 404: None,
-                   409: None},
+        summary="Read one project as the caller is allowed to see it.",
+        description="A submitted project in a public event is public. Private custom answers "
+                    "and the revision list appear only for the team, organizers and assigned "
+                    "judges; can_edit and can_withdraw say which actions this caller has, so "
+                    "a client never has to guess.",
+        parameters=[
+            OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                             description="Event slug."),
+            OpenApiParameter("public_id", str, OpenApiParameter.PATH,
+                             description="Project public id."),
+        ],
+        responses={200: ProjectDetailSerializer, **error_responses(404)},
         tags=TAGS,
     )
     def get(self, request, slug: str, public_id: str):
         project = project_or_404(slug, public_id, request.user)
         return Response(ProjectDetailSerializer(project, context={"viewer": request.user}).data)
 
+    @extend_schema(
+        operation_id="event_project_update",
+        summary="Edit your team's project.",
+        description="Refused with 403 window_closed once submissions close, 409 stale_edit "
+                    "when base_updated_at does not match the stored version, and 400 "
+                    "cross_event for a track from another event. Editing a submitted project "
+                    "writes a new revision immediately.",
+        request=ProjectPatchSerializer,
+        parameters=[
+            OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                             description="Event slug."),
+            OpenApiParameter("public_id", str, OpenApiParameter.PATH,
+                             description="Project public id."),
+        ],
+        responses={200: ProjectDetailSerializer,
+                   **error_responses(400, 401, 403, 404, 409)},
+        tags=TAGS,
+    )
     def patch(self, request, slug: str, public_id: str):
         event = event_or_404(slug)
         project = project_or_404(slug, public_id, request.user)
@@ -320,8 +426,14 @@ class ProjectSubmit(GenericAPIView):
                     "answer to every required question; anything missing comes back under "
                     "error.fields. The response carries the new revision and its receipt.",
         request=None,
-        responses={200: ProjectDetailSerializer, 400: None, 401: None, 403: None, 404: None,
-                   409: None},
+        parameters=[
+            OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                             description="Event slug."),
+            OpenApiParameter("public_id", str, OpenApiParameter.PATH,
+                             description="Project public id."),
+        ],
+        responses={200: ProjectDetailSerializer,
+                   **error_responses(400, 401, 403, 404, 409)},
         tags=TAGS,
     )
     def post(self, request, slug: str, public_id: str):
@@ -338,8 +450,17 @@ class ProjectWithdraw(GenericAPIView):
     @extend_schema(
         operation_id="event_project_withdraw",
         summary="Withdraw your team's submission while the window is open.",
+        description="Team owner only. A withdrawn project keeps its record and can be "
+                    "resubmitted while the window is still open.",
         request=None,
-        responses={200: ProjectDetailSerializer, 401: None, 403: None, 404: None, 409: None},
+        parameters=[
+            OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                             description="Event slug."),
+            OpenApiParameter("public_id", str, OpenApiParameter.PATH,
+                             description="Project public id."),
+        ],
+        responses={200: ProjectDetailSerializer,
+                   **error_responses(401, 403, 404, 409)},
         tags=TAGS,
     )
     def post(self, request, slug: str, public_id: str):
@@ -360,8 +481,14 @@ class ProjectDisqualify(GenericAPIView):
                     "submission window: an organizer has to be able to stand a project down "
                     "after the close. The reason is stored and audited.",
         request=DisqualifySerializer,
-        responses={200: ProjectDetailSerializer, 400: None, 401: None, 403: None, 404: None,
-                   409: None},
+        parameters=[
+            OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                             description="Event slug."),
+            OpenApiParameter("public_id", str, OpenApiParameter.PATH,
+                             description="Project public id."),
+        ],
+        responses={200: ProjectDetailSerializer,
+                   **error_responses(400, 401, 403, 404, 409)},
         tags=TAGS,
     )
     def post(self, request, slug: str, public_id: str):
@@ -383,8 +510,15 @@ class ProjectImageCreate(GenericAPIView):
         summary="Attach a gallery image (jpeg, png, webp or gif, up to 5 MB, six per project).",
         description="The file is verified with Pillow rather than trusted from its "
                     "extension, and stored under a random name.",
-        request={"multipart/form-data": {"image": "file", "caption": "string"}},
-        responses={201: None, 400: None, 401: None, 403: None, 404: None, 409: None},
+        request={"multipart/form-data": ImageUploadSerializer},
+        parameters=[
+            OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                             description="Event slug."),
+            OpenApiParameter("public_id", str, OpenApiParameter.PATH,
+                             description="Project public id."),
+        ],
+        responses={201: ProjectImageCreatedSerializer,
+                   **error_responses(400, 401, 403, 404, 409, 413, 415)},
         tags=TAGS,
     )
     def post(self, request, slug: str, public_id: str):
@@ -407,7 +541,17 @@ class ProjectImageDetail(GenericAPIView):
     @extend_schema(
         operation_id="event_project_image_detail",
         summary="Remove one gallery image by its position in the editor.",
-        responses={200: None, 401: None, 403: None, 404: None},
+        request=None,
+        parameters=[
+            OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                             description="Event slug."),
+            OpenApiParameter("public_id", str, OpenApiParameter.PATH,
+                             description="Project public id."),
+            OpenApiParameter("position", int, OpenApiParameter.PATH,
+                             description="One-based image slot, as shown in the editor."),
+        ],
+        responses={200: ProjectImageDeletedSerializer,
+                   **error_responses(401, 403, 404)},
         tags=TAGS,
     )
     def delete(self, request, slug: str, public_id: str, position: int):
@@ -427,7 +571,14 @@ class ProjectAnswers(GenericAPIView):
         description="Body is {question_public_id: value}. A question from another event is "
                     "400 cross_event. Saving on a submitted project writes a new revision.",
         request=AnswerSerializer,
-        responses={200: ProjectDetailSerializer, 400: None, 401: None, 403: None, 404: None},
+        parameters=[
+            OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                             description="Event slug."),
+            OpenApiParameter("public_id", str, OpenApiParameter.PATH,
+                             description="Project public id."),
+        ],
+        responses={200: ProjectDetailSerializer,
+                   **error_responses(400, 401, 403, 404, 409)},
         tags=TAGS,
     )
     def put(self, request, slug: str, public_id: str):

@@ -23,6 +23,24 @@ def code_matches(expected: str, supplied: str) -> bool:
     return isinstance(supplied, str) and supplied.isascii() and hmac.compare_digest(expected, supplied)
 
 
+def _superseded_by_version(event, publication, award) -> int | None:
+    publications = policy.certificate_publications(event).filter(
+        version__gt=publication.version
+    ).order_by("version")
+    for later in publications:
+        replacement = next(
+            (
+                row for row in later.awards
+                if row.get("prize_id") == award.get("prize_id")
+                and str(row.get("place")) == str(award.get("place"))
+            ),
+            None,
+        )
+        if replacement is None or replacement.get("project_id") != award.get("project_id"):
+            return later.version
+    return None
+
+
 def certificate_data(event, kind: str, public_id: str) -> dict | None:
     if kind == "participation":
         project = (
@@ -80,13 +98,18 @@ def certificate_data(event, kind: str, public_id: str) -> dict | None:
             policy.certificate_members(event, project.team)
         )
         return {
-            "subject": project.team.name,
-            "project": project.title,
+            "subject": award.get("team") or project.team.name,
+            "project": award.get("project") or project.title,
             "people": [m.user.display_name or "Participant" for m in members],
             "owner_ids": [m.user_id for m in members],
             "issued_at": publication.published_at,
             "public_id": public_id,
-            "detail": f"{award.get('prize', 'Winner')} — place {award.get('place', 1)}.",
+            "publication_version": publication.version,
+            "superseded_by_version": _superseded_by_version(event, publication, award),
+            "detail": (
+                f"Publication version {publication.version}: "
+                f"{award.get('prize', 'Winner')} — place {award.get('place', 1)}."
+            ),
         }
     return None
 
@@ -111,7 +134,7 @@ def certificate_index(event) -> list[dict]:
                             "label": f"Judge participation — {role.user.display_name or 'Judge'}",
                             "subject": role.user.display_name or "Judge", "people": [],
                             "detail": f"Submitted {role.submitted_reviews} reviews."})
-    publication = policy.certificate_publications(event).first()
+    publication = policy.certificate_publications(event).order_by("-version").first()
     if publication:
         for award in publication.awards:
             project_id = award.get("project_id")
@@ -122,8 +145,13 @@ def certificate_index(event) -> list[dict]:
                 public_id = f"{publication.public_id}.{prize_id}.{place}"
                 entries.append({"kind": "winner", "public_id": public_id,
                                 "label": f"Winner — {award.get('project', project_id)} ({award.get('prize', '')})",
-                                "subject": project.team.name, "project": project.title,
+                                "subject": award.get("team") or project.team.name,
+                                "project": award.get("project") or project.title,
                                 "people": [m.user.display_name or "Participant"
                                            for m in project.team.memberships.all()],
-                                "detail": f"{award.get('prize', 'Winner')} — place {award.get('place', 1)}."})
+                                "publication_version": publication.version,
+                                "detail": (
+                                    f"Publication version {publication.version}: "
+                                    f"{award.get('prize', 'Winner')} — place {award.get('place', 1)}."
+                                )})
     return entries

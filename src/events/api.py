@@ -3,7 +3,7 @@
 DRF serializers and viewsets. Thin: validate, delegate to services, return the envelope.
 """
 from core.errors import ApiError
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import OpenApiParameter, extend_schema
 from events import services
 from events.models import CustomQuestion, Event, EventRole, JudgingMode, Prize, QuestionKind, RankingMethod, Role, Track
 from events.policy import get_event_by_slug, submission_window_open
@@ -11,6 +11,10 @@ from rest_framework import serializers
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+from core.schema import error_responses
+
+TAGS = ["events"]
 
 
 class EventSerializer(serializers.ModelSerializer):
@@ -116,9 +120,15 @@ class QuestionWriteSerializer(serializers.Serializer):
 
 
 class RoleSerializer(serializers.Serializer):
+    """An event role. ``user`` is a display name, never an email address."""
+
     public_id = serializers.CharField()
     user = serializers.CharField()
-    role = serializers.CharField()
+    role = serializers.CharField(help_text="participant, judge, organizer, host or admin.")
+
+
+class OrganizerAddSerializer(serializers.Serializer):
+    email = serializers.EmailField(help_text="Account to give the organizer role.")
 
 
 def role_payload(role: EventRole) -> dict:
@@ -163,13 +173,27 @@ class EventListCreate(APIView):
             return [AllowAny()]
         return [IsAuthenticated()]
 
-    @extend_schema(operation_id="events", responses={200: EventSerializer(many=True)}, tags=["events"])
+    @extend_schema(
+        operation_id="events",
+        summary="List every event with its current phase.",
+        description="Public. A closed or not-yet-open event is still listed, so it is not a "
+                    "404 for a reader.",
+        responses={200: EventSerializer(many=True), **error_responses(429)},
+        tags=TAGS,
+    )
     def get(self, request):
         events = Event.objects.prefetch_related("result_publications").order_by("name", "slug")
         return Response(EventSerializer(events, many=True).data)
 
-    @extend_schema(operation_id="event_create", request=EventWriteSerializer,
-                   responses={201: EventSerializer, 400: None, 401: None, 403: None}, tags=["events"])
+    @extend_schema(
+        operation_id="event_create",
+        summary="Create an event; the caller becomes its first organizer.",
+        description="Windows are half-open: a submission is accepted at "
+                    "submissions_open_at and refused at submissions_close_at.",
+        request=EventWriteSerializer,
+        responses={201: EventSerializer, **error_responses(400, 401, 403)},
+        tags=TAGS,
+    )
     def post(self, request):
         serializer = EventWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -183,13 +207,28 @@ class EventDetail(APIView):
             return [AllowAny()]
         return [IsAuthenticated()]
 
-    @extend_schema(operation_id="event_detail", responses={200: EventSerializer, 404: None}, tags=["events"])
+    @extend_schema(
+        operation_id="event_detail",
+        summary="Read one event, including whether its submission window is open now.",
+        parameters=[OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                                     description="Event slug.")],
+        responses={200: EventSerializer, **error_responses(404)},
+        tags=TAGS,
+    )
     def get(self, request, slug: str):
         return Response(EventSerializer(event_or_404(slug)).data)
 
-    @extend_schema(operation_id="event_update", request=EventPatchSerializer,
-                   responses={200: EventSerializer, 400: None, 401: None, 403: None, 409: None},
-                   tags=["events"])
+    @extend_schema(
+        operation_id="event_update",
+        summary="Change an event's settings, submission window or judging window.",
+        description="Organizer only. A moved window is re-checked under lock, so a patch "
+                    "that crosses the close instant is a 409, not a silent change.",
+        request=EventPatchSerializer,
+        parameters=[OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                                     description="Event slug.")],
+        responses={200: EventSerializer, **error_responses(400, 401, 403, 404, 409)},
+        tags=TAGS,
+    )
     def patch(self, request, slug: str):
         serializer = EventPatchSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
@@ -200,6 +239,18 @@ class EventDetail(APIView):
 class CloseJudging(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        operation_id="event_close_judging",
+        summary="Close judging now.",
+        description="Organizer only. Sets judging_close_at from the server clock, so the "
+                    "recheck under lock, not the page, decides whether a submit still "
+                    "lands. Audited with the old and the new value.",
+        request=None,
+        parameters=[OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                                     description="Event slug.")],
+        responses={200: EventSerializer, **error_responses(401, 403, 404, 409)},
+        tags=TAGS,
+    )
     def post(self, request, slug: str):
         return Response(EventSerializer(services.close_judging(request.user, event_or_404(slug))).data)
 
@@ -207,6 +258,18 @@ class CloseJudging(APIView):
 class CloseSubmissions(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        operation_id="event_close_submissions",
+        summary="Close submissions now.",
+        description="Organizer only. Sets submissions_close_at from the server clock. "
+                    "Submissions already accepted are unaffected; new and edited ones are "
+                    "refused from that instant.",
+        request=None,
+        parameters=[OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                                     description="Event slug.")],
+        responses={200: EventSerializer, **error_responses(401, 403, 404, 409)},
+        tags=TAGS,
+    )
     def post(self, request, slug: str):
         return Response(EventSerializer(services.close_submissions(request.user, event_or_404(slug))).data)
 
@@ -217,10 +280,28 @@ class TrackListCreate(APIView):
             return [AllowAny()]
         return [IsAuthenticated()]
 
+    @extend_schema(
+        operation_id="event_tracks",
+        summary="List the event's tracks.",
+        parameters=[OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                                     description="Event slug.")],
+        responses={200: TrackSerializer(many=True), **error_responses(404)},
+        tags=TAGS,
+    )
     def get(self, request, slug: str):
         event = event_or_404(slug)
         return Response(TrackSerializer(event.tracks.all(), many=True).data)
 
+    @extend_schema(
+        operation_id="event_track_create",
+        summary="Create a track (organizer).",
+        description="Tracks group submissions for judging; a project sits in at most one.",
+        request=TrackWriteSerializer,
+        parameters=[OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                                     description="Event slug.")],
+        responses={201: TrackSerializer, **error_responses(400, 401, 403, 404)},
+        tags=TAGS,
+    )
     def post(self, request, slug: str):
         serializer = TrackWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -231,6 +312,19 @@ class TrackListCreate(APIView):
 class TrackDetail(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        operation_id="event_track_update",
+        summary="Change a track (organizer).",
+        request=TrackWriteSerializer,
+        parameters=[
+            OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                             description="Event slug."),
+            OpenApiParameter("public_id", str, OpenApiParameter.PATH,
+                             description="Public id of this object."),
+        ],
+        responses={200: TrackSerializer, **error_responses(400, 401, 403, 404, 409)},
+        tags=TAGS,
+    )
     def patch(self, request, slug: str, public_id: str):
         serializer = TrackWriteSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
@@ -239,6 +333,21 @@ class TrackDetail(APIView):
                                       dict(serializer.validated_data))
         return Response(TrackSerializer(track).data)
 
+    @extend_schema(
+        operation_id="event_track_delete",
+        summary="Delete an empty track (organizer).",
+        description="Refused with 409 while projects still reference the track, because "
+                    "deleting it would silently re-file those submissions.",
+        request=None,
+        parameters=[
+            OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                             description="Event slug."),
+            OpenApiParameter("public_id", str, OpenApiParameter.PATH,
+                             description="Public id of this object."),
+        ],
+        responses={204: None, **error_responses(401, 403, 404, 409)},
+        tags=TAGS,
+    )
     def delete(self, request, slug: str, public_id: str):
         event = event_or_404(slug)
         services.delete_track(request.user, event, track_or_404(event, public_id))
@@ -251,10 +360,27 @@ class PrizeListCreate(APIView):
             return [AllowAny()]
         return [IsAuthenticated()]
 
+    @extend_schema(
+        operation_id="event_prizes",
+        summary="List the event's prizes and the track each is limited to.",
+        parameters=[OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                                     description="Event slug.")],
+        responses={200: PrizeSerializer(many=True), **error_responses(404)},
+        tags=TAGS,
+    )
     def get(self, request, slug: str):
         event = event_or_404(slug)
         return Response(PrizeSerializer(event.prizes.select_related("track"), many=True).data)
 
+    @extend_schema(
+        operation_id="event_prize_create",
+        summary="Create a prize (organizer).",
+        request=PrizeWriteSerializer,
+        parameters=[OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                                     description="Event slug.")],
+        responses={201: PrizeSerializer, **error_responses(400, 401, 403, 404)},
+        tags=TAGS,
+    )
     def post(self, request, slug: str):
         serializer = PrizeWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -265,6 +391,19 @@ class PrizeListCreate(APIView):
 class PrizeDetail(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        operation_id="event_prize_update",
+        summary="Change a prize (organizer).",
+        request=PrizeWriteSerializer,
+        parameters=[
+            OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                             description="Event slug."),
+            OpenApiParameter("public_id", str, OpenApiParameter.PATH,
+                             description="Public id of this object."),
+        ],
+        responses={200: PrizeSerializer, **error_responses(400, 401, 403, 404, 409)},
+        tags=TAGS,
+    )
     def patch(self, request, slug: str, public_id: str):
         serializer = PrizeWriteSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
@@ -273,6 +412,19 @@ class PrizeDetail(APIView):
                                       dict(serializer.validated_data))
         return Response(PrizeSerializer(prize).data)
 
+    @extend_schema(
+        operation_id="event_prize_delete",
+        summary="Delete a prize (organizer).",
+        request=None,
+        parameters=[
+            OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                             description="Event slug."),
+            OpenApiParameter("public_id", str, OpenApiParameter.PATH,
+                             description="Public id of this object."),
+        ],
+        responses={204: None, **error_responses(401, 403, 404, 409)},
+        tags=TAGS,
+    )
     def delete(self, request, slug: str, public_id: str):
         event = event_or_404(slug)
         services.delete_prize(request.user, event, prize_or_404(event, public_id))
@@ -285,10 +437,29 @@ class QuestionListCreate(APIView):
             return [AllowAny()]
         return [IsAuthenticated()]
 
+    @extend_schema(
+        operation_id="event_questions",
+        summary="List the event's custom submission questions.",
+        parameters=[OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                                     description="Event slug.")],
+        responses={200: QuestionSerializer(many=True), **error_responses(404)},
+        tags=TAGS,
+    )
     def get(self, request, slug: str):
         event = event_or_404(slug)
         return Response(QuestionSerializer(event.questions.all(), many=True).data)
 
+    @extend_schema(
+        operation_id="event_question_create",
+        summary="Add a custom submission question (organizer).",
+        description="A public question appears on the public project page; a private one is "
+                    "asked of the team and shown to judges, not to the gallery.",
+        request=QuestionWriteSerializer,
+        parameters=[OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                                     description="Event slug.")],
+        responses={201: QuestionSerializer, **error_responses(400, 401, 403, 404)},
+        tags=TAGS,
+    )
     def post(self, request, slug: str):
         serializer = QuestionWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -299,6 +470,19 @@ class QuestionListCreate(APIView):
 class QuestionDetail(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        operation_id="event_question_update",
+        summary="Change a custom question (organizer).",
+        request=QuestionWriteSerializer,
+        parameters=[
+            OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                             description="Event slug."),
+            OpenApiParameter("public_id", str, OpenApiParameter.PATH,
+                             description="Public id of this object."),
+        ],
+        responses={200: QuestionSerializer, **error_responses(400, 401, 403, 404, 409)},
+        tags=TAGS,
+    )
     def patch(self, request, slug: str, public_id: str):
         serializer = QuestionWriteSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
@@ -307,6 +491,19 @@ class QuestionDetail(APIView):
                                             dict(serializer.validated_data))
         return Response(QuestionSerializer(question).data)
 
+    @extend_schema(
+        operation_id="event_question_delete",
+        summary="Delete a custom question (organizer).",
+        request=None,
+        parameters=[
+            OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                             description="Event slug."),
+            OpenApiParameter("public_id", str, OpenApiParameter.PATH,
+                             description="Public id of this object."),
+        ],
+        responses={204: None, **error_responses(401, 403, 404, 409)},
+        tags=TAGS,
+    )
     def delete(self, request, slug: str, public_id: str):
         event = event_or_404(slug)
         services.delete_question(request.user, event, question_or_404(event, public_id))
@@ -316,6 +513,17 @@ class QuestionDetail(APIView):
 class RegisterParticipant(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        operation_id="event_register",
+        summary="Join an event as a participant.",
+        description="Idempotent: the first call answers 201 and a repeat answers 200 with "
+                    "the same role. This is the only step needed before creating a team.",
+        request=None,
+        parameters=[OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                                     description="Event slug.")],
+        responses={200: RoleSerializer, 201: RoleSerializer, **error_responses(401, 404)},
+        tags=TAGS,
+    )
     def post(self, request, slug: str):
         role, created = services.register_participant(request.user, event_or_404(slug))
         return Response(role_payload(role), status=201 if created else 200)
@@ -324,6 +532,14 @@ class RegisterParticipant(APIView):
 class OrganizerListCreate(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        operation_id="event_organizers",
+        summary="List the event's organizers.",
+        parameters=[OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                                     description="Event slug.")],
+        responses={200: RoleSerializer(many=True), **error_responses(401, 403, 404)},
+        tags=TAGS,
+    )
     def get(self, request, slug: str):
         event = event_or_404(slug)
         if not services._can_manage(request.user, event):
@@ -331,6 +547,18 @@ class OrganizerListCreate(APIView):
         roles = EventRole.objects.filter(event=event, role=Role.ORGANIZER).select_related("user")
         return Response([role_payload(role) for role in roles])
 
+    @extend_schema(
+        operation_id="event_organizer_add",
+        summary="Give an existing account the organizer role in this event.",
+        description="Organizer only. The account must already exist; inviting someone new "
+                    "goes through the admin reset-link flow. Idempotent.",
+        request=OrganizerAddSerializer,
+        parameters=[OpenApiParameter("slug", str, OpenApiParameter.PATH,
+                                     description="Event slug.")],
+        responses={200: RoleSerializer, 201: RoleSerializer,
+                   **error_responses(400, 401, 403, 404, 409)},
+        tags=TAGS,
+    )
     def post(self, request, slug: str):
         email = (request.data.get("email") or "").strip()
         role, created = services.add_organizer(request.user, event_or_404(slug), email)
@@ -340,6 +568,20 @@ class OrganizerListCreate(APIView):
 class OrganizerDetail(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        operation_id="event_organizer_remove",
+        summary="Remove an organizer's role in this event.",
+        description="Organizer only. Refused with 409 when it would leave the event with no "
+                    "organizer at all.",
+        request=None,
+        parameters=[
+            OpenApiParameter("slug", str, OpenApiParameter.PATH, description="Event slug."),
+            OpenApiParameter("public_id", str, OpenApiParameter.PATH,
+                             description="Event role public id."),
+        ],
+        responses={204: None, **error_responses(401, 403, 404, 409)},
+        tags=TAGS,
+    )
     def delete(self, request, slug: str, public_id: str):
         event = event_or_404(slug)
         role = EventRole.objects.filter(event=event, role=Role.ORGANIZER, public_id=public_id).first()

@@ -130,30 +130,57 @@ def create_event(actor, data: dict) -> Event:
     return event
 
 
-@transaction.atomic
 def update_event(actor, event: Event, data: dict) -> Event:
-    locked = Event.objects.select_for_update().get(pk=event.pk)
-    _require_manager(actor, locked)
-    values = {field: data[field] for field in EVENT_FIELDS if field in data}
-    if not values:
-        return locked
-    merged = {field: getattr(locked, field) for field in EVENT_FIELDS}
-    merged.update(values)
-    if locked.scoring_locked_at is not None:
-        submission_changes = {"submissions_open_at", "submissions_close_at"} & set(values)
-        if any(getattr(locked, field) != values[field] for field in submission_changes):
-            raise ApiError("scoring_locked", "Submission windows are locked after scoring starts.", status_code=409)
-        if any(getattr(locked, field) != values[field] for field in LOCKED_FIELDS & set(values)):
-            raise ApiError("scoring_locked", "Scoring settings are locked after scoring starts.", status_code=409)
-    _validate_event_fields(merged)
-    old = {field: getattr(locked, field) for field in EVENT_FIELDS}
-    changed = {field for field, value in values.items() if getattr(locked, field) != value}
-    for field in changed:
-        setattr(locked, field, values[field])
-    if changed:
-        locked.save(update_fields=sorted(changed) + ["updated_at"])
-        _audit_event_update(actor, locked, old, changed)
-    return locked
+    reopen_attempt = None
+    try:
+        with transaction.atomic():
+            locked = Event.objects.select_for_update().get(pk=event.pk)
+            _require_manager(actor, locked)
+            values = {field: data[field] for field in EVENT_FIELDS if field in data}
+            if not values:
+                return locked
+            merged = {field: getattr(locked, field) for field in EVENT_FIELDS}
+            merged.update(values)
+            if locked.scoring_locked_at is not None:
+                submission_changes = {"submissions_open_at", "submissions_close_at"} & set(values)
+                if any(getattr(locked, field) != values[field] for field in submission_changes):
+                    raise ApiError("scoring_locked", "Submission windows are locked after scoring starts.",
+                                   status_code=409)
+                if any(getattr(locked, field) != values[field] for field in LOCKED_FIELDS & set(values)):
+                    raise ApiError("scoring_locked", "Scoring settings are locked after scoring starts.",
+                                   status_code=409)
+            _validate_event_fields(merged)
+            old = {field: getattr(locked, field) for field in EVENT_FIELDS}
+            changed = {field for field, value in values.items() if getattr(locked, field) != value}
+            judging_fields = {"judging_open_at", "judging_close_at"}
+            if (changed & judging_fields and locked.result_publications.exists()
+                    and (merged["judging_close_at"] is None or merged["judging_close_at"] > now())):
+                reopen_attempt = {
+                    field: {"old": _serial_value(old[field]), "requested": _serial_value(merged[field])}
+                    for field in sorted(changed & judging_fields)
+                }
+                raise ApiError(
+                    "judging_reopen_after_publication",
+                    "The judging window cannot be reopened after results have been published.",
+                    status_code=409,
+                )
+            for field in changed:
+                setattr(locked, field, values[field])
+            if changed:
+                locked.save(update_fields=sorted(changed) + ["updated_at"])
+                _audit_event_update(actor, locked, old, changed)
+            return locked
+    except ApiError:
+        if reopen_attempt is not None:
+            audit.services.record(
+                actor,
+                "event.judging_reopen_rejected",
+                event=event,
+                target=event,
+                summary=f"Rejected an attempt to reopen judging for {event.name} after publication.",
+                data={"requested_window": reopen_attempt},
+            )
+        raise
 
 
 @transaction.atomic

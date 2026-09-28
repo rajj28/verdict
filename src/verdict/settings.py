@@ -248,6 +248,24 @@ SPECTACULAR_SETTINGS = {
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
     "SCHEMA_PATH_PREFIX": "/api/v1",
+    # One description per area, so the generated docs read as a map of the product
+    # rather than a list of paths. The error envelope each operation documents is
+    # defined once in core/schema.py.
+    "TAGS": [
+        {"name": "accounts", "description": "Sessions, accounts and API tokens."},
+        {"name": "events", "description": "Events, tracks, prizes, questions and roles."},
+        {"name": "teams", "description": "Teams, membership and invite links."},
+        {"name": "projects", "description": "Submissions, revisions, images and answers."},
+        {"name": "judging", "description": "Rubric, judges, assignments, reviews and scores."},
+        {"name": "results", "description": "Publication, verification and released feedback."},
+        {"name": "Community voting", "description": "Ballots, comments and moderation."},
+        {"name": "audit", "description": "Organizer-only read access to the audit chain."},
+        {"name": "interop", "description": "Exports, imports, webhooks and signed records."},
+        {"name": "Outbox", "description": "Private offline messages queued for organizers."},
+        {"name": "core", "description": "Integrity probe and platform utilities."},
+        {"name": "Decision Room",
+         "description": "Organizer publication readiness and next steps."},
+    ],
     # Everything is served from the vendored sidecar: no CDN, no network at runtime.
     "SWAGGER_UI_DIST": "SIDECAR",
     "SWAGGER_UI_FAVICON_HREF": "SIDECAR",

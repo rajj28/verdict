@@ -31,7 +31,7 @@ def visible_publications(user, event: Event) -> QuerySet[ResultPublication]:
     return (
         ResultPublication.objects.filter(event=event)
         .select_related("published_by", "supersedes")
-        .order_by("-published_at")
+        .order_by("-version")
     )
 
 
@@ -39,9 +39,15 @@ def latest_publication(event: Event) -> ResultPublication | None:
     """The most recent (non-superseded) publication, or None."""
     return (
         ResultPublication.objects.filter(event=event)
-        .order_by("-published_at")
+        .select_related("supersedes")
+        .order_by("-version")
         .first()
     )
+
+
+def public_publications(event: Event) -> QuerySet[ResultPublication]:
+    """Only the version, timestamp, note and digest are exposed as history."""
+    return ResultPublication.objects.filter(event=event).order_by("-version")
 
 
 def public_results_available(event: Event) -> bool:

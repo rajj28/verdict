@@ -102,6 +102,32 @@ def iso_in(seconds):
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + seconds))
 
 
+# With three projects an independent shuffle matches another ballot 1 time in 6,
+# so one collision is luck, not determinism. Comparing up to seven independent
+# voters keeps a portal that gives everyone the same order failing every time,
+# while chance alone fails about 1 run in 280,000 instead of 1 in 36.
+SHUFFLE_VOTERS = 7
+
+
+def shuffle_differs(reference, orders, limit=SHUFFLE_VOTERS):
+    """Return (differs, compared) for lazily produced ballot orders.
+
+    Stops at the first order that differs from ``reference``, so later voters
+    are only created when earlier ones happened to match. An empty order means
+    that voter could not open a ballot, which fails the check.
+    """
+    compared = 0
+    for order in orders:
+        compared += 1
+        if not order:
+            return False, compared
+        if order != reference:
+            return True, compared
+        if compared >= limit:
+            break
+    return False, compared
+
+
 class Evidence:
     def __init__(self, base, auth):
         self.base = base
@@ -586,40 +612,33 @@ def main():
                          js(second).get("projects", [])]
             stable = (status == 200 and order_one and order_one == order_two
                       and sorted(order_one) == sorted(proj_ids))
-            (opener2, csrf2, _) = helpers[0]
-            status, text, _ = session_post(
-                evidence, base, "voter2(session)", opener2, csrf2,
-                f"/api/v1/events/{vslug}/votes/ballot", {})
-            ballot_b = js(text).get("ballot", "")
-            other_order = []
-            if status == 201 and ballot_b:
-                status, text, _ = evidence.request(
-                    "voter2(session)", "GET",
-                    f"/api/v1/events/{vslug}/votes/ballot/{ballot_b}",
-                    opener=opener2)
-                other_order = [row.get("public_id") for row in
-                               js(text).get("projects", [])]
-            random_ok = bool(other_order) and other_order != order_one
-            if not random_ok and other_order:
-                # A second shuffle colliding (1 in 6 with three projects) is
-                # luck, not determinism: try one more independent voter.
-                (opener3, csrf3, _) = helpers[1]
+            def voter_order(actor, opener, csrf):
                 status, text, _ = session_post(
-                    evidence, base, "voter3(session)", opener3, csrf3,
+                    evidence, base, actor, opener, csrf,
                     f"/api/v1/events/{vslug}/votes/ballot", {})
-                ballot_c = js(text).get("ballot", "")
-                if status == 201 and ballot_c:
-                    status, text, _ = evidence.request(
-                        "voter3(session)", "GET",
-                        f"/api/v1/events/{vslug}/votes/ballot/{ballot_c}",
-                        opener=opener3)
-                    third = [row.get("public_id") for row in
-                             js(text).get("projects", [])]
-                    random_ok = bool(third) and third != order_one
+                ballot = js(text).get("ballot", "")
+                if status != 201 or not ballot:
+                    return []
+                status, text, _ = evidence.request(
+                    actor, "GET", f"/api/v1/events/{vslug}/votes/ballot/{ballot}",
+                    opener=opener)
+                return [row.get("public_id") for row in js(text).get("projects", [])]
+
+            def other_orders():
+                # voter2 and voter3 already exist; later voters are registered
+                # only if every earlier shuffle happened to match.
+                for tag, helper in (("voter2", helpers[0]), ("voter3", helpers[1])):
+                    yield voter_order(f"{tag}(session)", helper[0], helper[1])
+                for number in range(4, SHUFFLE_VOTERS + 2):
+                    tag = f"voter{number}"
+                    opener, csrf, _, ok = register_session(evidence, base, tag, t3_unique)
+                    yield voter_order(f"{tag}(session)", opener, csrf) if ok else []
+
+            random_ok, compared = shuffle_differs(order_one, other_orders())
             evidence.check(
                 "T3", "ballot order is stable per ballot, random per voter",
                 200 if (stable and random_ok) else 0, (200,),
-                f"stable={stable} random={random_ok}")
+                f"stable={stable} random={random_ok} voters_compared={compared}")
             status, text, _ = evidence.request(
                 "participant", "GET", f"/api/v1/events/{vslug}/voting/results",
                 header=auth.get("participant"))
@@ -631,7 +650,7 @@ def main():
                            status, (403,), text)
             status, text, _ = evidence.request(
                 "voter2(session)", "GET",
-                f"/events/{vslug}/voting/results", opener=opener2)
+                f"/events/{vslug}/voting/results", opener=helpers[0][0])
             evidence.check("T3", "results page hidden during window", status,
                            (403,), text)
             status, text, _ = evidence.request(

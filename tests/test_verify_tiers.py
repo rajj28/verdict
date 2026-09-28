@@ -14,7 +14,7 @@ import threading
 from pathlib import Path
 
 from django.contrib.staticfiles.testing import StaticLiveServerTestCase
-from django.test import override_settings
+from django.test import SimpleTestCase, override_settings
 
 REPO_DIR = Path(__file__).resolve().parent.parent
 SCRIPT = REPO_DIR / "scripts" / "verify_tiers.py"
@@ -203,3 +203,48 @@ class VerifyTiersTests(StaticLiveServerTestCase):
         requests = re.findall(r"^  (GET|POST|PUT|PATCH|DELETE) \S+  as \S+  -> \S+$",
                               output, re.MULTILINE)
         self.assertGreaterEqual(len(requests), len(passes))
+
+
+def _load_script():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("verify_tiers_script", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class ShuffleCheckTests(SimpleTestCase):
+    """The ballot-order check tells a fair shuffle from a fixed one, lazily."""
+
+    def setUp(self):
+        self.script = _load_script()
+
+    def _orders(self, orders, produced):
+        for order in orders:
+            produced.append(order)
+            yield order
+
+    def test_stops_at_first_differing_voter(self):
+        produced = []
+        same, other = ["a", "b", "c"], ["b", "a", "c"]
+        differs, compared = self.script.shuffle_differs(
+            same, self._orders([same, same, other, same], produced))
+        self.assertEqual((differs, compared), (True, 3))
+        self.assertEqual(len(produced), 3)  # the fourth voter is never created
+
+    def test_fixed_order_for_everyone_still_fails(self):
+        produced = []
+        same = ["a", "b", "c"]
+        differs, compared = self.script.shuffle_differs(
+            same, self._orders([same] * 20, produced))
+        self.assertEqual((differs, compared), (False, self.script.SHUFFLE_VOTERS))
+        self.assertEqual(len(produced), self.script.SHUFFLE_VOTERS)
+
+    def test_voter_without_a_ballot_fails(self):
+        differs, compared = self.script.shuffle_differs(["a", "b"], iter([[]]))
+        self.assertEqual((differs, compared), (False, 1))
+
+    def test_chance_failure_rate_is_negligible(self):
+        # Seven independent matches at 1 in 6 each.
+        self.assertLess((1 / 6) ** self.script.SHUFFLE_VOTERS, 1e-5)
+

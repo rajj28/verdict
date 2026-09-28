@@ -919,9 +919,11 @@ class JudgeAssignmentsView(APIView):
     )
     def get(self, request):
         wanted = (request.query_params.get("judge") or "").strip()
-        rows = policy.visible_assignments(request.user, judge_public_id=wanted or None).prefetch_related(
-            "project__answers__question", "review"
-        )
+        rows = policy.order_judge_queue(list(
+            policy.visible_assignments(request.user, judge_public_id=wanted or None).prefetch_related(
+                "project__answers__question", "review"
+            )
+        ))
         return Response({"assignments": [_assignment_payload(row) for row in rows]})
 
 
@@ -943,9 +945,13 @@ class EventAssignmentsView(APIView):
     def get(self, request, slug: str):
         event = _event(slug)
         wanted = (request.query_params.get("judge") or "").strip()
-        rows = policy.visible_assignments(
+        rows = list(policy.visible_assignments(
             request.user, event, judge_public_id=wanted or None
-        ).prefetch_related("project__answers__question", "review")
+        ).prefetch_related("project__answers__question", "review"))
+        if not is_organizer(request.user, event):
+            # A judge's own rows follow the per-judge review order; the
+            # organizer table stays a lookup table in database order.
+            rows = policy.order_judge_queue(rows)
         return Response({"assignments": [_assignment_payload(row) for row in rows]})
 
     @extend_schema(

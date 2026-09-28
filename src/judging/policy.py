@@ -2,6 +2,8 @@
 
 Read scoping and permission predicates. Every queryset in a view starts here.
 """
+import hashlib
+
 from django.db.models import F, Q, QuerySet
 
 from core.errors import ApiError
@@ -185,6 +187,42 @@ def reviews_for_judge_role(judge_role: EventRole) -> QuerySet[Review]:
         .prefetch_related("scores__criterion")
         .order_by("project__title", "id")
     )
+
+
+def review_order_key(event_slug: str, judge_public_id: str, project_public_id: str) -> str:
+    """Deterministic per-judge sort key for one assignment.
+
+    Events are addressed by slug (their public identifier; Event has no
+    public_id), so the key is sha256 of
+    ``"{event.slug}:{judge.public_id}:{project.public_id}"``. Two judges with
+    the same projects get different orders; the same judge always gets the same
+    order, which spreads serial-position effects across projects instead of
+    piling them onto the same teams.
+    """
+    return hashlib.sha256(
+        f"{event_slug}:{judge_public_id}:{project_public_id}".encode("utf-8")
+    ).hexdigest()
+
+
+def order_judge_queue(rows: list[Assignment]) -> list[Assignment]:
+    """Sort a judge's already-fetched assignments into review order.
+
+    To-do (no review, or a draft) comes before submitted reviews; within each
+    group rows follow :func:`review_order_key`. Everything is computed in
+    Python over select_related/prefetched relations, so sorting adds no
+    queries. Organizer tables are lookup tables, not a judging sequence, and
+    keep their database order: only judge-facing queues use this.
+    """
+    def key(row: Assignment) -> tuple:
+        review = row.review if hasattr(row, "review") else None
+        submitted = review is not None and review.status == ReviewStatus.SUBMITTED
+        return (
+            row.event.slug,
+            submitted,
+            review_order_key(row.event.slug, row.judge.public_id, row.project.public_id),
+        )
+
+    return sorted(rows, key=key)
 
 
 def visible_assignments(user, event: Event | None = None,

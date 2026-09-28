@@ -288,10 +288,13 @@ full-prevention test exists.
 3. **Undeclared conflicts (a judge who stays silent).** Why: recusal depends on
    honesty. Do: publish the judge roster per track, invite counter-declarations,
    treat outlier flags as investigation leads.
-4. **Order effects on judges.** Why: judge queues are sorted by title, so every
-   judge sees the same order; the model does not correct it. (Community ballots
-   already use per-ballot random order.) Do: randomize review order manually
-   until per-judge shuffling lands.
+4. **Order effects on judges.** Why: serial-position effects are real and the
+   model does not correct them. Each judge now sees a per-judge deterministic
+   order (sha256 of event, judge-role and project public ids, to-do before
+   submitted), so position effects spread across projects instead of piling
+   onto the same ones; the model still does not correct them. (Community
+   ballots already use per-ballot random order.) Do: treat any residual
+   first/last skew as uncorrected signal, not as evidence about the projects.
 5. **Scale (multiplicative) differences between judges.** Why: the offset model
    shifts but never stretches; a per-judge scale parameter would be fitted from
    noise at ~3 reviews per cell. Documented in `JUDGING.md` (Limitations). Do:

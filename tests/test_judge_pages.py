@@ -5,6 +5,7 @@ proves the HTML pages enforce them too, because a page must never be the weaker
 half of a rule.
 """
 import json
+import re
 from datetime import timedelta
 
 from django.db import connection
@@ -14,6 +15,7 @@ from django.utils import timezone
 
 from accounts.models import User
 from events.models import CustomQuestion, Event, EventRole, Role, Track
+from judging import policy
 from judging.models import (Assignment, Criterion, CriterionScore, JudgeInvite, Review,
                             ReviewStatus, Rubric)
 from projects.models import Answer, Project, ProjectStatus
@@ -206,13 +208,22 @@ class JudgePageTests(TestCase):
         ).status_code, 403)
 
     def test_review_page_links_to_the_neighbouring_assignments(self):
+        # Neighbours follow the per-judge queue order, not creation or title
+        # order (packet Q1): derive the expected sequence from the same helper
+        # the views use.
         self.client.force_login(self.judge)
-        page = self.client.get(self.review_path(self.project))
-        self.assertContains(page, f'href="{self.review_path(self.queued)}" rel="next"')
-        first = self.client.get(self.review_path(self.queued))
-        self.assertContains(first, f'href="{self.review_path(self.project)}" rel="prev"')
+        ordered = [row.project for row in policy.order_judge_queue(list(
+            Assignment.objects.filter(event=self.event, judge=self.role)
+            .select_related("event", "judge", "project").prefetch_related("review")))]
+        self.assertEqual(len(ordered), 2)
+        first, second = ordered
+        page = self.client.get(self.review_path(first))
+        self.assertNotContains(page, 'rel="prev"')
+        self.assertContains(page, f'href="{self.review_path(second)}" rel="next"')
+        last = self.client.get(self.review_path(second))
+        self.assertContains(last, f'href="{self.review_path(first)}" rel="prev"')
         # The last assignment has no next link to follow.
-        self.assertNotContains(first, 'rel="next"')
+        self.assertNotContains(last, 'rel="next"')
 
     def test_review_page_prefills_the_callers_own_draft(self):
         Review.objects.create(
@@ -269,6 +280,105 @@ class JudgePageTests(TestCase):
         self.assertContains(self.client.get("/judge"), "Submitted")
         self.assertContains(self.client.get(self.review_path(self.project)),
                             "Review submitted")
+
+
+class PerJudgeQueueOrderTests(TestCase):
+    """The judge queue follows a per-judge deterministic order (packet Q1).
+
+    Sort key ``sha256("{event.slug}:{judge.public_id}:{project.public_id}")``,
+    to-do before submitted. Two judges with the same projects get different
+    orders; one judge always gets the same order on the page and the API.
+    """
+
+    PROJECT_IDS = ("prj_q1", "prj_q2", "prj_q3", "prj_q4", "prj_q5")
+
+    def setUp(self):
+        now = timezone.now()
+        self.organizer = User.objects.create_user("queue-organizer@ex.org", "password")
+        self.judge_a = User.objects.create_user("queue-a@ex.org", "password")
+        self.judge_b = User.objects.create_user("queue-b@ex.org", "password")
+        self.event = Event.objects.create(
+            slug="queue-order", name="Queue Order",
+            submissions_close_at=now - timedelta(days=2),
+            judging_open_at=now - timedelta(days=2),
+            judging_close_at=now + timedelta(days=2),
+            created_by=self.organizer,
+        )
+        track = Track.objects.create(event=self.event, name="Track A")
+        self.role_a = EventRole.objects.create(
+            event=self.event, user=self.judge_a, role=Role.JUDGE, public_id="jdg_q_a")
+        self.role_b = EventRole.objects.create(
+            event=self.event, user=self.judge_b, role=Role.JUDGE, public_id="jdg_q_b")
+        self.role_a.tracks.add(track)
+        self.role_b.tracks.add(track)
+        titles = {"prj_q1": "Queue One", "prj_q2": "Queue Two", "prj_q3": "Queue Three",
+                  "prj_q4": "Queue Four", "prj_q5": "Queue Five"}
+        self.projects = {}
+        for public_id in self.PROJECT_IDS:
+            self.projects[public_id] = Project.objects.create(
+                event=self.event, team=Team.objects.create(event=self.event, name=f"Team {public_id}"),
+                track=track, public_id=public_id, title=titles[public_id],
+                summary=f"{titles[public_id]} in one line", description="Description.",
+                repo_url="https://example.org/repo",
+                status=ProjectStatus.SUBMITTED, revision=1,
+            )
+        for role in (self.role_a, self.role_b):
+            for public_id in self.PROJECT_IDS:
+                Assignment.objects.create(event=self.event, judge=role,
+                                          project=self.projects[public_id])
+
+    def _expected_order(self, role) -> list[str]:
+        return sorted(self.PROJECT_IDS, key=lambda pid: policy.review_order_key(
+            self.event.slug, role.public_id, pid))
+
+    def _page_order(self, user) -> list[str]:
+        self.client.force_login(user)
+        content = self.client.get("/judge").content.decode()
+        hrefs = re.findall(r"/judge/queue-order/review/(\S+?)\"", content)
+        return list(dict.fromkeys(hrefs))
+
+    def _api_order(self, user) -> list[str]:
+        self.client.force_login(user)
+        response = self.client.get("/api/v1/judge/assignments")
+        self.assertEqual(response.status_code, 200)
+        return [row["project"]["public_id"] for row in response.data["assignments"]]
+
+    def test_two_judges_with_the_same_projects_see_different_orders(self):
+        order_a = self._page_order(self.judge_a)
+        order_b = self._page_order(self.judge_b)
+        # Each judge's page follows their own hash order, which is neither
+        # title order nor the other judge's order for these ids.
+        self.assertEqual(order_a, self._expected_order(self.role_a))
+        self.assertEqual(order_b, self._expected_order(self.role_b))
+        self.assertNotEqual(order_a, order_b)
+        title_order = sorted(self.PROJECT_IDS,
+                             key=lambda pid: self.projects[pid].title)
+        self.assertNotEqual(order_a, title_order)
+        self.assertNotEqual(order_b, title_order)
+
+    def test_one_judges_order_is_stable_across_page_and_api(self):
+        first = self._page_order(self.judge_a)
+        self.assertEqual(self._page_order(self.judge_a), first)
+        self.assertEqual(self._api_order(self.judge_a), first)
+        self.assertEqual(first, self._expected_order(self.role_a))
+
+    def test_todo_comes_before_done_and_every_project_appears_once(self):
+        initial = self._page_order(self.judge_a)
+        submitted_pid = initial[0]
+        assignment = Assignment.objects.get(
+            event=self.event, judge=self.role_a, project=self.projects[submitted_pid])
+        Review.objects.create(event=self.event, assignment=assignment, judge=self.role_a,
+                              project=self.projects[submitted_pid], status=ReviewStatus.SUBMITTED)
+        after = self._page_order(self.judge_a)
+        # Every project exactly once, the submitted review moved to the end,
+        # and the remaining to-do rows keep their per-judge order.
+        self.assertEqual(sorted(after), sorted(self.PROJECT_IDS))
+        self.assertEqual(after[-1], submitted_pid)
+        self.assertEqual(after[:-1], [pid for pid in initial if pid != submitted_pid])
+        api_order = self._api_order(self.judge_a)
+        self.assertEqual(sorted(api_order), sorted(self.PROJECT_IDS))
+        self.assertEqual(len(set(api_order)), len(self.PROJECT_IDS))
+        self.assertEqual(api_order[-1], submitted_pid)
 
 
 class JudgeInvitePageTests(TestCase):

@@ -22,7 +22,11 @@ budget is held fixed. "Unfilled by this planner" is the honest output; it is
 not a proof that no feasible assignment exists. Pacing and rebalance math
 lives in `src/judging/forecast.py`; the first submitted review locks the
 event's scoring settings (`scoring_locked_at`), further rubric edits return
-409.
+409. Each judge's queue follows a per-judge deterministic order — sha256 of the
+event, judge-role and project public ids, to-do before submitted — so the same
+projects are not judged first or last by everyone. This spreads
+serial-position effects across projects instead of piling them onto the same
+teams; the scoring model does not correct order effects.
 
 ## Rubric and review score
 

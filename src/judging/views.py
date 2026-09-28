@@ -150,9 +150,11 @@ def judge_console(request):
         return _login_redirect(request)
     if not is_judge(request.user):
         raise PermissionDenied("The judge console is for judges of at least one event.")
-    rows = policy.visible_assignments(request.user).prefetch_related(
-        "review__scores__criterion", "project__track", "project__team"
-    )
+    rows = policy.order_judge_queue(list(
+        policy.visible_assignments(request.user).prefetch_related(
+            "review__scores__criterion", "project__track", "project__team"
+        )
+    ))
     groups = []
     for row in rows:
         if not groups or groups[-1]["event"].pk != row.event.pk:
@@ -198,8 +200,8 @@ def judge_review(request, slug: str, public_id: str):
     # The caller's own review only: a review never carries another judge's draft.
     review = policy.judge_reviews(request.user).filter(project=project).first()
     scores = {row.criterion.key: row.value for row in review.scores.all()} if review else {}
-    queue = [_queue_row(row) for row in
-             policy.visible_assignments(request.user, event).prefetch_related("review")]
+    queue = [_queue_row(row) for row in policy.order_judge_queue(list(
+             policy.visible_assignments(request.user, event).prefetch_related("review")))]
     position = next((index for index, row in enumerate(queue)
                      if row["project"].pk == project.pk), None)
     window_open = judging_window_open(event)

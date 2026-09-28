@@ -91,7 +91,7 @@ def consequences(event: Event, action: str, target: str | None = None) -> dict:
         after = services.preview(event)
         if before_publication is None:
             ranked = sum(row.get("status") == "ranked" for row in after["rows"])
-            return {
+            result = {
                 "action": action,
                 "target": None,
                 "basis_digest": after["input_digest"],
@@ -107,6 +107,8 @@ def consequences(event: Event, action: str, target: str | None = None) -> dict:
                     f"{'' if len(after['awards']) == 1 else 's'}."
                 ),
             }
+            result.update(_certainty_fields(after))
+            return result
         before_rows = before_publication.rows
         before_awards = before_publication.awards
         basis_digest = after["input_digest"]
@@ -129,7 +131,7 @@ def consequences(event: Event, action: str, target: str | None = None) -> dict:
     award_changes = _award_changes(before_awards, after["awards"])
     winner_before, winner_after = _winner(before_rows), _winner(after["rows"])
     sentence = _sentence(action, target, rank_changes, award_changes, winner_before, winner_after)
-    return {
+    result = {
         "action": action,
         "target": target,
         "basis_digest": basis_digest,
@@ -140,6 +142,38 @@ def consequences(event: Event, action: str, target: str | None = None) -> dict:
         "n_rank_changes": len(rank_changes),
         "n_award_changes": len(award_changes),
         "sentence": sentence,
+    }
+    result.update(_certainty_fields(after))
+    return result
+
+
+def _certainty_fields(preview: dict) -> dict:
+    uncertainty = preview.get("uncertainty") or {}
+    summary = uncertainty.get("summary", "")
+    tied_pairs = uncertainty.get("tied_pairs", [])
+    # The preview omits an order array, but its rows are in official rank order.
+    ranked = [row for row in preview.get("rows", []) if row.get("status") == "ranked"]
+    first_pair = [row["project_id"] for row in ranked[:2]]
+    top_tied = bool(
+        uncertainty.get("available")
+        and len(first_pair) == 2
+        and any(set(first_pair) == set(pair) for pair in tied_pairs)
+    )
+    warning = ""
+    if top_tied:
+        top_pair = next(pair for pair in tied_pairs if set(first_pair) == set(pair))
+        first = next(row for row in ranked if row["project_id"] == top_pair[0])
+        held = first.get("p_above_next")
+        if held is not None:
+            warning = (
+                "1st and 2nd are statistically tied "
+                f"(order held in {100 * held:.0f}% of {uncertainty['replicates']} re-runs). "
+                "Consider a tie-break review or a shared award."
+            )
+    return {
+        "certainty": summary,
+        "top_tied": top_tied,
+        "top_tie_warning": warning,
     }
 
 

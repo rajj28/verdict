@@ -81,6 +81,12 @@ prizes. No judge name, id, offset or comment ever reaches this template
     </p>
   {% endif %}
 
+  {% if uncertainty.available %}
+    <p class="form-hint">
+      Ranks are estimates from a few reviews each. Projects marked as tied could swap places if different judges had reviewed them.
+    </p>
+  {% endif %}
+
   <section class="mb-4">
     <h2 class="h4">Ranking</h2>
     <div class="table-responsive">
@@ -99,7 +105,12 @@ prizes. No judge name, id, offset or comment ever reaches this template
         <tbody>
           {% for row in ranked %}
             <tr>
-              <td class="num">{{ row.rank }}</td>
+              <td class="num">
+                {% if row.rank_low %}{{ row.rank_low }}-{{ row.rank_high }}{% else %}{{ row.rank }}{% endif %}
+                {% if row.tied_with_next or row.tied_with_previous %}
+                  <span class="status-badge status-not-started">Statistically tied</span>
+                {% endif %}
+              </td>
               <td>
                 <a class="link-underline" href="/events/{{ event.slug }}/projects/{{ row.project_id }}">{{ row.title }}</a>
               </td>
@@ -149,7 +160,12 @@ prizes. No judge name, id, offset or comment ever reaches this template
           <tbody>
             {% for row in group.rows %}
               <tr>
-                <td class="num">{% if row.rank %}{{ row.rank }}{% else %}&mdash;{% endif %}</td>
+                <td class="num">
+                  {% if row.rank_low %}{{ row.rank_low }}-{{ row.rank_high }}{% elif row.rank %}{{ row.rank }}{% else %}&mdash;{% endif %}
+                  {% if row.tied_with_next or row.tied_with_previous %}
+                    <span class="status-badge status-not-started">Statistically tied</span>
+                  {% endif %}
+                </td>
                 <td>
                   <a class="link-underline" href="/events/{{ event.slug }}/projects/{{ row.project_id }}">{{ row.title }}</a>
                 </td>

@@ -16,6 +16,7 @@
     var reasonGroup = modalElement.querySelector("[data-consequence-reason-group]");
     var reason = modalElement.querySelector("#consequence-reason");
     var confirmButton = modalElement.querySelector("[data-consequence-confirm]");
+    var certaintyWarning = modalElement.querySelector("[data-consequence-certainty-warning]");
     var state = null;
 
     function request(method, url, payload) {
@@ -100,6 +101,12 @@
 
     function renderConsequences(data) {
       sentence.textContent = data.sentence || "";
+      certaintyWarning.textContent = "";
+      certaintyWarning.hidden = true;
+      if (state.action === "publish" && data.top_tied && data.top_tie_warning) {
+        certaintyWarning.textContent = data.top_tie_warning;
+        certaintyWarning.hidden = false;
+      }
       renderTable(
         "Rank changes",
         ["Project", "Before", "After"],
@@ -134,6 +141,8 @@
       setLoading(true);
       error.textContent = state.notice || "";
       sentence.textContent = "";
+      certaintyWarning.textContent = "";
+      certaintyWarning.hidden = true;
       rankContainer.replaceChildren();
       awardContainer.replaceChildren();
       var payload = { action: state.action };

@@ -251,6 +251,18 @@ When submitted with the write, the digest is checked again while the event is
 locked; a mismatch returns `stale_preview` without changing any data.
 The organizer must review refreshed consequences and confirm again.
 
+## Rank uncertainty
+
+Normalized rankings include seeded parametric re-runs that estimate rank ranges,
+first-place/top-three shares and adjacent pairs whose order is not firm.
+The public results page shows rank intervals and marks statistically tied
+projects; the organizer preview also shows the model assumptions and limits.
+This is sensitivity to estimated review noise, not the removal-based
+robustness certificate above.
+Uncertainty is derived from the exact scoring inputs and is **not stored** in
+the publication snapshot or digest. See [docs/UNCERTAINTY.md](docs/UNCERTAINTY.md)
+for the method, definition of a tie, assumptions and fixture measurements.
+
 ## Publication and verification
 
 `publish` (`src/results/services.py`) locks the event, requires judging and

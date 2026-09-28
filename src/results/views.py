@@ -534,7 +534,9 @@ def results_public(request, slug: str):
         }
         for item in public_publications(event)
     ]
-    rows = publication.rows
+    rows = [dict(row) for row in publication.rows]
+    uncertainty, uncertainty_rows = services.publication_uncertainty(publication)
+    services.decorate_uncertainty_rows(rows, uncertainty_rows)
     by_track: dict[str, list[dict]] = {}
     for row in rows:
         by_track.setdefault(row.get("track") or "", []).append(row)
@@ -543,6 +545,7 @@ def results_public(request, slug: str):
         "publication": publication,
         "version_history": version_history,
         "rows": rows,
+        "uncertainty": uncertainty,
         "ranked": [row for row in rows if row.get("status") == "ranked"],
         "unranked": [row for row in rows if row.get("status") != "ranked"],
         "by_track": [

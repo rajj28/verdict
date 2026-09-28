@@ -13,6 +13,7 @@ from collections import Counter
 from collections.abc import Callable
 from typing import Any
 
+from django.core.cache import cache
 from django.db import transaction
 
 import audit.services
@@ -381,7 +382,20 @@ def _preview_from(
         project_status_overrides=project_status_overrides,
     ))
     snapshot = _project_snapshot(result, event, project_status_overrides)
-    allocation = _allocate(result, event, snapshot)
+    prize_specs = _prize_specs(event)
+    allocation = _allocate(result, event, snapshot, prize_specs)
+    top_k = _uncertainty_top_k(prize_specs)
+    if result.method == "normalized":
+        uncertainty_result = engine.rank_uncertainty(
+            result.scored, result.lam, top_k=top_k
+        )
+        uncertainty = _uncertainty_payload(uncertainty_result)
+        uncertainty_rows = _uncertainty_row_values(uncertainty_result)
+    else:
+        uncertainty = _unavailable_uncertainty(top_k)
+        uncertainty_rows = {}
+    rows = _build_rows(result, snapshot, comparisons)
+    decorate_uncertainty_rows(rows, uncertainty_rows)
     return {
         "method": result.method,
         "lam": result.lam,
@@ -397,7 +411,8 @@ def _preview_from(
             else None
         ),
         "input_digest": input_digest,
-        "rows": _build_rows(result, snapshot, comparisons),
+        "rows": rows,
+        "uncertainty": uncertainty,
         "live_pairwise": _live_pairwise_metadata(event, result, comparisons),
         "judge_rows": _build_judge_rows(result),
         "awards": [a.as_dict() for a in allocation.awards],
@@ -542,14 +557,152 @@ def _allocation_inputs(
 
 
 def _allocate(
-    result: engine.Result, event: Event, snapshot: list[tuple[Project, str, float | None]]
+    result: engine.Result,
+    event: Event,
+    snapshot: list[tuple[Project, str, float | None]],
+    specs: list[prizes.PrizeSpec] | None = None,
 ) -> prizes.Allocation:
     """Award the event's prizes from a computed result (pure allocation)."""
     return prizes.allocate(
         _allocation_inputs(result, snapshot),
-        _prize_specs(event),
+        _prize_specs(event) if specs is None else specs,
         one_per_team=event.one_prize_per_team,
     )
+
+
+def _uncertainty_top_k(specs: list[prizes.PrizeSpec]) -> int:
+    """Count overall prize places for uncertainty, defaulting when none exist."""
+    places = sum(spec.places for spec in specs if spec.scope == "overall")
+    return places or 3
+
+
+def _uncertainty_payload(uncertainty: engine.Uncertainty) -> dict:
+    """Return serialized metadata, keeping project detail on result rows."""
+    return {
+        "available": uncertainty.available,
+        "replicates": uncertainty.replicates,
+        "seed": uncertainty.seed,
+        "level": uncertainty.level,
+        "top_k": uncertainty.top_k,
+        "sigma": round(uncertainty.sigma, 2),
+        "df": uncertainty.df,
+        "summary": uncertainty.summary,
+        "assumption": uncertainty.assumption,
+        "reason": uncertainty.reason,
+        "tied_pairs": [list(pair) for pair in uncertainty.tied_pairs],
+        "groups": [list(group) for group in uncertainty.groups],
+    }
+
+
+def _uncertainty_row_values(uncertainty: engine.Uncertainty) -> dict[str, dict]:
+    tied = set(uncertainty.tied_pairs)
+    rows = {}
+    for index, project_id in enumerate(uncertainty.order):
+        project = uncertainty.projects[project_id]
+        rows[project_id] = {
+            "rank_low": project.rank_low,
+            "rank_high": project.rank_high,
+            "score_low": round(project.score_low, 2),
+            "score_high": round(project.score_high, 2),
+            "p_first": round(project.p_first, 3),
+            "p_top": round(project.p_top, 3),
+            "p_above_next": (
+                round(project.p_above_next, 3)
+                if project.p_above_next is not None else None
+            ),
+            "tied_with_next": (
+                index + 1 < len(uncertainty.order)
+                and (project_id, uncertainty.order[index + 1]) in tied
+            ),
+            "tied_with_previous": (
+                index > 0
+                and (uncertainty.order[index - 1], project_id) in tied
+            ),
+        }
+    return rows
+
+
+def _unavailable_uncertainty(top_k: int) -> dict:
+    reason = "Rank intervals are computed for the normalized ranking only."
+    return {
+        "available": False,
+        "replicates": 200,
+        "seed": 20260929,
+        "level": 0.90,
+        "top_k": top_k,
+        "sigma": 0.0,
+        "df": 0,
+        "summary": reason,
+        "assumption": engine.UNCERTAINTY_ASSUMPTION,
+        "reason": reason,
+        "tied_pairs": [],
+        "groups": [],
+    }
+
+
+def decorate_uncertainty_rows(rows: list[dict], row_values: dict[str, dict]) -> None:
+    for row in rows:
+        values = (
+            row_values.get(row["project_id"])
+            if row.get("status") == "ranked" else None
+        )
+        row.update(values or {
+            "rank_low": None,
+            "rank_high": None,
+            "score_low": None,
+            "score_high": None,
+            "p_first": None,
+            "p_top": None,
+            "p_above_next": None,
+            "tied_with_next": False,
+            "tied_with_previous": False,
+        })
+
+
+def publication_uncertainty(pub: ResultPublication) -> tuple[dict, dict[str, dict]]:
+    """Replay rank uncertainty from immutable publication inputs and cache it."""
+    cache_key = f"results:uncertainty:{pub.public_id}:{pub.input_digest}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached["payload"], cached["rows"]
+
+    stored_prizes = pub.inputs.get("prizes", [])
+    top_k = sum(
+        int(prize.get("places", 1))
+        for prize in stored_prizes
+        if prize.get("scope") == "overall"
+    ) or 3
+    if pub.method != "normalized":
+        payload = _unavailable_uncertainty(top_k)
+        row_values = {}
+    else:
+        params = pub.inputs.get("params", {})
+        criteria = [
+            engine.Criterion(
+                key=item["key"],
+                weight=float(item["weight"]),
+                min_score=int(item["min_score"]),
+                max_score=int(item["max_score"]),
+            )
+            for item in params["criteria"]
+        ]
+        reviews = [
+            engine.ReviewInput(
+                review_id=item["review_id"],
+                judge_id=item["judge_id"],
+                project_id=item["project_id"],
+                values=item["criteria"],
+            )
+            for item in pub.inputs["included"]
+        ]
+        scored = engine.score_reviews(reviews, criteria)
+        uncertainty = engine.rank_uncertainty(
+            scored, float(params["lam"]), top_k=top_k
+        )
+        payload = _uncertainty_payload(uncertainty)
+        row_values = _uncertainty_row_values(uncertainty)
+    cache.set(cache_key, {"payload": payload, "rows": row_values}, timeout=None)
+    return payload, row_values
 
 
 def _build_judge_rows(result: engine.Result) -> list[dict]:
@@ -782,6 +935,7 @@ def public_results(event: Event) -> dict:
             "Results have not been published yet.",
             status_code=404,
         )
+    uncertainty, uncertainty_rows = publication_uncertainty(pub)
     history = [
         {
             "version": item.version,
@@ -811,6 +965,10 @@ def public_results(event: Event) -> dict:
             "status": row.get("status"),
             "status_reason": row.get("status_reason"),
         })
+    decorate_uncertainty_rows(public_rows, uncertainty_rows)
+    public_uncertainty = {
+        key: value for key, value in uncertainty.items() if key not in {"sigma", "seed"}
+    }
     return {
         "pub_id": pub.public_id,
         "version": pub.version,
@@ -824,6 +982,7 @@ def public_results(event: Event) -> dict:
         "awards": pub.awards,
         "unawarded": pub.unawarded,
         "history": history,
+        "uncertainty": public_uncertainty,
     }
 
 

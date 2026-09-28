@@ -52,6 +52,15 @@ class ResultRowSerializer(serializers.Serializer):
     live_strength = serializers.FloatField(allow_null=True,
                                           help_text="Live pairwise strength, when in use.")
     rank_live = serializers.IntegerField(allow_null=True)
+    rank_low = serializers.IntegerField(allow_null=True)
+    rank_high = serializers.IntegerField(allow_null=True)
+    score_low = serializers.FloatField(allow_null=True)
+    score_high = serializers.FloatField(allow_null=True)
+    p_first = serializers.FloatField(allow_null=True)
+    p_top = serializers.FloatField(allow_null=True)
+    p_above_next = serializers.FloatField(allow_null=True)
+    tied_with_next = serializers.BooleanField()
+    tied_with_previous = serializers.BooleanField()
     n_comparisons = serializers.IntegerField()
     status = serializers.CharField(
         help_text="'ranked', 'draft', 'withdrawn', 'disqualified', 'superseded', or an "
@@ -87,6 +96,42 @@ class UnawardedPrizeSerializer(serializers.Serializer):
     projects = serializers.ListField(child=serializers.CharField())
 
 
+class RankUncertaintySerializer(serializers.Serializer):
+    available = serializers.BooleanField()
+    replicates = serializers.IntegerField()
+    seed = serializers.IntegerField()
+    level = serializers.FloatField()
+    top_k = serializers.IntegerField()
+    sigma = serializers.FloatField()
+    df = serializers.IntegerField()
+    summary = serializers.CharField()
+    assumption = serializers.CharField()
+    reason = serializers.CharField(allow_blank=True)
+    tied_pairs = serializers.ListField(
+        child=serializers.ListField(child=serializers.CharField())
+    )
+    groups = serializers.ListField(
+        child=serializers.ListField(child=serializers.CharField())
+    )
+
+
+class PublicRankUncertaintySerializer(serializers.Serializer):
+    available = serializers.BooleanField()
+    replicates = serializers.IntegerField()
+    level = serializers.FloatField()
+    top_k = serializers.IntegerField()
+    df = serializers.IntegerField()
+    summary = serializers.CharField()
+    assumption = serializers.CharField()
+    reason = serializers.CharField(allow_blank=True)
+    tied_pairs = serializers.ListField(
+        child=serializers.ListField(child=serializers.CharField())
+    )
+    groups = serializers.ListField(
+        child=serializers.ListField(child=serializers.CharField())
+    )
+
+
 class ResultsPreviewSerializer(serializers.Serializer):
     """The engine output an organizer sees before publishing. Nothing is stored."""
 
@@ -102,6 +147,7 @@ class ResultsPreviewSerializer(serializers.Serializer):
                   "reports is how an organizer knows the data has not moved."
     )
     rows = ResultRowSerializer(many=True)
+    uncertainty = RankUncertaintySerializer()
     live_pairwise = serializers.DictField(
         help_text="Pairwise component counts and whether live ballots were used."
     )
@@ -129,12 +175,44 @@ class PublicationHistoryEntrySerializer(serializers.Serializer):
     input_digest = serializers.CharField()
 
 
+class PublicResultRowSerializer(serializers.Serializer):
+    rank = serializers.CharField(allow_null=True)
+    project_id = serializers.CharField()
+    title = serializers.CharField()
+    team = serializers.CharField(allow_blank=True)
+    track = serializers.CharField(allow_null=True, allow_blank=True)
+    n_reviews = serializers.IntegerField(allow_null=True)
+    raw_mean = serializers.FloatField(allow_null=True)
+    normalized = serializers.FloatField(allow_null=True)
+    live_strength = serializers.FloatField(allow_null=True)
+    rank_live = serializers.IntegerField(allow_null=True)
+    n_comparisons = serializers.IntegerField()
+    status = serializers.CharField()
+    status_reason = serializers.CharField(allow_null=True, allow_blank=True)
+    rank_low = serializers.IntegerField(allow_null=True)
+    rank_high = serializers.IntegerField(allow_null=True)
+    score_low = serializers.FloatField(allow_null=True)
+    score_high = serializers.FloatField(allow_null=True)
+    p_first = serializers.FloatField(allow_null=True)
+    p_top = serializers.FloatField(allow_null=True)
+    p_above_next = serializers.FloatField(allow_null=True)
+    tied_with_next = serializers.BooleanField()
+    tied_with_previous = serializers.BooleanField()
+
+
 class PublicResultsSerializer(serializers.Serializer):
     """The public projection of the newest publication: awards, no judge data."""
 
-    event = serializers.CharField()
-    publication = serializers.DictField(allow_null=True)
-    rows = ResultRowSerializer(many=True)
+    pub_id = serializers.CharField()
+    version = serializers.IntegerField()
+    published_at = serializers.DateTimeField()
+    supersedes_version = serializers.IntegerField(allow_null=True)
+    note = serializers.CharField(allow_blank=True)
+    method = serializers.CharField()
+    lam = serializers.FloatField(allow_null=True)
+    lambda_source = serializers.CharField()
+    rows = PublicResultRowSerializer(many=True)
+    uncertainty = PublicRankUncertaintySerializer()
     awards = AwardSerializer(many=True)
     unawarded = UnawardedPrizeSerializer(many=True)
     history = PublicationHistoryEntrySerializer(many=True)
@@ -182,6 +260,9 @@ class ConsequenceResponseSerializer(serializers.Serializer):
     n_rank_changes = serializers.IntegerField()
     n_award_changes = serializers.IntegerField()
     sentence = serializers.CharField()
+    certainty = serializers.CharField(allow_blank=True)
+    top_tied = serializers.BooleanField()
+    top_tie_warning = serializers.CharField(allow_blank=True)
 
 
 class PublicationCreatedSerializer(serializers.Serializer):

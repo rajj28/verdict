@@ -82,13 +82,11 @@ def _displaced(ids, ranks: dict, truth_ranks: dict) -> int:
 
 def _judge_rows(preview: dict, scale: float, truth: dict, directory: dict) -> list[dict]:
     """One row per judge: planted offset against the fitted one, weakest habit first."""
-    planted_offsets = truth["judge_offsets"]
     rows = []
     for row in preview.get("judge_rows", []):
         judge_id = row["judge_id"]
         known = directory.get(judge_id)
-        email = known["email"] if known else ""
-        planted = planted_offsets.get(email)
+        planted = truth.get("judge_offsets_by_id", {}).get(judge_id)
         if planted is None:
             continue
         planted_points = planted * scale
@@ -146,13 +144,22 @@ def calibration_report(event) -> dict:
     """Everything the calibration page shows, computed live from the current data."""
     preview = results_services.preview(event)
     truth = showcase.truth()
+    fixture = showcase.build()
+    truth["judge_offsets_by_id"] = {
+        judge["id"]: truth["judge_offsets"][judge["email"]]
+        for judge in fixture["judges"]
+    }
+    truth["quality_by_project_id"] = {
+        project["id"]: truth["quality"][project["title"]]
+        for project in fixture["projects"]
+    }
     scale = _criterion_scale(judging_policy.engine_criteria(event))
 
     titles = {row["project_id"]: row["title"] for row in preview["rows"]}
     quality = {
-        project_id: truth["quality"][title]
-        for project_id, title in titles.items()
-        if title in truth["quality"]
+        project_id: truth["quality_by_project_id"][project_id]
+        for project_id in titles
+        if project_id in truth["quality_by_project_id"]
     }
     raw = {row["project_id"]: row["raw_mean"] for row in preview["rows"] if row["raw_mean"] is not None}
     normalized = {
@@ -231,11 +238,14 @@ def calibration(request, slug: str):
     """/manage/{slug}/calibration: planted truth against the recovered numbers.
 
     Organizer only, like every other /manage/ page. 404 for any other event: the
-    truth is a property of the generated showcase, and inventing one for a real
-    event would be a lie.
+    truth belongs to the generated showcase and its private sandbox copies.
     """
-    event = get_object_or_404(visible_events(), slug=slug)
-    if not showcase.is_showcase_event(event):
+    event = get_object_or_404(visible_events(request.user), slug=slug)
+    is_sandbox = (
+        bool(event.source_id and event.source_id.startswith("evt_tour_"))
+        and request.session.get("verdict_tour_event") == event.slug
+    )
+    if not showcase.is_showcase_event(event) and not is_sandbox:
         raise Http404("The planted truth is only known for the calibration showcase.")
     if not can_manage(request.user, event):
         raise PermissionDenied("Only organizers of this event can open this page.")

@@ -2,7 +2,7 @@
 from django.shortcuts import get_object_or_404
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import never_cache
-from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
+from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import serializers
 from rest_framework.generics import ListAPIView
 from rest_framework.permissions import IsAuthenticated
@@ -11,6 +11,7 @@ from core import outbox_policy
 from core.errors import ApiError
 from core.models import OutboxMessage
 from core.pagination import VerdictPagination
+from core.schema import error_responses
 from events.policy import visible_events
 
 
@@ -49,9 +50,7 @@ class EventOutboxView(OutboxListView):
         description="Messages are queued for organizer delivery, not sent by SMTP. Bodies may contain "
                     "voting capabilities. Paginated; never available to anonymous users or other events' organizers.",
         responses={200: OutboxMessageSerializer(many=True),
-                   401: OpenApiResponse(description="Authentication required."),
-                   403: OpenApiResponse(description="Not an organizer of this event."),
-                   404: OpenApiResponse(description="Event not found.")},
+                   **error_responses(401, 403, 404)},
     )
     def get(self, request, *args, **kwargs):
         return super().get(request, *args, **kwargs)
@@ -63,8 +62,7 @@ class AdminOutboxView(OutboxListView):
         summary="Read the platform's private offline outbox (admins only).",
         description="Includes event messages and unscoped messages; paginated with a maximum page size of 100.",
         responses={200: OutboxMessageSerializer(many=True),
-                   401: OpenApiResponse(description="Authentication required."),
-                   403: OpenApiResponse(description="Platform administrator required.")},
+                   **error_responses(401, 403)},
     )
     def get(self, request, *args, **kwargs):
         return super().get(request, *args, **kwargs)

@@ -327,19 +327,14 @@ Every `operationId` here exists in `docs/openapi.yaml`, enforced by
 |---|---|---|---|---|
 | `integrity_probe` | `POST /api/v1/integrity/probe` | organizer or admin | `core/integrity.html` | Run the adversarial integrity probe (admin, or an event's organizer). |
 
-### Tour (in-flight) (4)
-
-The guided-tour console (packet F5-TOUR) is landing in parallel: the endpoints
-below exist and `js/tour.js` calls them, but their schema annotations are not
-finished (no summaries or error responses yet). They are covered by explicit
-allow-lists in `tests/test_api_first.py` until that packet lands.
+### Tour (4)
 
 | operationId | Method + path | Who may call it | UI control | Purpose |
 |---|---|---|---|---|
-| `tour_reset` | `POST /api/v1/tour/reset` | anyone (tour sandbox) | `js/tour.js` | Reset the tour sandbox event. |
-| `tour_start` | `POST /api/v1/tour/start` | anyone (tour sandbox) | `js/tour.js` | Start a guided tour sandbox event. |
-| `tour_step` | `POST /api/v1/tour/step` | anyone (tour sandbox) | `js/tour.js` | Record the visitor's tour step. |
-| `tour_switch_role` | `POST /api/v1/tour/role` | anyone (tour sandbox) | `js/tour.js` | Switch the tour sandbox to another role. |
+| `tour_reset` | `POST /api/v1/tour/reset` | anyone (tour sandbox) | `js/tour.js` | Delete the current private copy and create a fresh sandbox. |
+| `tour_start` | `POST /api/v1/tour/start` | anyone | `js/tour.js` | Start or resume a private, full-copy tour sandbox. |
+| `tour_step` | `POST /api/v1/tour/step` | anyone (tour sandbox) | `js/tour.js` | Record the visitor's current step. |
+| `tour_switch_role` | `POST /api/v1/tour/role` | anyone (tour sandbox) | `js/tour.js` | Switch to the designated organizer, judge or participant account. |
 
 ## Full lifecycle with curl
 
@@ -503,12 +498,7 @@ afterwards.
 5. **Docs coverage** — every `operationId` in the schema appears in this file,
    so the table cannot silently fall behind the code.
 
-Two honest exceptions are encoded as narrow, commented allow-lists (both
-listed here so they get fixed, not forgotten): the in-flight tour endpoints
-currently emit two serializer warnings and lack summaries/error responses
-(packet F5-TOUR owns `src/core/tour.py`), and four older operations
-(`admin_outbox_list`, `event_outbox_list`, `event_decision_room`,
-`request_voting_email`) document their errors without the shared envelope
-component. The committed `docs/openapi.yaml` was therefore generated with
-`--validate` (without `--fail-on-warn`) until the tour annotations land; the
-test asserts everything else is already at zero warnings, zero errors.
+The committed schema is generated with validation and zero warnings. Every
+operation, including tour, outbox, decision-room and voting-email operations,
+documents errors through the shared `ErrorEnvelope` component. The API First
+tests contain no operation, generator-error, or UI-operation allow-lists.

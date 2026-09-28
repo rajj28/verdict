@@ -189,9 +189,19 @@ paths:
                 $ref: '#/components/schemas/PaginatedOutboxMessageList'
           description: ''
         '401':
-          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: 'Not authenticated: no session cookie and no usable Authorization:
+            Bearer token.'
         '403':
-          description: Platform administrator required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: Authenticated but not allowed. The rule that refused is named
+            in error.code.
   /api/v1/admin/users:
     get:
       operationId: admin_users
@@ -1642,23 +1652,23 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
-          description: ''
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: 'Not authenticated: no session cookie and no usable Authorization:
+            Bearer token.'
         '403':
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
-          description: ''
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: Authenticated but not allowed. The rule that refused is named
+            in error.code.
         '404':
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
-          description: ''
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: No such object, or it exists but the caller may not know it
+            exists.
   /api/v1/events/{slug}/exports/{kind}.csv:
     get:
       operationId: event_export_csv
@@ -3098,11 +3108,26 @@ paths:
                 $ref: '#/components/schemas/PaginatedOutboxMessageList'
           description: ''
         '401':
-          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: 'Not authenticated: no session cookie and no usable Authorization:
+            Bearer token.'
         '403':
-          description: Not an organizer of this event.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: Authenticated but not allowed. The rule that refused is named
+            in error.code.
         '404':
-          description: Event not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: No such object, or it exists but the caller may not know it
+            exists.
   /api/v1/events/{slug}/prizes:
     get:
       operationId: event_prizes
@@ -6067,15 +6092,39 @@ paths:
                 $ref: '#/components/schemas/EmailDelivery'
           description: ''
         '400':
-          description: Invalid email or access mode.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: 'Rejected: malformed body, a field that failed validation,
+            or a rule that returns 400. See error.code.'
         '403':
-          description: Voting is closed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: Authenticated but not allowed. The rule that refused is named
+            in error.code.
         '409':
-          description: A ballot already exists.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: 'Conflict: the object moved on (a closed window, a duplicate,
+            a stale edit).'
         '429':
-          description: Request limit reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: Rate limited. Retry after the window named in the Retry-After
+            header.
         '503':
-          description: Configured email service unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: Error.
   /api/v1/events/{slug}/votes/email/verify:
     post:
       operationId: verify_voting_email
@@ -7352,8 +7401,9 @@ paths:
   /api/v1/tour/reset:
     post:
       operationId: tour_reset
+      summary: Delete and recreate the current private tour sandbox.
       tags:
-      - tour
+      - Tour
       security:
       - bearerAuth: []
       - cookieAuth: []
@@ -7365,11 +7415,26 @@ paths:
               schema:
                 $ref: '#/components/schemas/TourResetOutput'
           description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: No such object, or it exists but the caller may not know it
+            exists.
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: Rate limited. Retry after the window named in the Retry-After
+            header.
   /api/v1/tour/role:
     post:
       operationId: tour_switch_role
+      summary: Switch to a designated role in the current tour sandbox.
       tags:
-      - tour
+      - Tour
       requestBody:
         content:
           application/json:
@@ -7393,11 +7458,33 @@ paths:
               schema:
                 $ref: '#/components/schemas/TourRoleOutput'
           description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: 'Rejected: malformed body, a field that failed validation,
+            or a rule that returns 400. See error.code.'
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: Authenticated but not allowed. The rule that refused is named
+            in error.code.
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: No such object, or it exists but the caller may not know it
+            exists.
   /api/v1/tour/start:
     post:
       operationId: tour_start
+      summary: Start or resume a private tour sandbox.
       tags:
-      - tour
+      - Tour
       security:
       - bearerAuth: []
       - cookieAuth: []
@@ -7409,11 +7496,26 @@ paths:
               schema:
                 $ref: '#/components/schemas/TourStartOutput'
           description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: No such object, or it exists but the caller may not know it
+            exists.
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: Rate limited. Retry after the window named in the Retry-After
+            header.
   /api/v1/tour/step:
     post:
       operationId: tour_step
+      summary: Record the current step in the tour walkthrough.
       tags:
-      - tour
+      - Tour
       requestBody:
         content:
           application/json:
@@ -7437,6 +7539,27 @@ paths:
               schema:
                 $ref: '#/components/schemas/TourStepOutput'
           description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: 'Rejected: malformed body, a field that failed validation,
+            or a rule that returns 400. See error.code.'
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: Authenticated but not allowed. The rule that refused is named
+            in error.code.
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: No such object, or it exists but the caller may not know it
+            exists.
 components:
   schemas:
     AbuseFlag:

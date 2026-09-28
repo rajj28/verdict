@@ -70,43 +70,6 @@ CONTEXT_URLS_BY_FILE = {
     "manage/command_center.html::api_url": CONTEXT_URLS["api_url::command_center"],
 }
 
-# In-flight tour console (packet F5-TOUR, uncommitted working tree): the views
-# render but drf-spectacular cannot guess a serializer for the two plain
-# APIViews without serializer_class, so generation emits exactly these errors.
-# Owned by the tour worker; delete this allow-list once src/core/tour.py
-# documents them. Anything else in the stats fails the test.
-KNOWN_GENERATOR_ERROR_FRAGMENTS = (
-    "Error [TourStartView]: unable to guess serializer",
-    "Error [TourResetView]: unable to guess serializer",
-)
-
-# In-flight tour operations (same worker): rendered without a summary and
-# without documented error responses yet. operationId and 2xx are still
-# required; remove once src/core/tour.py annotates them.
-TOUR_INFLIGHT_OPERATION_IDS = frozenset(
-    {"tour_start", "tour_switch_role", "tour_reset", "tour_step"}
-)
-
-# Committed operations whose error responses do not reference the shared
-# ErrorEnvelope component yet. Each entry is a (method, schema path) pair
-# whose 4xx/5xx responses are description-only or a generic object.
-# Owned by the respective area workers; shrink this set, never grow it.
-ENVELOPE_EXCEPTIONS = frozenset(
-    {
-        ("GET", "/api/v1/admin/outbox"),
-        ("GET", "/api/v1/events/{slug}/outbox"),
-        ("GET", "/api/v1/events/{slug}/decision-room"),
-        ("POST", "/api/v1/events/{slug}/votes/email"),
-    }
-)
-
-# UI write actions that are genuinely not API calls. Empty by construction:
-# every form and button posts through data-api-* (BUILD-SPEC section 2), and
-# every dynamic fetch in src/static/js/ targets a data-* URL the templates
-# provide. Keep entries here commented with a reason if one ever appears.
-NON_API_ALLOW_LIST = frozenset()  # type: frozenset[tuple[str, str]]
-
-
 def generate_schema():
     """Build the schema exactly as `manage.py spectacular` does."""
     reset_generator_stats()
@@ -252,10 +215,6 @@ class StrictSchemaTest(SimpleTestCase):
     def test_schema_validates_with_zero_warnings(self):
         schema, warnings, errors = cached_generation()
         validate_schema(schema)  # raises on OpenAPI non-compliance
-        unexpected_errors = [
-            message for message in errors
-            if not any(fragment in message for fragment in KNOWN_GENERATOR_ERROR_FRAGMENTS)
-        ]
         self.assertEqual(
             warnings,
             [],
@@ -263,10 +222,9 @@ class StrictSchemaTest(SimpleTestCase):
             + "\n".join(warnings),
         )
         self.assertEqual(
-            unexpected_errors,
+            errors,
             [],
-            "Schema generation produced errors beyond the allow-listed in-flight "
-            "tour views (see KNOWN_GENERATOR_ERROR_FRAGMENTS):\n" + "\n".join(unexpected_errors),
+            "Schema generation produced errors:\n" + "\n".join(errors),
         )
 
 
@@ -289,7 +247,7 @@ class UiParityTest(SimpleTestCase):
     def test_every_ui_action_matches_a_schema_operation(self):
         schema, _, _ = cached_generation()
         operations = [(method, path) for method, path, _ in schema_operations(schema)]
-        ui_pairs = (collect_template_pairs() | collect_js_pairs()) - NON_API_ALLOW_LIST
+        ui_pairs = collect_template_pairs() | collect_js_pairs()
         unmatched = sorted(
             (method, path)
             for method, path in ui_pairs
@@ -302,8 +260,8 @@ class UiParityTest(SimpleTestCase):
             unmatched,
             [],
             "UI actions with no documented API operation (add the endpoint or, "
-            "only if it is genuinely not an API call, allow-list it in "
-            "NON_API_ALLOW_LIST with a comment):\n"
+            "only if it is genuinely not an API call, remove its API-looking "
+            "UI control):\n"
             + "\n".join(f"{method} {path}" for method, path in unmatched)
             + "\n" + REGENERATE_HINT,
         )
@@ -320,15 +278,13 @@ class OperationCompletenessTest(SimpleTestCase):
                 missing_id.append(label)
                 continue
             if not (operation.get("summary") or operation.get("description")):
-                if operation_id not in TOUR_INFLIGHT_OPERATION_IDS:
-                    missing_summary.append(label)
+                missing_summary.append(label)
             responses = operation.get("responses") or {}
             if not self._has_success_schema(responses, path):
                 missing_2xx.append(label)
             for code, response in responses.items():
                 if str(code).startswith(("4", "5")) and not self._is_envelope(response):
-                    if (method, path) not in ENVELOPE_EXCEPTIONS:
-                        envelope_gaps.append(f"{label} -> {code}")
+                    envelope_gaps.append(f"{label} -> {code}")
         self.assertEqual(missing_id, [], "Operations without operationId:\n" + "\n".join(missing_id))
         self.assertEqual(
             missing_summary, [], "Operations without summary/description:\n" + "\n".join(missing_summary)
@@ -342,8 +298,8 @@ class OperationCompletenessTest(SimpleTestCase):
         self.assertEqual(
             envelope_gaps,
             [],
-            "Error responses not using the shared ErrorEnvelope component "
-            "(shrink ENVELOPE_EXCEPTIONS, never grow it):\n" + "\n".join(envelope_gaps),
+            "Error responses not using the shared ErrorEnvelope component:\n"
+            + "\n".join(envelope_gaps),
         )
 
     @staticmethod

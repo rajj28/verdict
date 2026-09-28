@@ -9,18 +9,19 @@ import secrets
 from datetime import timedelta
 
 from django.conf import settings
-from django.contrib.auth import login
+from django.contrib.auth.hashers import make_password
 from django.db import transaction
 from django.utils import timezone
 from rest_framework.permissions import AllowAny
 from rest_framework import serializers
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from drf_spectacular.utils import OpenApiResponse, extend_schema
+from drf_spectacular.utils import extend_schema
 
 from accounts.models import User
 from accounts.services import start_session
 from core.errors import ApiError
+from core.schema import error_responses
 from core.showcase import build
 from events.models import Event, EventRole, Role
 from interop.importer import import_fixture
@@ -29,6 +30,7 @@ from teams.models import TeamMember
 
 SESSION_KEY = "verdict_tour_event"
 STEP_KEY = "verdict_tour_step"
+TOUR_EMAIL_DOMAIN = "@tour.verdict.local"
 MAX_SANDBOXES = 60
 SANDBOX_TTL = timedelta(hours=6)
 RATE_LIMIT_SECONDS = 60
@@ -108,7 +110,10 @@ def prune_expired(hours: float = 6) -> int:
 
 def _delete_event(event: Event) -> None:
     """Delete only tour-owned rows; source data is never matched by slug."""
-    user_ids = list(EventRole.objects.filter(event=event).values_list("user_id", flat=True))
+    user_ids = set(EventRole.objects.filter(event=event).values_list("user_id", flat=True))
+    user_ids.update(TeamMember.objects.filter(event=event).values_list("user_id", flat=True))
+    if event.created_by_id:
+        user_ids.add(event.created_by_id)
     with transaction.atomic():
         event.projects.all().delete()
         event.teams.all().delete()
@@ -117,7 +122,9 @@ def _delete_event(event: Event) -> None:
         event.questions.all().delete()
         event.roles.all().delete()
         Event.objects.filter(pk=event.pk).delete()
-        User.objects.filter(pk__in=user_ids, email__endswith="@tour.verdict.local").delete()
+        User.objects.filter(
+            pk__in=user_ids, email__endswith=TOUR_EMAIL_DOMAIN
+        ).delete()
 
 
 def _event_for_session(request) -> Event | None:
@@ -129,24 +136,33 @@ def _event_for_session(request) -> Event | None:
     return _tour_events().filter(slug=slug).first()
 
 
-def _fresh_fixture() -> dict:
+def _fresh_fixture(token: str) -> dict:
     data = build()
-    token = secrets.token_hex(4)
-    judge_id = "jdg_tour"
     data["event"]["id"] = f"evt_tour_{token}"
-    data["judges"] = [{
-        "id": judge_id,
-        "name": "Tour Judge",
-        "email": f"judge-{token}@tour.verdict.local",
-        "tracks": [track["id"] for track in data["tracks"]],
-    }]
-    data["scores"] = [
-        {**row, "judge": judge_id}
-        for row in data["scores"] if row["judge"] == "jdg_sc01"
-    ]
-    for index, team in enumerate(data["teams"]):
-        team["members"] = [f"tour.member{index + 1:02d}@example.org"]
+    for index, judge in enumerate(data["judges"], start=1):
+        judge["email"] = f"j{token[:13]}{index:02d}{TOUR_EMAIL_DOMAIN}"
+    for team_index, team in enumerate(data["teams"], start=1):
+        team["members"] = [
+            f"m{token[:13]}{team_index:02d}{member_index:02d}{TOUR_EMAIL_DOMAIN}"
+            for member_index, _ in enumerate(team["members"], start=1)
+        ]
     return data
+
+
+def _fresh_token() -> str:
+    """Avoid reusing a sandbox identity even if a random token collides."""
+    while True:
+        token = secrets.token_hex(14)
+        data = _fresh_fixture(token)
+        emails = [judge["email"] for judge in data["judges"]]
+        emails.extend(member for team in data["teams"] for member in team["members"])
+        if (
+            not Event.objects.filter(source_id=f"evt_tour_{token}").exists()
+            and not Event.objects.filter(slug=f"tour-{token}").exists()
+            and not User.objects.filter(email__in=emails).exists()
+            and not User.objects.filter(email=f"o{token[:13]}{TOUR_EMAIL_DOMAIN}").exists()
+        ):
+            return token
 
 
 @transaction.atomic
@@ -159,10 +175,10 @@ def create_sandbox(request, *, throttle: bool = True) -> Event:
         return current
     if _tour_events().count() >= getattr(settings, "TOUR_MAX_SANDBOXES", MAX_SANDBOXES):
         raise ApiError("tour_capacity", "The tour is busy right now. Please try again in a few minutes.", 429)
-    data = _fresh_fixture()
-    token = secrets.token_hex(4)
+    token = _fresh_token()
+    data = _fresh_fixture(token)
     organizer = User.objects.create_user(
-        email=f"organizer-{token}@tour.verdict.local",
+        email=f"o{token[:13]}{TOUR_EMAIL_DOMAIN}",
         display_name="Tour Organizer",
     )
     report = import_fixture(data, slug=f"tour-{token}", actor=organizer)
@@ -171,42 +187,30 @@ def create_sandbox(request, *, throttle: bool = True) -> Event:
     event.tagline = "A private, synthetic rehearsal."
     event.gallery_public = False
     event.judging_close_at = None
-    event.scoring_locked_at = None
-    event.save(update_fields=["name", "tagline", "gallery_public", "judging_close_at", "scoring_locked_at"])
-    judge_role = EventRole.objects.get(event=event, role=Role.JUDGE)
-    old_judge = judge_role.user
-    sandbox_judge = User.objects.create_user(
-        email=f"judge-{event.slug[-8:]}@tour.verdict.local",
-        display_name="Tour Judge",
+    event.save(update_fields=["name", "tagline", "gallery_public", "judging_close_at"])
+    EventRole.objects.create(
+        event=event,
+        user=organizer,
+        role=Role.ORGANIZER,
+        public_id=f"org_{token[-12:]}",
+        source_id=f"org-{token}",
     )
-    judge_role.user = sandbox_judge
-    judge_role.save(update_fields=["user"])
-    old_judge.delete()
-    imported_participant = EventRole.objects.filter(
-        event=event, role=Role.PARTICIPANT
-    ).select_related("user").first().user
-    sandbox_participant = User.objects.create_user(
-        email=f"participant-{event.slug[-8:]}@tour.verdict.local",
-        display_name="Tour Participant",
+    judge_role = EventRole.objects.get(event=event, role=Role.JUDGE, source_id="jdg_sc01")
+    participant_email = data["teams"][0]["members"][0]
+    account_ids = set(EventRole.objects.filter(event=event).values_list("user_id", flat=True))
+    account_ids.update(TeamMember.objects.filter(event=event).values_list("user_id", flat=True))
+    User.objects.filter(pk__in=account_ids).update(password=make_password(None))
+    open_reviews = list(
+        Review.objects.filter(event=event, judge=judge_role).order_by("id")[:2]
     )
-    participant_role = EventRole.objects.get(event=event, user=imported_participant, role=Role.PARTICIPANT)
-    participant_role.user = sandbox_participant
-    participant_role.save(update_fields=["user"])
-    TeamMember.objects.filter(event=event, user=imported_participant).update(user=sandbox_participant)
-    imported_participant.delete()
-    EventRole.objects.create(event=event, user=organizer, role=Role.ORGANIZER, public_id=f"org_{event.slug[-8:]}")
-    open_reviews = list(Review.objects.filter(event=event, judge=judge_role).order_by("id")[:2])
     for review in open_reviews:
         CriterionScore.objects.filter(review=review).delete()
         review.status = ReviewStatus.DRAFT
         review.submitted_at = None
         review.save(update_fields=["status", "submitted_at", "updated_at"])
-    event.scoring_locked_at = None
-    event.save(update_fields=["scoring_locked_at"])
     request.session[SESSION_KEY] = event.slug
     request.session[STEP_KEY] = 0
     request.session.modified = True
-    request._tour_users = (organizer, sandbox_judge, sandbox_participant)
     return event
 
 
@@ -214,8 +218,17 @@ def role_user(request, role: str) -> User:
     event = _event_for_session(request)
     if event is None or role not in {Role.ORGANIZER, Role.JUDGE, Role.PARTICIPANT}:
         raise ApiError("tour_forbidden", "This role is not available in your tour sandbox.", 403)
-    row = EventRole.objects.filter(event=event, role=role).select_related("user").first()
-    if row is None:
+    token = event.source_id.removeprefix("evt_tour_")
+    source_id = {
+        Role.ORGANIZER: f"org-{token}",
+        Role.JUDGE: "jdg_sc01",
+        Role.PARTICIPANT: f"m{token[:13]}0101{TOUR_EMAIL_DOMAIN}",
+    }[role]
+    try:
+        row = EventRole.objects.select_related("user").get(
+            event=event, role=role, source_id=source_id
+        )
+    except EventRole.DoesNotExist:
         raise ApiError("tour_forbidden", "This role is not available in your tour sandbox.", 403)
     return row.user
 
@@ -223,7 +236,13 @@ def role_user(request, role: str) -> User:
 class TourStartView(APIView):
     permission_classes = [AllowAny]
 
-    @extend_schema(operation_id="tour_start", request=None, responses={201: TourStartOutputSerializer})
+    @extend_schema(
+        operation_id="tour_start",
+        summary="Start or resume a private tour sandbox.",
+        request=None,
+        responses={201: TourStartOutputSerializer, **error_responses(404, 429)},
+        tags=["Tour"],
+    )
     def post(self, request):
         if not enabled():
             raise ApiError("not_found", "Not found.", 404)
@@ -234,22 +253,38 @@ class TourStartView(APIView):
 class TourRoleView(APIView):
     permission_classes = [AllowAny]
 
-    @extend_schema(operation_id="tour_switch_role", request=TourRoleInputSerializer,
-                   responses={200: TourRoleOutputSerializer})
+    @extend_schema(
+        operation_id="tour_switch_role",
+        summary="Switch to a designated role in the current tour sandbox.",
+        request=TourRoleInputSerializer,
+        responses={200: TourRoleOutputSerializer, **error_responses(400, 403, 404)},
+        tags=["Tour"],
+    )
     def post(self, request):
         if not enabled():
             raise ApiError("not_found", "Not found.", 404)
         serializer = TourRoleInputSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = role_user(request, serializer.validated_data["role"])
+        event_slug = request.session[SESSION_KEY]
+        step = request.session.get(STEP_KEY, 0)
         start_session(request, user)
-        return Response({"role": serializer.validated_data["role"], "redirect": f"/tour/{request.session[SESSION_KEY]}"})
+        request.session[SESSION_KEY] = event_slug
+        request.session[STEP_KEY] = step
+        request.session.modified = True
+        return Response({"role": serializer.validated_data["role"], "redirect": f"/tour/{event_slug}"})
 
 
 class TourResetView(APIView):
     permission_classes = [AllowAny]
 
-    @extend_schema(operation_id="tour_reset", request=None, responses={201: TourResetOutputSerializer})
+    @extend_schema(
+        operation_id="tour_reset",
+        summary="Delete and recreate the current private tour sandbox.",
+        request=None,
+        responses={201: TourResetOutputSerializer, **error_responses(404, 429)},
+        tags=["Tour"],
+    )
     def post(self, request):
         if not enabled():
             raise ApiError("not_found", "Not found.", 404)
@@ -266,8 +301,13 @@ class TourResetView(APIView):
 class TourStepView(APIView):
     permission_classes = [AllowAny]
 
-    @extend_schema(operation_id="tour_step", request=TourStepInputSerializer,
-                   responses={200: TourStepOutputSerializer})
+    @extend_schema(
+        operation_id="tour_step",
+        summary="Record the current step in the tour walkthrough.",
+        request=TourStepInputSerializer,
+        responses={200: TourStepOutputSerializer, **error_responses(400, 403, 404)},
+        tags=["Tour"],
+    )
     def post(self, request):
         if not enabled():
             raise ApiError("not_found", "Not found.", 404)
@@ -298,9 +338,8 @@ def tour_page(request, slug: str | None = None):
 
 
 def tour_calibration(request, slug: str):
-    """Sandbox counterpart to the showcase-only planted-truth page."""
+    """Serve the real planted-truth report to organizers of their sandbox."""
     from django.http import Http404
-    from django.shortcuts import render
     from events.policy import is_organizer
 
     event = _event_for_session(request)
@@ -309,7 +348,8 @@ def tour_calibration(request, slug: str):
         return calibration(request, slug)
     if event is None or event.slug != slug or not is_organizer(request.user, event):
         raise Http404()
-    return render(request, "core/tour_calibration.html", {"event": event})
+    from core.calibration_views import calibration
+    return calibration(request, slug)
 
 
 def render_tour(request, event, steps):

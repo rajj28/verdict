@@ -44,13 +44,16 @@ piles onto the same teams. A per-judge order spreads it out instead.
 - `docs/REAL-WORLD-JUDGING.md`: in the table row for failure 5 and in section 4,
   replace the "queued" wording with what is now implemented (keep "the model does
   not correct order effects").
+- `THREAT-MODEL.md`, section 5 item 4 ("Order effects on judges"): say each judge
+  now sees a per-judge order, so position effects spread across projects instead of
+  piling onto the same ones; the model still does not correct them.
 
 ## Scope
 
 Touch only `src/judging/policy.py` (and the judge queue view/API function that
 orders the list, if ordering happens there), the judging test module, `JUDGING.md`
 (Assignment section only), `docs/REAL-WORLD-JUDGING.md` (row 5 and section 4
-wording only). Do not touch tour, showcase, results, templates or docs/API.md.
+wording only), `THREAT-MODEL.md` (section 5 item 4 only). Do not touch tour, showcase, results, templates or docs/API.md.
 Never git commit.
 
 ## Done means

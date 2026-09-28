@@ -11,6 +11,7 @@ from rest_framework.views import APIView
 
 from core.decisions import decision_room
 from core.errors import ApiError
+from core.schema import error_responses
 
 
 @login_required
@@ -32,8 +33,7 @@ class DecisionRoomView(APIView):
 
     @extend_schema(tags=["Decision Room"], operation_id="event_decision_room",
                    summary="Organizer-only publication readiness and next actions",
-                   responses={200: OpenApiTypes.OBJECT, 401: OpenApiTypes.OBJECT,
-                              403: OpenApiTypes.OBJECT, 404: OpenApiTypes.OBJECT})
+                   responses={200: OpenApiTypes.OBJECT, **error_responses(401, 403, 404)})
     def get(self, request, slug):
         response = Response(decision_room(request.user, slug))
         response["Cache-Control"] = "private, no-store"

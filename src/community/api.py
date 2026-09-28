@@ -418,11 +418,7 @@ class EmailVotingView(APIView):
         operation_id="request_voting_email", tags=["Community voting"],
         request=EmailVerificationSerializer,
         responses={202: EmailDeliverySerializer,
-                   400: OpenApiResponse(description="Invalid email or access mode."),
-                   403: OpenApiResponse(description="Voting is closed."),
-                   409: OpenApiResponse(description="A ballot already exists."),
-                   429: OpenApiResponse(description="Request limit reached."),
-                   503: OpenApiResponse(description="Configured email service unavailable.")},
+                   **error_responses(400, 403, 409, 429, 503)},
         description="Queues a private organizer-delivered link offline, or sends via the configured email "
                     "backend. The response never contains the link. Offline delivery does not prove mailbox ownership.",
     )

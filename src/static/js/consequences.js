@@ -137,39 +137,51 @@
     }
 
     function loadConsequences() {
-      state.digest = "";
+      // Responses belong to the dialog that asked for them: if it was closed or
+      // reopened for another action meanwhile, a late response is ignored.
+      var current = state;
+      current.digest = "";
       setLoading(true);
-      error.textContent = state.notice || "";
+      error.textContent = current.notice || "";
       sentence.textContent = "";
       certaintyWarning.textContent = "";
       certaintyWarning.hidden = true;
       rankContainer.replaceChildren();
       awardContainer.replaceChildren();
-      var payload = { action: state.action };
-      if (state.target) {
-        payload.target = state.target;
+      var payload = { action: current.action };
+      if (current.target) {
+        payload.target = current.target;
       }
       return request("POST", modalElement.getAttribute("data-consequences-url"), payload)
         .then(function (result) {
+          if (state !== current) {
+            return;
+          }
           if (!result.ok) {
-            error.textContent = state.notice
-              ? state.notice + " " + errorMessage(result)
+            error.textContent = current.notice
+              ? current.notice + " " + errorMessage(result)
               : errorMessage(result);
             return;
           }
-          state.digest = result.body.basis_digest;
+          current.digest = result.body.basis_digest;
           renderConsequences(result.body);
-          error.textContent = state.notice || "";
+          error.textContent = current.notice || "";
           confirmButton.disabled = false;
         })
         .catch(function () {
-          error.textContent = state.notice
-            ? state.notice + " Could not load updated consequences."
+          if (state !== current) {
+            return;
+          }
+          error.textContent = current.notice
+            ? current.notice + " Could not load updated consequences."
             : "Could not load consequences. Check your connection and try again.";
         })
         .then(function () {
+          if (state !== current) {
+            return;
+          }
           setLoading(false);
-          if (state && state.digest) {
+          if (current.digest) {
             confirmButton.disabled = false;
           }
         });
@@ -262,22 +274,29 @@
       } else if (state.action === "disqualify" || state.action === "exclude_review") {
         payload.reason = reason.value.trim();
       }
+      var current = state;
       confirmButton.disabled = true;
       error.textContent = "";
-      request(state.method, state.url, payload).then(function (result) {
+      request(current.method, current.url, payload).then(function (result) {
         if (result.ok) {
           window.location.reload();
           return;
         }
+        if (state !== current) {
+          return;
+        }
         if (result.status === 409 && result.body && result.body.error
             && result.body.error.code === "stale_preview") {
-          state.notice = errorMessage(result);
+          current.notice = errorMessage(result);
           loadConsequences();
           return;
         }
         error.textContent = errorMessage(result);
         confirmButton.disabled = false;
       }).catch(function () {
+        if (state !== current) {
+          return;
+        }
         error.textContent = "Could not complete the action. Check your connection and try again.";
         confirmButton.disabled = false;
       });

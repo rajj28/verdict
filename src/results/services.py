@@ -1486,7 +1486,8 @@ def verify_publication(pub: ResultPublication) -> dict:
     digest_match = live_digest == pub.input_digest
     differences = _projected_differences(stored_inputs, live_inputs)
 
-    reproducible = rows_match and stored_inputs_match and awards_match is not False
+    policy_match = pub.params == params and pub.method == params.get("method")
+    reproducible = rows_match and stored_inputs_match and awards_match is not False and policy_match
     if reproducible:
         reproducible_detail = "Stored inputs reproduce the publication rows and awards."
     else:
@@ -1495,6 +1496,7 @@ def verify_publication(pub: ResultPublication) -> dict:
                 ("recomputed rows differ from stored rows", not rows_match),
                 ("recomputed awards differ from stored awards", awards_match is False),
                 ("stored inputs do not hash to the stored digest", not stored_inputs_match),
+                ("displayed policy differs from the canonical stored policy", not policy_match),
             ) if failed
         ]
         reproducible_detail = "; ".join(reasons).capitalize() + "."

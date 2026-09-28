@@ -4503,6 +4503,77 @@ paths:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: No such object, or it exists but the caller may not know it
             exists.
+  /api/v1/events/{slug}/results/consequences:
+    post:
+      operationId: results_consequences
+      description: Read-only comparison against the current preview or latest official
+        publication. No audit or result data is written.
+      summary: Preview the exact consequences of a results action (organizer).
+      parameters:
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - results
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsequenceRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ConsequenceRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ConsequenceRequest'
+        required: true
+      security:
+      - bearerAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsequenceResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: 'Rejected: malformed body, a field that failed validation,
+            or a rule that returns 400. See error.code.'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: 'Not authenticated: no session cookie and no usable Authorization:
+            Bearer token.'
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: Authenticated but not allowed. The rule that refused is named
+            in error.code.
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: No such object, or it exists but the caller may not know it
+            exists.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: 'Conflict: the object moved on (a closed window, a duplicate,
+            a stale edit).'
   /api/v1/events/{slug}/results/preview:
     get:
       operationId: results_preview
@@ -4837,6 +4908,13 @@ paths:
       responses:
         '204':
           description: No response body
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: 'Rejected: malformed body, a field that failed validation,
+            or a rule that returns 400. See error.code.'
         '401':
           content:
             application/json:
@@ -4858,6 +4936,13 @@ paths:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: No such object, or it exists but the caller may not know it
             exists.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: 'Conflict: the object moved on (a closed window, a duplicate,
+            a stale edit).'
   /api/v1/events/{slug}/rubric:
     get:
       operationId: event_rubric
@@ -7264,6 +7349,94 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: Unsupported media type; JSON is expected except on upload endpoints.
+  /api/v1/tour/reset:
+    post:
+      operationId: tour_reset
+      tags:
+      - tour
+      security:
+      - bearerAuth: []
+      - cookieAuth: []
+      - {}
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TourResetOutput'
+          description: ''
+  /api/v1/tour/role:
+    post:
+      operationId: tour_switch_role
+      tags:
+      - tour
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TourRoleInput'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TourRoleInput'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TourRoleInput'
+        required: true
+      security:
+      - bearerAuth: []
+      - cookieAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TourRoleOutput'
+          description: ''
+  /api/v1/tour/start:
+    post:
+      operationId: tour_start
+      tags:
+      - tour
+      security:
+      - bearerAuth: []
+      - cookieAuth: []
+      - {}
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TourStartOutput'
+          description: ''
+  /api/v1/tour/step:
+    post:
+      operationId: tour_step
+      tags:
+      - tour
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TourStepInput'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TourStepInput'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TourStepInput'
+        required: true
+      security:
+      - bearerAuth: []
+      - cookieAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TourStepOutput'
+          description: ''
 components:
   schemas:
     AbuseFlag:
@@ -7303,6 +7476,18 @@ components:
         * `open_link` - Open link
         * `email` - Email verification
         * `authenticated` - Authenticated account
+    ActionEnum:
+      enum:
+      - publish
+      - disqualify
+      - exclude_review
+      - include_review
+      type: string
+      description: |-
+        * `publish` - publish
+        * `disqualify` - disqualify
+        * `exclude_review` - exclude_review
+        * `include_review` - include_review
     AdminUser:
       type: object
       description: Admin view of an account; adds the email the admin manages.
@@ -7722,6 +7907,28 @@ components:
       - team
       - team_id
       - track
+    AwardChange:
+      type: object
+      properties:
+        prize:
+          type: string
+        prize_name:
+          type: string
+        before:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+        after:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+      required:
+      - after
+      - before
+      - prize
+      - prize_name
     Ballot:
       type: object
       description: A ballot and the rules that govern it, so the page needs no second
@@ -8034,6 +8241,68 @@ components:
           maxLength: 300
       required:
       - team
+    ConsequenceRequest:
+      type: object
+      properties:
+        action:
+          $ref: '#/components/schemas/ActionEnum'
+        target:
+          type: string
+          nullable: true
+      required:
+      - action
+    ConsequenceResponse:
+      type: object
+      properties:
+        action:
+          type: string
+        target:
+          type: string
+          nullable: true
+        basis_digest:
+          type: string
+        rank_changes:
+          type: array
+          items:
+            $ref: '#/components/schemas/RankChange'
+        award_changes:
+          type: array
+          items:
+            $ref: '#/components/schemas/AwardChange'
+        winner_before:
+          type: object
+          additionalProperties: {}
+          nullable: true
+        winner_after:
+          type: object
+          additionalProperties: {}
+          nullable: true
+        n_rank_changes:
+          type: integer
+        n_award_changes:
+          type: integer
+        sentence:
+          type: string
+        certainty:
+          type: string
+        top_tied:
+          type: boolean
+        top_tie_warning:
+          type: string
+      required:
+      - action
+      - award_changes
+      - basis_digest
+      - certainty
+      - n_award_changes
+      - n_rank_changes
+      - rank_changes
+      - sentence
+      - target
+      - top_tie_warning
+      - top_tied
+      - winner_after
+      - winner_before
     Criterion:
       type: object
       properties:
@@ -8113,6 +8382,9 @@ components:
         reason:
           type: string
           maxLength: 2000
+        expected_digest:
+          type: string
+          maxLength: 64
       required:
       - reason
     EmailDelivery:
@@ -8345,6 +8617,9 @@ components:
         reason:
           type: string
           maxLength: 300
+        expected_digest:
+          type: string
+          maxLength: 64
       required:
       - reason
     FeedbackRelease:
@@ -9951,21 +10226,173 @@ components:
             type: string
             maxLength: 40
           maxItems: 20
+    PublicRankUncertainty:
+      type: object
+      properties:
+        available:
+          type: boolean
+        replicates:
+          type: integer
+        level:
+          type: number
+          format: double
+        top_k:
+          type: integer
+        df:
+          type: integer
+        summary:
+          type: string
+        assumption:
+          type: string
+        reason:
+          type: string
+        tied_pairs:
+          type: array
+          items:
+            type: array
+            items:
+              type: string
+        groups:
+          type: array
+          items:
+            type: array
+            items:
+              type: string
+      required:
+      - assumption
+      - available
+      - df
+      - groups
+      - level
+      - reason
+      - replicates
+      - summary
+      - tied_pairs
+      - top_k
+    PublicResultRow:
+      type: object
+      properties:
+        rank:
+          type: string
+          nullable: true
+        project_id:
+          type: string
+        title:
+          type: string
+        team:
+          type: string
+        track:
+          type: string
+          nullable: true
+        n_reviews:
+          type: integer
+          nullable: true
+        raw_mean:
+          type: number
+          format: double
+          nullable: true
+        normalized:
+          type: number
+          format: double
+          nullable: true
+        live_strength:
+          type: number
+          format: double
+          nullable: true
+        rank_live:
+          type: integer
+          nullable: true
+        n_comparisons:
+          type: integer
+        status:
+          type: string
+        status_reason:
+          type: string
+          nullable: true
+        rank_low:
+          type: integer
+          nullable: true
+        rank_high:
+          type: integer
+          nullable: true
+        score_low:
+          type: number
+          format: double
+          nullable: true
+        score_high:
+          type: number
+          format: double
+          nullable: true
+        p_first:
+          type: number
+          format: double
+          nullable: true
+        p_top:
+          type: number
+          format: double
+          nullable: true
+        p_above_next:
+          type: number
+          format: double
+          nullable: true
+        tied_with_next:
+          type: boolean
+        tied_with_previous:
+          type: boolean
+      required:
+      - live_strength
+      - n_comparisons
+      - n_reviews
+      - normalized
+      - p_above_next
+      - p_first
+      - p_top
+      - project_id
+      - rank
+      - rank_high
+      - rank_live
+      - rank_low
+      - raw_mean
+      - score_high
+      - score_low
+      - status
+      - status_reason
+      - team
+      - tied_with_next
+      - tied_with_previous
+      - title
+      - track
     PublicResults:
       type: object
       description: 'The public projection of the newest publication: awards, no judge
         data.'
       properties:
-        event:
+        pub_id:
           type: string
-        publication:
-          type: object
-          additionalProperties: {}
+        version:
+          type: integer
+        published_at:
+          type: string
+          format: date-time
+        supersedes_version:
+          type: integer
           nullable: true
+        note:
+          type: string
+        method:
+          type: string
+        lam:
+          type: number
+          format: double
+          nullable: true
+        lambda_source:
+          type: string
         rows:
           type: array
           items:
-            $ref: '#/components/schemas/ResultRow'
+            $ref: '#/components/schemas/PublicResultRow'
+        uncertainty:
+          $ref: '#/components/schemas/PublicRankUncertainty'
         awards:
           type: array
           items:
@@ -9980,11 +10407,18 @@ components:
             $ref: '#/components/schemas/PublicationHistoryEntry'
       required:
       - awards
-      - event
       - history
-      - publication
+      - lam
+      - lambda_source
+      - method
+      - note
+      - pub_id
+      - published_at
       - rows
+      - supersedes_version
       - unawarded
+      - uncertainty
+      - version
     PublicationCreated:
       type: object
       properties:
@@ -10192,11 +10626,14 @@ components:
       properties:
         note:
           type: string
-          maxLength: 500
+          maxLength: 300
         acknowledge_unranked:
           type: boolean
           description: Required when some projects are unranked, so the organizer
             is recorded as having seen that before publishing.
+        expected_digest:
+          type: string
+          maxLength: 64
     Question:
       type: object
       properties:
@@ -10250,6 +10687,72 @@ components:
           minimum: 0
       required:
       - prompt
+    RankChange:
+      type: object
+      properties:
+        project:
+          type: string
+        title:
+          type: string
+        before:
+          type: string
+        after:
+          type: string
+      required:
+      - after
+      - before
+      - project
+      - title
+    RankUncertainty:
+      type: object
+      properties:
+        available:
+          type: boolean
+        replicates:
+          type: integer
+        seed:
+          type: integer
+        level:
+          type: number
+          format: double
+        top_k:
+          type: integer
+        sigma:
+          type: number
+          format: double
+        df:
+          type: integer
+        summary:
+          type: string
+        assumption:
+          type: string
+        reason:
+          type: string
+        tied_pairs:
+          type: array
+          items:
+            type: array
+            items:
+              type: string
+        groups:
+          type: array
+          items:
+            type: array
+            items:
+              type: string
+      required:
+      - assumption
+      - available
+      - df
+      - groups
+      - level
+      - reason
+      - replicates
+      - seed
+      - sigma
+      - summary
+      - tied_pairs
+      - top_k
     RankingMethodEnum:
       enum:
       - normalized
@@ -10480,6 +10983,36 @@ components:
         rank_live:
           type: integer
           nullable: true
+        rank_low:
+          type: integer
+          nullable: true
+        rank_high:
+          type: integer
+          nullable: true
+        score_low:
+          type: number
+          format: double
+          nullable: true
+        score_high:
+          type: number
+          format: double
+          nullable: true
+        p_first:
+          type: number
+          format: double
+          nullable: true
+        p_top:
+          type: number
+          format: double
+          nullable: true
+        p_above_next:
+          type: number
+          format: double
+          nullable: true
+        tied_with_next:
+          type: boolean
+        tied_with_previous:
+          type: boolean
         n_comparisons:
           type: integer
         status:
@@ -10494,16 +11027,25 @@ components:
       - n_comparisons
       - n_reviews
       - normalized
+      - p_above_next
+      - p_first
+      - p_top
       - project_id
       - rank
       - rank_bt
+      - rank_high
       - rank_live
+      - rank_low
       - rank_norm
       - rank_raw
       - raw_mean
+      - score_high
+      - score_low
       - status
       - status_reason
       - team
+      - tied_with_next
+      - tied_with_previous
       - title
       - track
     ResultsPreview:
@@ -10533,6 +11075,8 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ResultRow'
+        uncertainty:
+          $ref: '#/components/schemas/RankUncertainty'
         live_pairwise:
           type: object
           additionalProperties: {}
@@ -10589,6 +11133,7 @@ components:
       - rows
       - spread
       - unawarded
+      - uncertainty
     Review:
       type: object
       properties:
@@ -10698,6 +11243,16 @@ components:
       - public_id
       - role
       - user
+    RoleEnum:
+      enum:
+      - organizer
+      - judge
+      - participant
+      type: string
+      description: |-
+        * `organizer` - organizer
+        * `judge` - judge
+        * `participant` - participant
     Rubric:
       type: object
       description: The active rubric. ``version`` increments on every replacement.
@@ -10935,6 +11490,65 @@ components:
           $ref: '#/components/schemas/Token'
       required:
       - token
+    TourResetOutput:
+      type: object
+      properties:
+        slug:
+          type: string
+        url:
+          type: string
+      required:
+      - slug
+      - url
+    TourRoleInput:
+      type: object
+      properties:
+        role:
+          $ref: '#/components/schemas/RoleEnum'
+      required:
+      - role
+    TourRoleOutput:
+      type: object
+      properties:
+        role:
+          type: string
+        redirect:
+          type: string
+      required:
+      - redirect
+      - role
+    TourStartOutput:
+      type: object
+      properties:
+        slug:
+          type: string
+        url:
+          type: string
+        steps:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+      required:
+      - slug
+      - steps
+      - url
+    TourStepInput:
+      type: object
+      properties:
+        step:
+          type: integer
+          maximum: 9
+          minimum: 0
+      required:
+      - step
+    TourStepOutput:
+      type: object
+      properties:
+        step:
+          type: integer
+      required:
+      - step
     Track:
       type: object
       properties:

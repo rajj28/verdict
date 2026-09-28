@@ -206,3 +206,48 @@ What it does not prove: that nobody ever had access to the machine it came from.
 Keep the archive encrypted and treat a restore as a normal privileged operation.
 
 ## Recorded run
+
+Run by the maintainers on 2026-09-28 against a Docker Compose stack built from a
+clean `git archive` of commit `2e8903a` (Compose project `verdict-rc2`, Windows 11
+host, Docker Desktop). One publication (`pub_vgwl7wobnv`, version 1) existed at
+backup time. The restore target was not the original portal: every volume was
+deleted and a brand-new portal was seeded (new database, new secret key, new
+signing keys) before restoring. Output is copied verbatim; the create step is shortened to
+its last lines.
+
+```text
+$ python scripts/backup.py create --out ../backups --project verdict-rc2
+    (optional step failed, continuing: record the source version)
+
+BACKUP OK: C:\Users\Acer\hackathonwinnigproject\rc\backups\verdict-20260928T102143Z
+  5 files, 1921 rows, audit head 7, 1 publications.
+  It contains the database, uploaded media, the Django secret key and the
+  Ed25519 signing keys. Store it like a password, and keep it out of git.
+
+$ docker compose down -v   # destroy the portal: database and appdata volumes
+ Volume verdict-rc2_appdata Removed 
+ Volume verdict-rc2_pgdata Removed 
+ Network verdict-rc2_default Removed 
+$ docker compose up -d --wait   # a brand-new, freshly seeded portal
+ Container verdict-rc2-web-1 Healthy 
+ Container verdict-rc2-webhook-worker-1 Healthy 
+ Container verdict-rc2-db-1 Healthy 
+
+$ python scripts/backup.py restore ../backups/verdict-20260928T102143Z --yes --project verdict-rc2
+Checksums OK: 5 files.
+  $ docker compose -p verdict-rc2 stop webhook-worker web
+  $ docker compose -p verdict-rc2 exec -T db pg_restore -U verdict -d verdict --clean --if-exists --no-owner < C:\Users\Acer\hackathonwinnigproject\rc\backups\verdict-20260928T102143Z\db.dump
+  $ docker compose -p verdict-rc2 cp C:\Users\Acer\hackathonwinnigproject\rc\backups\verdict-20260928T102143Z\appdata web:/data
+  $ docker compose -p verdict-rc2 up -d web webhook-worker
+  $ docker compose exec -T web python -c <inline appdata layout check, see APPDATA_LAYOUT_CODE>
+Waiting for http://localhost:18095/healthz (up to 180s)
+  healthz OK
+  $ docker compose -p verdict-rc2 exec -T web python manage.py backup_fingerprint
+Fingerprint matches the manifest exactly.
+  $ docker compose -p verdict-rc2 exec -T web python manage.py verify_publication pub_vgwl7wobnv
+  pub_vgwl7wobnv: identical
+RESTORE OK: 1921 rows, audit head 7, 1/1 publications verified
+```
+
+Backup took 4 seconds and restore 59 seconds (most of it waiting for `/healthz`
+after the web service restarts).

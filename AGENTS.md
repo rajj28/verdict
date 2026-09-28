@@ -3,8 +3,8 @@
 You are a worker on VERDICT, a hackathon submission/judging portal (Django 5.2 + DRF + PostgreSQL, server-rendered templates + Bootstrap, no build step). An orchestrator plans, reviews and commits. You implement one task packet at a time.
 
 ## Read first
-1. `docs/BUILD-SPEC.md`: the authoritative spec (data model, permissions, API contract, engine math). Follow it exactly. If it is ambiguous, choose the simplest reading and say so in your final summary.
-2. Your packet file in `docs/packets/`. Touch only the files and directories it lists. If you must change anything else, keep it minimal and list it in your summary.
+1. `docs/process/BUILD-SPEC.md`: the authoritative spec (data model, permissions, API contract, engine math). Follow it exactly. If it is ambiguous, choose the simplest reading and say so in your final summary.
+2. Your packet file in `docs/process/packets/`. Touch only the files and directories it lists. If you must change anything else, keep it minimal and list it in your summary.
 
 ## Environment
 - Windows host. Use the repo virtualenv: `.venv\Scripts\python.exe` (create it with `python -m venv .venv` and `.venv\Scripts\python.exe -m pip install -r requirements.txt` if missing).

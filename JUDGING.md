@@ -234,7 +234,7 @@ intransitive preferences, or sparse coverage. No winner probability or
 calibrated confidence is claimed.
 
 A separate bounded completion analysis exists in `src/results/closure.py`
-(`tests/test_closure_engine.py`; research context in `FEATURES.md`): given a
+(`tests/test_closure_engine.py`): given a
 declared pending roster it searches deterministic completions for a
 first-place change and returns only `counterexample_found`, `unknown`, or
 `unsupported` — never a stability certificate. Caps: 100 projects, 500

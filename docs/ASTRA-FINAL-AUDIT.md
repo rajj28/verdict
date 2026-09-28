@@ -1,5 +1,13 @@
 # Astra final audit
 
+> **Status: partial.** This independent audit (OpenAI Codex, maximum reasoning) ran
+> until its usage budget ended, so the scorecard and risk sections below were never
+> filled in. Its four fixes and statistics corrections were merged
+> (`60a9aaa`, `b0219c4`, `bd08035`, `4a39881`, `1c61a09`). Its open findings were fixed
+> afterwards: `b8de114` (Verify is bit-for-bit reproducible for imported events)
+> and `36c8091` (consequence dialog ignores late responses). The README fix is in
+> the final README. Paths below refer to the tree at the audit's baseline `43f341e`.
+
 Audit started 2026-09-28 on branch `astra-final`, baseline `43f341e`.
 Scope: this worktree only; isolated app database `verdict_w4app` and gate database
 `verdict_w4`. No Docker startup, push, or access to the sibling worktree.

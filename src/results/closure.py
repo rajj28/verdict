@@ -13,9 +13,8 @@ minimum-flip claim. :func:`replay` independently re-verifies a claimed
 witness against the exact declared pending-slot identities and the real
 engine, without trusting the witness's own claimed output.
 
-See FEATURES.md ("VERDICT Closure") for the product framing and the
-mathematical shipping boundary this module stays inside (bounded
-witness search, not a stability certificate).
+Shipping boundary: a bounded witness search, never a stability
+certificate (JUDGING.md describes what it may and may not claim).
 """
 
 from __future__ import annotations

@@ -23,8 +23,8 @@ Duplicate handling: `prj_07` (titled "Dry Harbour") was superseded by `prj_41` a
 | 13 | =13 | = | `prj_15` | Copper Orbit | 2 | 66.67 | 66.71 |
 | 14 | =13 | ▼1 | `prj_36` | Salt Drift | 3 | 66.67 | 66.68 |
 | 15 | =13 | ▼2 | `prj_19` | Small Relay | 2 | 66.67 | 66.61 |
-| =16 | =16 | = | `prj_09` | Hollow Signal | 3 | 63.89 | 63.94 |
 | =16 | =16 | = | `prj_17` | Small Loom | 3 | 63.89 | 63.94 |
+| =16 | =16 | = | `prj_09` | Hollow Signal | 3 | 63.89 | 63.94 |
 | 18 | =16 | ▼2 | `prj_31` | Salt Ferry | 3 | 63.89 | 63.90 |
 | 19 | =16 | ▼3 | `prj_02` | Small Meadow | 3 | 63.89 | 63.83 |
 | 20 | =20 | = | `prj_18` | Open Kiln | 2 | 62.50 | 62.67 |
@@ -149,7 +149,7 @@ The predeclared procedure shuffles the 121 included reviews by sorted review id 
 | λ | Top-5 (normalized) | Spearman ρ vs λ=2 |
 |---:|---|---:|
 | 0 | `prj_11`, `prj_25`, `prj_16`, `prj_21`, `prj_38` | 0.8313 |
-| 1 | `prj_11`, `prj_34`, `prj_25`, `prj_16`, `prj_37` | 0.9944 |
+| 1 | `prj_11`, `prj_34`, `prj_25`, `prj_16`, `prj_37` | 0.9943 |
 | 2 | `prj_34`, `prj_11`, `prj_25`, `prj_37`, `prj_16` | 1.0000 |
 | 5 | `prj_34`, `prj_11`, `prj_25`, `prj_37`, `prj_10` | 0.9936 |
 
@@ -283,7 +283,7 @@ The test does not reject this relabeling null at the 5% level. Nondetection is n
 
 ### Agreement between the normalized and Bradley–Terry rankings
 
-Spearman ρ = 0.8509, Kendall τ = 0.6684 over the 40 projects ranked by both methods (score-level correlation, then rank positions). 15 project(s) differ by more than 5 places:
+Spearman ρ = 0.8493, Kendall τ = 0.6667 over the 40 projects ranked by both methods (score-level correlation, then rank positions). 15 project(s) differ by more than 5 places:
 
 - `prj_02` (Small Meadow): normalized 19 vs Bradley–Terry 4
 - `prj_03` (Deep Compass): normalized 32 vs Bradley–Terry 20

@@ -1127,6 +1127,8 @@ def _malformed_inputs(pub: ResultPublication) -> str | None:
         ("reviews_per_project", _is_int(inputs.get("reviews_per_project"))),
         ("included reviews", _records(inputs.get("included", []), review_id=_is_text, judge_id=_is_text,
                                       project_id=_is_text, criteria=_is_values)),
+        ("excluded reviews", _records(inputs.get("excluded", []), review_id=_is_text,
+                                      judge_id=_is_text, project_id=_is_text, reason=_is_text)),
         ("projects", "projects" not in inputs or (
             isinstance(inputs["projects"], list) and all(map(_is_text, inputs["projects"])))),
         ("project snapshot", _records(

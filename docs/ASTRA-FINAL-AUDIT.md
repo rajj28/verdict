@@ -21,7 +21,7 @@ Evidence below is recorded as it is collected; pending checks are not passes.
 | Medium | Reviewer documentation | `README.md:126` | README says there is no historical roster snapshot and strict schema has 306 errors; task and newer migrations claim both were repaired | Verify live behavior, then correct stale present-tense claims |
 | Low | Evidence navigation | `docs/BUILD-SPEC.md:248` | Referenced `docs/TIER-EVIDENCE.md` is absent in this build | Use existing tier evaluation and record new HTTP evidence; incoming evidence worker is outside scope |
 | High | Verify policy consistency | `src/results/services.py:1329` | Change a publication's separate `params` or `method` without changing canonical inputs; public policy reads those columns but Verify compared only canonical inputs | Fixed: `FinalPublicationTests.test_verify_rejects_policy_columns_that_disagree_with_hashed_inputs`; red 3 failures, green 11 tests including policy suite; fix commit recorded below |
-| High | Verify robustness | `src/results/services.py:968` | Stored `inputs.excluded = [null]` passes input validation and later calls `row.get` | Add malformed-exclusion regression and fail closed |
+| High | Verify robustness | `src/results/services.py:968` | Stored `inputs.excluded = [null]` passed input validation and later called `row.get` | Fixed: `FinalPublicationTests.test_verify_malformed_exclusions_fail_closed_without_a_500`; red 3 errors/1 failure; validated excluded-review shape |
 | Medium | Verify current state | `src/results/services.py:1233` | Keep a publication instance, change event coverage policy, verify the old instance; cached `pub.event` can hide the update | Add regression; read current event under the shared event lock |
 | Medium | Certificate verification | `src/interop/views.py:84` | Verify a valid winner code after a later version replaces that award: response contains only `valid` and `kind` | Add version/supersession regression and return authenticated certificate status |
 | Medium | Uncertainty claims | `docs/UNCERTAINTY.md:6` | Calls Monte Carlo uncertainty exact; treats 95% order threshold as an exact interval equivalence; does not account for estimated offsets in df | Correct wording; reproduce fixture numbers with a named command |
@@ -89,5 +89,6 @@ outside this audit; this report does not certify their integration.
    running. Correct overclaims in the generator as well as its generated report.
 5. Red-before-green fixes: fix 1 complete (Verify policy copies); command
    `.venv/Scripts/python.exe manage.py test tests.test_astra_final tests.test_publication_policy -v 1 --noinput`
-   on `verdict_w4`: 11 tests, OK. Separate commit pending.
+   on `verdict_w4`: 11 tests, OK. Commit `ece782f`.
+   Fix 2: malformed exclusions, regression plus `tests.test_adversarial_t2`.
 6. Full gate, strict schema validation, final report and commit: pending.

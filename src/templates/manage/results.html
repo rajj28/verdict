@@ -188,7 +188,7 @@ word. Judge names appear here because this page is organizer-only.
                 {% if preview.uncertainty.available %}
                   <td>
                     {% if row.rank_low %}
-                      ranks {{ row.rank_low }}-{{ row.rank_high }}, top {{ preview.uncertainty.top_k }} in {{ row.p_top|floatformat:0 }}%
+                      ranks {{ row.rank_low }}-{{ row.rank_high }}, top {{ preview.uncertainty.top_k }} in {% widthratio row.p_top 1 100 %}%
                     {% else %}&mdash;{% endif %}
                   </td>
                 {% endif %}

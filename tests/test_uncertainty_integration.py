@@ -232,6 +232,22 @@ class RankUncertaintyIntegrationTests(TestCase):
             "Projects marked as tied could swap places if different judges had reviewed them.",
         )
 
+    def test_certainty_cell_shows_top_k_share_as_a_percentage(self):
+        """p_top is a 0-1 share; the page must print it as a percentage."""
+        self._set_all_scores(1, 5)
+        self._set_all_scores(2, 1)
+        preview = services.preview(self.event)
+        top_k = preview["uncertainty"]["top_k"]
+        rows = [row for row in preview["rows"] if row.get("p_top") is not None]
+        self.assertTrue(rows)
+        self.client.force_login(self.organizer)
+        page = self.client.get(f"/manage/{self.event.slug}/results")
+        for row in rows:
+            percent = round(row["p_top"] * 100)
+            self.assertContains(page, f"top {top_k} in {percent}%")
+        best = max(rows, key=lambda row: row["p_top"])
+        self.assertGreater(round(best["p_top"] * 100), 1)
+
     def test_preview_endpoint_query_bound_and_schema(self):
         # Keep the endpoint within 25 queries; uncertainty reuses scored fit data.
         with CaptureQueriesContext(connection) as queries:

@@ -36,11 +36,20 @@ def _acceptance_report() -> dict | None:
     except OSError:
         return None
     lines = [line for line in text.splitlines() if line.startswith(("T1", "T2", "T3", "T4"))]
+    note = next((line for line in text.splitlines()
+                 if line.startswith("note: claimed but not verified:")), "")
+    unverified = note.split(":", 2)[-1].split() if note else []
     return {
         "checks": [{"text": line, "passed": line.rstrip().endswith("PASS")} for line in lines],
         "passed": sum(1 for line in lines if line.rstrip().endswith("PASS")),
         "total": len(lines),
-        "summary": next((line for line in text.splitlines() if line.startswith("claimed")), ""),
+        # Prefer run.py's closing "claimed ..., verified ..." line over the header.
+        "summary": next((line for line in text.splitlines()
+                         if line.startswith("claimed ") and ", verified " in line),
+                        next((line for line in text.splitlines() if line.startswith("claimed")), "")),
+        # run.py has no T3/T4 checks, so claiming them always leaves this note;
+        # say where those tiers are verified instead of leaving it unexplained.
+        "hand_checked": bool(unverified) and set(unverified) <= {"T3", "T4"},
     }
 
 

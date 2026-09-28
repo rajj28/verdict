@@ -5,7 +5,7 @@ import re
 from datetime import datetime
 from datetime import timezone as dt_timezone
 
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TestCase
 from rest_framework.exceptions import PermissionDenied, Throttled
 from rest_framework.views import APIView
 
@@ -107,3 +107,35 @@ class SecurityHeaderTests(SimpleTestCase):
         self.assertIn("default-src 'self'", CSP)
         self.assertIn("frame-ancestors 'none'", CSP)
         self.assertNotIn("unsafe-eval", CSP)
+
+
+class HomeAcceptanceCardTests(TestCase):
+    """The landing page explains why claimed T3/T4 are not in run.py's verified list."""
+
+    REPORT = (
+        "DOGFOOD 2026 acceptance report\nportal: http://localhost:8080\n"
+        "claimed: {claimed}\nfixtures: fixtures.json\n\n"
+        "T1  gallery is public ................. PASS\n"
+        "T2  csv export works .................. PASS\n\n"
+        "claimed {claimed}, verified T1 T2\n{note}"
+    )
+
+    def _home_with(self, claimed: str, note: str):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "acceptance-report.txt").write_text(
+                self.REPORT.format(claimed=claimed, note=note), encoding="utf-8")
+            with self.settings(REPO_DIR=Path(tmp)):
+                return self.client.get("/")
+
+    def test_note_when_only_hand_judged_tiers_are_unverified(self):
+        page = self._home_with("T1 T2 T3 T4", "note: claimed but not verified: T3 T4\n")
+        self.assertContains(page, "claimed T1 T2 T3 T4, verified T1 T2")
+        self.assertContains(page, "run.py has no T3/T4 checks")
+
+    def test_no_note_for_a_clean_t2_claim_or_a_real_overclaim(self):
+        clean = self._home_with("T1 T2", "")
+        self.assertNotContains(clean, "run.py has no T3/T4 checks")
+        overclaim = self._home_with("T1 T2", "note: claimed but not verified: T2\n")
+        self.assertNotContains(overclaim, "run.py has no T3/T4 checks")

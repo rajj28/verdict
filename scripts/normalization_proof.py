@@ -614,8 +614,9 @@ def main():
         f"({', '.join(f'{s}: {mean_lams[s]:.1f}' for s in SIGMAS)}), so the "
         "rule normalizes gently when judges agree and strongly when they do "
         "not. Its best-first shares trail fixed \u03bb=2 in three of four "
-        "settings, which is within the wider sampling noise of the 20-rep "
-         "subset.")
+        "settings. These unequal simulation budgets do not establish whether "
+        "that difference exceeds Monte Carlo variability; no uncertainty "
+        "test for the difference is performed.")
     add("")
     add("### Designing for calibration")
     add("")
@@ -938,21 +939,18 @@ def main():
     add("")
     add("## Method lineage")
     add("")
-    add("The additive fit is a shrinkage-penalized least-squares estimator "
-        "of a two-way layout, i.e. the Henderson BLUP / linear mixed-model "
-        "solution in which the penalty \u03bb plays the role of the variance "
-        "ratio \u03c3\u00b2_error / \u03c3\u00b2_judge: larger \u03bb trusts "
-        "the judge sample less. Rater-severity modelling of the same form is "
-        "the workhorse of Many-Facet Rasch measurement (Linacre), and "
-        "review-score calibration of this kind was studied for peer review "
-        "by Ge, Welling and Ghahramani (2013). Linear-bias models have known "
-        "limits \u2014 Wang and Shah (2019) show where they break under "
-        "strategic or correlated miscalibration, which is why the proof "
-        "reports outliers and states the offset-only limitation instead of "
-        "claiming more. The Bradley\u2013Terry cross-check is fitted by the "
-        "Hunter (2004) MM algorithm, whose fixed point on the "
-        "virtual-opponent-augmented (hence strongly connected) graph is the "
-        "exact MAP estimate.")
+    add("The implemented additive fit is penalized least squares with "
+        "project levels and judge offsets: the Platt-Burges objective NIPS "
+        "(now NeurIPS) minimised to calibrate reviewer scores from 2006 to "
+        "2012 (score = quality + reviewer bias + noise, ridge penalty on the "
+        "biases), as described by Ge, Welling and Ghahramani, 'A Bayesian "
+        "Model for Calibrating Reviewer Scores'. A Gaussian random-offset model "
+        "gives lambda a residual-to-judge variance-ratio interpretation, "
+        "but this implementation selects lambda by cross-validation, not "
+        "variance estimation. It is not a Rasch model. The Bradley-Terry "
+        "cross-check uses numerical MM updates with a virtual opponent, "
+        "subject to convergence tolerance and an iteration cap. Neither "
+        "model establishes robustness to strategic or correlated judging.")
     add("")
     add("## Limitations")
     add("")

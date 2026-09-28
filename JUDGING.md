@@ -63,21 +63,19 @@ Fixture effect, same command: 19 of 40 projects move rank raw → normalized
 (largest: `prj_28` 24 → 28); the top changes from tied `prj_34`/`prj_11` at
 83.33 raw to `prj_34` 83.35 above `prj_11` 83.26 normalized.
 
-Method lineage: the fit is the shrinkage-penalized least-squares (Henderson
-BLUP / linear mixed-model) solution where lambda is the variance ratio
-`noise / judge variance`; rater-severity models of this form are the
-workhorse of Many-Facet Rasch measurement. The objective is the same one NIPS
-(now NeurIPS) minimised to calibrate reviewer scores from 2006 to 2012, the
-Platt–Burges model `score = quality + reviewer bias + noise` with a ridge
-penalty on the biases, as described by Ge, Welling and Ghahramani ("A Bayesian
-Model for Calibrating Reviewer Scores"), who replaced it with a Bayesian variant
-for 2013–2014; VERDICT's difference is that lambda is chosen by predeclared
-cross-validation instead of by hand. Linear-bias
-models break under strategic or correlated miscalibration (Wang and Shah,
-2019) — hence the outlier list and the stated offset-only limit, not a wider
-claim. The Bradley–Terry cross-check is fitted by the Hunter (2004) MM
-algorithm on a virtual-opponent-augmented graph, which makes it the exact MAP
-estimate on a strongly connected graph.
+The implemented fit is penalized least squares with additive judge offsets: the
+Platt–Burges objective NIPS (now NeurIPS) minimised to calibrate reviewer scores
+from 2006 to 2012 (`score = quality + reviewer bias + noise`, with a ridge
+penalty on the biases), as described by Ge, Welling and Ghahramani ("A Bayesian
+Model for Calibrating Reviewer Scores"), who moved NIPS 2013–2014 to a Bayesian
+variant. It has a Gaussian random-offset interpretation when lambda is the
+residual-to-judge variance ratio, but VERDICT chooses lambda by predeclared
+cross-validation, not by variance estimation. It is not a Rasch model.
+Linear-bias models break under strategic or correlated miscalibration (Wang and
+Shah, 2019) — hence the outlier list and the stated offset-only limit, not a
+wider claim. The Bradley–Terry cross-check uses iterative MM updates (Hunter,
+2004) with a virtual opponent; it is a regularized numerical fit subject to a
+convergence tolerance and an iteration cap, not an exact symbolic solution.
 
 ## The organizers' sigma 0.42 chain
 
@@ -93,9 +91,9 @@ prints the full chain so each step is auditable:
         (lambda = 0: 0.6145; lambda = 2: 0.1908, for context)
 ```
 
-The first drop comes from removing the single all-2s review on the
-superseded project (which also removes `jdg_01` from the included set); the
-second removes the fitted judge levels at each stated shrinkage. A smaller
+The first drop follows removal of all five reviews of the superseded project,
+including the only included review from `jdg_01` (all 2s). The second removes
+fitted judge levels at the stated shrinkage. A smaller
 spread after removal is **not** evidence the ranking improved: lambda = 2
 shrinks spread the most yet predicts unseen reviews worse than plain project
 means (LOO RMSE 19.86 vs 19.28; best is lambda = 10 at 19.17). Improvement is
@@ -113,7 +111,8 @@ That is why the portal uses offsets, not z-scores
 to one judge's criteria moves 17 of 40 raw ranks and leaves the additive
 ranking exactly unchanged). The reviews are kept by default and shown with
 this explanation; excluding `jdg_07` moves 18 projects and is an organizer
-decision with a recorded reason before publication, never automatic.
+decision with a recorded exclusion reason, never automatic. After publication,
+a correction needs a new publication version to change official results.
 
 ## Permutation test: what it does and does not show
 
@@ -274,10 +273,10 @@ for the method, definition of a tie, assumptions and fixture measurements.
 voting closed, and refuses with 409 on open windows, unranked projects
 (unless acknowledged), missing rubric, or disconnected pairwise groups. It
 stores method, params (including chosen lambda), canonical inputs, rows,
-awards and digests. `verify_publication` genuinely recomputes: engine re-run
-plus prize re-allocation, then four checks — rows match (against the live
-non-draft roster projection), awards match, stored inputs re-hash to the
-stored digest, live digest matches — verdict `identical` or `differs` with an
+awards and digests. `verify_publication` recomputes the engine and prize
+allocation from stored inputs and the stored public project snapshot. It
+checks rows, awards, the stored digest and policy metadata, independently
+of whether current inputs still match that digest — verdict `identical` or `differs` with an
 explicit reason. Malformed stored inputs fail explicitly instead of raising
 (`tests/test_adversarial_t2.py`). Verify from a shell with
 `python manage.py verify_publication <pub_id>` or
@@ -296,6 +295,6 @@ rows in position order, skip on 2-dp ties, and record unawarded reasons.
 - Derived Bradley–Terry agreement (fixture ρ = 0.8509, τ = 0.6684, 15
   projects differ by >5) is a cross-check on the same reviews, not
   independent evidence the offset model is right.
-- The verifier depends on the live roster and checks a limited row
-  projection; rewriting data and digest together (DB admin) is outside what
-  the digest detects.
+- Historical replay uses the stored roster; the separate unchanged check
+  reads live data. Rewriting data and digest together (DB admin) is outside
+  what the digest detects. Migration-backfilled snapshots are labelled as such.

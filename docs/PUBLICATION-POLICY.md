@@ -9,10 +9,14 @@ This is the contract every guard, page, export, verifier and test in VERDICT fol
 
 ## 2. Corrections change inputs, never history
 The only ways to change a result after judging closes are explicit, reasoned and audited:
-- exclude or re-include a review (reason required);
+- exclude a review with a reason, or re-include it (audited; no new reason field);
 - disqualify a project (reason required).
 
-Neither action changes anything the public can see. Public results change only when an organizer publishes a **new publication version** with a mandatory note. The new version supersedes the previous one; the previous version is never edited or deleted.
+These actions leave the official published results unchanged. Disqualification
+does change the live project's gallery eligibility. Official public results change
+only when an organizer publishes a **new publication version** with a mandatory
+note. The new version supersedes the previous one; the previous version is never
+edited or deleted by the correction workflow.
 
 ## 3. Publications are immutable, versioned snapshots
 Each publication stores, at the moment it is created:
@@ -25,6 +29,13 @@ The public results page always shows the **official version** (the latest non-su
 ## 4. What "Verify" proves (two separate answers)
 - **Reproducible:** recomputing from the publication's stored inputs with the current engine yields exactly the stored rows and awards. This uses only the stored snapshot and does not read the live project roster.
 - **Unchanged since publication:** the live database, projected the same way, still hashes to the stored digest. A difference is reported field by field (for example "review rev_x excluded after publication", "project prj_y disqualified after publication") and means a correction is pending a new version; it is not tampering evidence by itself.
+
+This is reproducibility and consistency evidence, not protection from a database
+administrator who rewrites both data and digests. Historical snapshots added by
+migration are marked as best-effort backfills. Reproduce the policy checks with
+`.venv/Scripts/python.exe manage.py test tests.test_publication_policy` on the
+isolated PostgreSQL database; verify a real record with
+`.venv/Scripts/python.exe manage.py verify_publication <pub_id>`.
 
 ## 5. Awards and certificates
 - Awards belong to a publication version. Winner certificates name that version.

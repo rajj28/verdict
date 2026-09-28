@@ -3,6 +3,7 @@
 import json
 import math
 import os
+import random
 import sys
 import time
 import unittest
@@ -1017,6 +1018,22 @@ class RankUncertaintyTests(unittest.TestCase):
             _nearest_rank_interval(list(range(200)), 0.9), (10, 189)
         )
         self.assertEqual(_nearest_rank_interval([3, 1, 2], 0.9), (1, 3))
+
+    def test_fixture_uncertainty_is_exactly_independent_of_review_order(self):
+        path = os.path.join(os.path.dirname(__file__), "..", "fixtures.json")
+        with open(path, encoding="utf-8") as handle:
+            fixture = json.load(handle)
+        reviews = [
+            ReviewInput(f"{row['judge']}__{row['project']}", row["judge"],
+                        row["project"], dict(row["criteria"]))
+            for row in fixture["scores"] if row["project"] != "prj_07"
+        ]
+        scored_reviews = score_reviews(reviews, CRIT_1_5)
+        original = rank_uncertainty(scored_reviews, 100.0)
+        self.assertEqual(original, rank_uncertainty(list(reversed(scored_reviews)), 100.0))
+        shuffled = list(scored_reviews)
+        random.Random(142).shuffle(shuffled)
+        self.assertEqual(original, rank_uncertainty(shuffled, 100.0))
 
     def test_fixture_uncertainty(self):
         # Organizers' fixture, scored like the proof: prj_07 excluded,

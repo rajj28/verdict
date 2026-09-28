@@ -13,6 +13,7 @@ scripts at the bottom of the body.
     <meta name="description" content="{% block description %}VERDICT is a self-hostable hackathon portal where deadlines, judge isolation and score normalization are enforced in the backend.{% endblock %}">
     <link rel="stylesheet" href="{% static 'vendor/bootstrap/bootstrap.min.css' %}">
     <link rel="stylesheet" href="{% static 'css/app.css' %}">
+    {% if DEMO_MODE %}<link rel="stylesheet" href="{% static 'css/tour.css' %}">{% endif %}
     {% block extra_css %}{% endblock %}
     {# Runs before the body paints so the correct theme is set with no flash. #}
     <script src="{% static 'js/theme.js' %}"></script>
@@ -138,6 +139,10 @@ scripts at the bottom of the body.
       {% block content %}{% endblock %}
     </main>
 
+      {% if tour_active %}
+        {% include "core/tour_panel.html" %}
+      {% endif %}
+
     <footer class="footer-verdict">
       <div class="container d-flex flex-wrap gap-3 justify-content-between align-items-center">
         <span class="brand-mark" style="font-size:.8rem"><span class="brand-dot" aria-hidden="true"></span>{{ PORTAL_NAME }}</span>
@@ -152,5 +157,6 @@ scripts at the bottom of the body.
     <script src="{% static 'js/time.js' %}"></script>
     <script src="{% static 'js/api-forms.js' %}"></script>
     {% block extra_js %}{% endblock %}
+    {% if DEMO_MODE %}<script src="{% static 'js/tour.js' %}"></script>{% endif %}
   </body>
 </html>

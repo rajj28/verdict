@@ -22,6 +22,7 @@ same rows the gallery shows.
 {% endblock %}
 
 {% block content %}
+  <div data-tour-gallery>
   <form class="card-verdict p-3 mb-4" method="get" action="{% if event %}/events/{{ event.slug }}/projects{% else %}/projects{% endif %}" role="search">
     <div class="row g-3 align-items-end">
       <div class="col-12 col-lg-4">
@@ -134,4 +135,5 @@ same rows the gallery shows.
          href="{% if event %}/events/{{ event.slug }}/projects{% else %}/projects{% endif %}">Show every project</a>
     </div>
   {% endif %}
+  </div>
 {% endblock %}

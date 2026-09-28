@@ -1,0 +1,21 @@
+<aside class="tour-panel" data-tour-panel aria-labelledby="tour-title">
+  <div class="tour-panel-top">
+    <span class="tour-kicker">Private tour</span>
+    <span data-tour-count aria-live="polite"></span>
+  </div>
+  <h2 id="tour-title" data-tour-title></h2>
+  <p data-tour-text aria-live="polite"></p>
+  <p class="tour-hint" data-tour-hint></p>
+  <div class="tour-actions">
+    <button type="button" class="btn btn-sm btn-outline-secondary" data-tour-back>Back</button>
+    <button type="button" class="btn btn-sm btn-primary" data-tour-next>Next</button>
+  </div>
+  <div class="tour-switch" data-tour-switch hidden>
+    <button type="button" class="btn btn-sm btn-outline-primary" data-tour-role></button>
+  </div>
+  <div class="tour-links">
+    <button type="button" class="btn btn-link btn-sm" data-tour-exit>Exit</button>
+    <button type="button" class="btn btn-link btn-sm" data-tour-reset>Reset sandbox</button>
+  </div>
+  {{ tour_steps|json_script:"tour-steps" }}
+</aside>

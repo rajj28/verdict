@@ -8,6 +8,7 @@ from django.conf import settings
 
 from accounts.policy import visible_roles
 from events.models import Role
+from core.tour import context as tour_context
 
 
 def portal(request):
@@ -19,6 +20,7 @@ def portal(request):
         "is_judge_anywhere": False,
         "show_admin_panel": False,
     }
+    context.update(tour_context(request))
     user = getattr(request, "user", None)
     if user is None or not user.is_authenticated:
         return context

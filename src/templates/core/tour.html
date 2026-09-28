@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Five-minute tour · VERDICT{% endblock %}
+{% block main_class %}container py-5{% endblock %}
+{% block content %}
+<section class="card-verdict p-4 p-md-5" data-tour-welcome>
+  <span class="tour-kicker">Private sandbox</span>
+  <h1 class="mt-2">A real event rehearsal, without the risk</h1>
+  <p class="lead">This synthetic event is yours alone. Use the panel to switch roles and walk through deadlines, judge isolation, normalization, publication and verification.</p>
+  <p class="mb-0 text-muted">Sandbox: <code>{{ tour_event.slug }}</code></p>
+</section>
+{% endblock %}

@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Calibration rehearsal · {{ event.name }}{% endblock %}
+{% block heading %}Calibration rehearsal{% endblock %}
+{% block lead %}The sandbox keeps the synthetic calibration data while isolating every action to this tour.{% endblock %}
+{% block content %}
+<section class="card-verdict p-4" data-tour-calibration>
+  <h2 class="h4">Planted judge habits</h2>
+  <p>The original showcase generator planted harsh, generous and neutral scoring habits. This private copy keeps those reviews, so the organizer can compare raw means with the normalized model without touching the shared showcase.</p>
+  <div class="alert alert-info mb-0">Exclude a review or finish the tour to see how the real result changes. Nothing here is public until you publish this sandbox.</div>
+</section>
+{% endblock %}

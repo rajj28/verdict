@@ -153,6 +153,7 @@ word. Judge names appear here because this page is organizer-only.
                 <th scope="col" class="num">Live comparison rank</th>
               {% endif %}
               <th scope="col">Flags</th>
+              <th scope="col"><span class="visually-hidden">Actions</span></th>
             </tr>
           </thead>
           <tbody>
@@ -177,9 +178,19 @@ word. Judge names appear here because this page is organizer-only.
                   <span class="status-badge {{ row.status_badge }}">{{ row.status_label }}</span>
                   {% if row.status_reason %}<div class="form-hint">{{ row.status_reason }}</div>{% endif %}
                 </td>
+                <td>
+                  {% if row.status == "ranked" %}
+                    <button class="btn btn-sm btn-outline-danger" type="button"
+                            data-consequence-action="disqualify" data-consequence-target="{{ row.project_id }}"
+                            data-execute-method="POST"
+                            data-execute-url="/api/v1/events/{{ event.slug }}/projects/{{ row.project_id }}/disqualify">
+                      Disqualify
+                    </button>
+                  {% endif %}
+                </td>
               </tr>
             {% empty %}
-              <tr><td colspan="{% if live_pairwise.enabled %}11{% else %}9{% endif %}" class="form-hint">No projects to rank yet.</td></tr>
+              <tr><td colspan="{% if live_pairwise.enabled %}12{% else %}10{% endif %}" class="form-hint">No projects to rank yet.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -293,6 +304,7 @@ word. Judge names appear here because this page is organizer-only.
                 <th scope="col">Project</th>
                 <th scope="col" class="num">Score</th>
                 <th scope="col" class="num">Residual</th>
+                <th scope="col"><span class="visually-hidden">Actions</span></th>
               </tr>
             </thead>
             <tbody>
@@ -303,6 +315,14 @@ word. Judge names appear here because this page is organizer-only.
                   <td>{{ row.project_id }}</td>
                   <td class="num">{{ row.score|floatformat:2 }}</td>
                   <td class="num">{{ row.residual|floatformat:2 }}</td>
+                  <td>
+                    <button class="btn btn-sm btn-outline-secondary" type="button"
+                            data-consequence-action="exclude_review" data-consequence-target="{{ row.review_id }}"
+                            data-execute-method="POST"
+                            data-execute-url="/api/v1/events/{{ event.slug }}/reviews/{{ row.review_id }}/exclusion">
+                      Exclude
+                    </button>
+                  </td>
                 </tr>
               {% endfor %}
             </tbody>
@@ -418,10 +438,9 @@ word. Judge names appear here because this page is organizer-only.
                   <td>{{ row.reason }}</td>
                   <td class="text-end">
                     <button class="btn btn-sm btn-outline-secondary" type="button"
-                            data-api-method="DELETE"
-                            data-api-url="/api/v1/events/{{ event.slug }}/reviews/{{ row.review_id }}/exclusion"
-                            data-success="reload"
-                            data-confirm="Put this review back into the results? The ranking may change.">
+                            data-consequence-action="include_review" data-consequence-target="{{ row.review_id }}"
+                            data-execute-method="DELETE"
+                            data-execute-url="/api/v1/events/{{ event.slug }}/reviews/{{ row.review_id }}/exclusion">
                       Include again
                     </button>
                   </td>
@@ -479,8 +498,7 @@ word. Judge names appear here because this page is organizer-only.
         </div>
       {% endif %}
 
-      <form data-api-method="POST" data-api-url="{{ publish_api }}" data-success="reload"
-            class="card-verdict p-3" data-publish-form>
+      <form class="card-verdict p-3" data-publish-form data-publish-url="{{ publish_api }}">
         <div data-form-errors class="mb-3"></div>
         <div class="mb-3">
           <label class="form-label" for="id_publish_note">
@@ -519,6 +537,35 @@ word. Judge names appear here because this page is organizer-only.
 
         <button class="btn btn-primary" type="submit" data-publish-submit>Publish results</button>
       </form>
+
+      <div class="modal fade" id="consequence-dialog" tabindex="-1" role="dialog"
+           aria-labelledby="consequence-title" aria-hidden="true"
+           data-consequences-url="{{ consequences_api }}">
+        <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h2 class="modal-title fs-5" id="consequence-title">Review consequences</h2>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <p data-consequence-loading role="status" aria-live="polite">Loading consequences…</p>
+              <p data-consequence-error class="text-danger" role="alert" aria-live="assertive"></p>
+              <p data-consequence-sentence aria-live="polite"></p>
+              <div data-consequence-rank-container></div>
+              <div data-consequence-award-container></div>
+              <div class="mt-3" data-consequence-reason-group hidden>
+                <label class="form-label" for="consequence-reason">Reason (required)</label>
+                <textarea class="form-control" id="consequence-reason" rows="2"
+                          maxlength="300" required></textarea>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+              <button type="button" class="btn btn-primary" data-consequence-confirm disabled>Confirm</button>
+            </div>
+          </div>
+        </div>
+      </div>
 
       <h3 class="h5 mt-4">Publication history</h3>
       {% if publications %}
@@ -604,4 +651,5 @@ word. Judge names appear here because this page is organizer-only.
 
 {% block extra_js %}
 <script src="{% static 'js/results.js' %}"></script>
+<script src="{% static 'js/consequences.js' %}"></script>
 {% endblock %}

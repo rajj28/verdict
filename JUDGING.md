@@ -236,6 +236,21 @@ not-yet-scored pair, not an established assignment) moves Still Beacon
 78.95 → 86.13 and the lead. The scenario replays through the real engine; it
 does not show any real judge owes that review.
 
+## Consequence preview
+
+Before publishing, disqualifying a project, or excluding/re-including a review,
+organizers see the changed ranks, awards, and winner in a read-only preview.
+Publish compares the latest official rows and awards with the current preview.
+Disqualification and review actions compare the current preview with the
+hypothetical result after that one action.
+The preview uses the same result engine, eligible-project set, review inputs,
+and award allocator as normal preview and publication; it is exact, not an
+estimate.
+Every response includes the live input digest used as its basis.
+When submitted with the write, the digest is checked again while the event is
+locked; a mismatch returns `stale_preview` without changing any data.
+The organizer must review refreshed consequences and confirm again.
+
 ## Publication and verification
 
 `publish` (`src/results/services.py`) locks the event, requires judging and

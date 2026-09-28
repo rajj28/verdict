@@ -146,6 +146,7 @@ class ProjectPatchSerializer(ProjectWriteSerializer):
 
 class DisqualifySerializer(serializers.Serializer):
     reason = serializers.CharField(allow_blank=True, max_length=2000)
+    expected_digest = serializers.CharField(required=False, allow_blank=False, max_length=64)
 
 
 class AnswerSerializer(serializers.Serializer):
@@ -495,7 +496,10 @@ class ProjectDisqualify(GenericAPIView):
         project = project_or_404(slug, public_id, request.user)
         serializer = DisqualifySerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        updated = services.disqualify_project(request.user, project, serializer.validated_data["reason"])
+        updated = services.disqualify_project(
+            request.user, project, serializer.validated_data["reason"],
+            expected_digest=serializer.validated_data.get("expected_digest"),
+        )
         return Response(ProjectDetailSerializer(updated, context={"viewer": request.user}).data)
 
 

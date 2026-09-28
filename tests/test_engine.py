@@ -4,6 +4,7 @@ import json
 import math
 import os
 import sys
+import time
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
@@ -34,12 +35,14 @@ from results.engine import (  # noqa: E402
     judge_table,
     kendall_tau,
     leave_one_out,
+    _nearest_rank_interval,
     offset_variance,
     outliers,
     permutation_test,
     pooled_residual_sd,
     rank,
     rank_agreement,
+    rank_uncertainty,
     raw_scores,
     review_budget_curve,
     review_score,
@@ -910,6 +913,160 @@ class LivePairwiseEngineTests(unittest.TestCase):
         self.assertEqual(result.rank["A"], "1")
         self.assertEqual(result.rank_live["B"], "1")
         self.assertEqual(result.robustness.winners, ("A",))
+
+
+class RankUncertaintyTests(unittest.TestCase):
+    def _noisy_pair_design(self):
+        # X and Y get identical reviews; Z sits far below with jitter so
+        # the fit is non-degenerate (sigma > 0) while X/Y stay symmetric.
+        reviews = []
+        for ji, j in enumerate(("J1", "J2", "J3", "J4")):
+            reviews.append(scored(j, "X", 50.0))
+            reviews.append(scored(j, "Y", 50.0))
+            reviews.append(scored(j, "Z", (10.0, 12.0, 8.0, 10.0)[ji]))
+        return score_reviews(reviews, CRIT_0_100)
+
+    def test_determinism_and_seed_sensitivity(self):
+        s = self._noisy_pair_design()
+        first = rank_uncertainty(s, 2.0)
+        self.assertEqual(first, rank_uncertainty(s, 2.0))
+        # Draws run in review_id order, so input order must not matter.
+        self.assertEqual(first, rank_uncertainty(list(reversed(s)), 2.0))
+
+        def shares(u):
+            return tuple(
+                (
+                    p,
+                    u.projects[p].p_first,
+                    u.projects[p].p_top,
+                    u.projects[p].p_above_next,
+                )
+                for p in sorted(u.projects)
+            )
+
+        base = shares(first)
+        self.assertTrue(
+            any(
+                shares(rank_uncertainty(s, 2.0, seed=sd)) != base
+                for sd in (1, 2, 3)
+            )
+        )
+
+    def test_well_separated_projects_are_firm(self):
+        # True levels 2/5/8 with tiny noise: gaps dwarf the residual SD.
+        levels = {"P_LO": 2.0, "P_MID": 5.0, "P_HI": 8.0}
+        reviews = []
+        for ji, j in enumerate(("J1", "J2", "J3", "J4")):
+            for pi, p in enumerate(sorted(levels)):
+                reviews.append(
+                    scored(j, p, levels[p] + ((ji + pi) % 2 * 0.1 - 0.05))
+                )
+        u = rank_uncertainty(score_reviews(reviews, CRIT_0_100), 2.0)
+        self.assertTrue(u.available)
+        self.assertEqual(u.order, ("P_HI", "P_MID", "P_LO"))
+        for p, pos in (("P_HI", 1), ("P_MID", 2), ("P_LO", 3)):
+            self.assertEqual(
+                (u.projects[p].rank_low, u.projects[p].rank_high), (pos, pos)
+            )
+        self.assertEqual(u.projects["P_HI"].p_above_next, 1.0)
+        self.assertEqual(u.projects["P_MID"].p_above_next, 1.0)
+        self.assertIsNone(u.projects["P_LO"].p_above_next)
+        self.assertEqual(u.tied_pairs, ())
+        self.assertIn("clear", u.summary)
+
+    def test_identical_pair_is_tied(self):
+        u = rank_uncertainty(self._noisy_pair_design(), 2.0)
+        self.assertEqual(u.order, ("X", "Y", "Z"))
+        held = u.projects["X"].p_above_next
+        self.assertGreaterEqual(held, 0.3)
+        self.assertLessEqual(held, 0.7)
+        self.assertIn(("X", "Y"), u.tied_pairs)
+
+    def test_degenerate_sigma_zero(self):
+        # Constant scores per project fit exactly: no residual noise.
+        reviews = []
+        for j in ("J1", "J2"):
+            for p, v in (("A", 60.0), ("B", 60.0), ("C", 40.0)):
+                reviews.append(scored(j, p, v))
+        u = rank_uncertainty(score_reviews(reviews, CRIT_0_100), 2.0)
+        self.assertEqual(u.sigma, 0.0)
+        self.assertEqual(u.order, ("A", "B", "C"))
+        for p in ("A", "B", "C"):
+            proj = u.projects[p]
+            self.assertEqual(proj.rank_low, proj.rank_high)
+            self.assertEqual(proj.score_low, proj.score_high)
+        self.assertEqual(u.projects["A"].p_above_next, 0.5)
+        self.assertEqual(u.projects["B"].p_above_next, 1.0)
+
+    def test_too_few_reviews_unavailable(self):
+        s = score_reviews(
+            [scored("J1", "A", 50.0), scored("J2", "B", 60.0)], CRIT_0_100
+        )
+        u = rank_uncertainty(s, 2.0)
+        self.assertFalse(u.available)
+        self.assertTrue(u.reason)
+        single = score_reviews(
+            [scored("J1", "A", 50.0), scored("J2", "A", 60.0)], CRIT_0_100
+        )
+        solo = rank_uncertainty(single, 2.0)
+        self.assertFalse(solo.available)
+        self.assertTrue(solo.reason)
+
+    def test_nearest_rank_interval_indices(self):
+        self.assertEqual(
+            _nearest_rank_interval(list(range(200)), 0.9), (10, 189)
+        )
+        self.assertEqual(_nearest_rank_interval([3, 1, 2], 0.9), (1, 3))
+
+    def test_fixture_uncertainty(self):
+        # Organizers' fixture, scored like the proof: prj_07 excluded,
+        # equal-weight 1-5 rubric, official lambda 100.
+        path = os.path.join(os.path.dirname(__file__), "..", "fixtures.json")
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        reviews = [
+            ReviewInput(
+                f"{s['judge']}__{s['project']}",
+                s["judge"],
+                s["project"],
+                dict(s["criteria"]),
+            )
+            for s in data["scores"]
+            if s["project"] != "prj_07"
+        ]
+        s = score_reviews(reviews, CRIT_1_5)
+        start = time.perf_counter()
+        u = rank_uncertainty(s, 100.0)
+        elapsed = time.perf_counter() - start
+        self.assertTrue(u.available)
+        # Groups partition the projects ...
+        flat = [p for g in u.groups for p in g]
+        self.assertEqual(sorted(flat), sorted(u.order))
+        self.assertEqual(len(flat), len(u.order))
+        # ... into maximal runs joined by tied pairs.
+        rebuilt = [[u.order[0]]]
+        tied = set(u.tied_pairs)
+        for i in range(len(u.order) - 1):
+            if (u.order[i], u.order[i + 1]) in tied:
+                rebuilt[-1].append(u.order[i + 1])
+            else:
+                rebuilt.append([u.order[i + 1]])
+        self.assertEqual([tuple(g) for g in rebuilt], list(u.groups))
+        inside = 0
+        for i, p in enumerate(u.order):
+            proj = u.projects[p]
+            for share in (proj.p_first, proj.p_top):
+                self.assertGreaterEqual(share, 0.0)
+                self.assertLessEqual(share, 1.0)
+            if proj.p_above_next is not None:
+                self.assertGreaterEqual(proj.p_above_next, 0.0)
+                self.assertLessEqual(proj.p_above_next, 1.0)
+            self.assertLessEqual(proj.rank_low, proj.rank_high)
+            if proj.rank_low <= i + 1 <= proj.rank_high:
+                inside += 1
+        self.assertIsNone(u.projects[u.order[-1]].p_above_next)
+        self.assertGreaterEqual(inside / len(u.order), 0.9)
+        self.assertLess(elapsed, 10.0)
 
 
 if __name__ == "__main__":

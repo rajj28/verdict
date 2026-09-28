@@ -433,9 +433,19 @@ def withdraw_project(actor, project: Project) -> Project:
 
 
 @transaction.atomic
-def disqualify_project(actor, project: Project, reason: str) -> Project:
+def disqualify_project(
+    actor, project: Project, reason: str, expected_digest: str | None = None,
+) -> Project:
     """An organizer stands a project down, any time, with a recorded reason."""
     _require_authenticated(actor)
+    if expected_digest is not None:
+        locked_event = Event.objects.select_for_update().get(pk=project.event_id)
+        if not is_organizer(actor, locked_event):
+            raise ApiError("forbidden", "Only organizers of this event can disqualify a project.",
+                           status_code=403)
+        from results.services import check_expected_digest
+
+        check_expected_digest(locked_event, expected_digest)
     locked = _lock_project(project)
     if not is_organizer(actor, locked.event):
         raise ApiError("forbidden", "Only organizers of this event can disqualify a project.",

@@ -13,6 +13,7 @@ from rest_framework.views import APIView
 from core.errors import ApiError
 from events.policy import get_event_by_slug, is_organizer
 from projects.policy import visible_project
+from results import consequences as consequence_services
 from results import services
 from results.policy import (
     can_see_feedback,
@@ -140,12 +141,47 @@ class PublicResultsSerializer(serializers.Serializer):
 
 
 class PublishSerializer(serializers.Serializer):
-    note = serializers.CharField(required=False, allow_blank=True, max_length=500)
+    note = serializers.CharField(required=False, allow_blank=True, max_length=300)
     acknowledge_unranked = serializers.BooleanField(
         required=False,
         help_text="Required when some projects are unranked, so the organizer is recorded "
                   "as having seen that before publishing.",
     )
+    expected_digest = serializers.CharField(required=False, allow_blank=False, max_length=64)
+
+
+class ConsequenceRequestSerializer(serializers.Serializer):
+    action = serializers.ChoiceField(
+        choices=("publish", "disqualify", "exclude_review", "include_review")
+    )
+    target = serializers.CharField(required=False, allow_blank=False, allow_null=True)
+
+
+class RankChangeSerializer(serializers.Serializer):
+    project = serializers.CharField()
+    title = serializers.CharField()
+    before = serializers.CharField()
+    after = serializers.CharField()
+
+
+class AwardChangeSerializer(serializers.Serializer):
+    prize = serializers.CharField()
+    prize_name = serializers.CharField()
+    before = serializers.ListField(child=serializers.DictField())
+    after = serializers.ListField(child=serializers.DictField())
+
+
+class ConsequenceResponseSerializer(serializers.Serializer):
+    action = serializers.CharField()
+    target = serializers.CharField(allow_null=True)
+    basis_digest = serializers.CharField()
+    rank_changes = RankChangeSerializer(many=True)
+    award_changes = AwardChangeSerializer(many=True)
+    winner_before = serializers.DictField(allow_null=True)
+    winner_after = serializers.DictField(allow_null=True)
+    n_rank_changes = serializers.IntegerField()
+    n_award_changes = serializers.IntegerField()
+    sentence = serializers.CharField()
 
 
 class PublicationCreatedSerializer(serializers.Serializer):
@@ -285,6 +321,33 @@ class ResultsPreviewView(APIView):
         return Response(data)
 
 
+class ResultsConsequencesView(APIView):
+    """``POST /events/{slug}/results/consequences`` — organizer-only preview."""
+
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        operation_id="results_consequences",
+        summary="Preview the exact consequences of a results action (organizer).",
+        description="Read-only comparison against the current preview or latest official "
+                    "publication. No audit or result data is written.",
+        request=ConsequenceRequestSerializer,
+        responses={200: ConsequenceResponseSerializer, **error_responses(400, 401, 403, 404, 409)},
+        tags=TAGS,
+    )
+    def post(self, request: Request, slug: str) -> Response:
+        serializer = ConsequenceRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        event = _get_event(slug)
+        require_organizer(request.user, event)
+        data = consequence_services.consequences(
+            event,
+            serializer.validated_data["action"],
+            serializer.validated_data.get("target"),
+        )
+        return Response(data)
+
+
 class ResultsPublishView(APIView):
     """``POST /events/{slug}/results/publish`` — organizer only."""
 
@@ -309,10 +372,12 @@ class ResultsPublishView(APIView):
     def post(self, request: Request, slug: str) -> Response:
         event = _get_event(slug)
         require_organizer(request.user, event)
-        note = request.data.get("note", "")
-        acknowledge_unranked = bool(request.data.get("acknowledge_unranked", False))
+        serializer = PublishSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
         pub = services.publish(
-            request.user, event, note=note, acknowledge_unranked=acknowledge_unranked
+            request.user, event, note=serializer.validated_data.get("note", ""),
+            acknowledge_unranked=serializer.validated_data.get("acknowledge_unranked", False),
+            expected_digest=serializer.validated_data.get("expected_digest"),
         )
         return Response(
             {

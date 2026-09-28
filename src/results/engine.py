@@ -1778,3 +1778,269 @@ def review_budget_curve(
         rows=tuple(rows),
         residual_dispersion=residual_dispersion,
     )
+
+
+# ---------------------------------------------------------------------------
+# Rank uncertainty (packet F2A-UNCERTAINTY-ENGINE).
+# ---------------------------------------------------------------------------
+
+#: Fixed assumption text carried on every :class:`Uncertainty`.
+UNCERTAINTY_ASSUMPTION = (
+    "Parametric re-runs of the additive model: each review is project level "
+    "+ judge offset + independent normal noise, with the noise SD estimated "
+    "from the residuals (SSE / (reviews - projects)). Rubric bounds, rounding "
+    "and correlated judging are not modelled, so intervals are approximate "
+    "and describe the model, not the truth."
+)
+
+
+@dataclass(frozen=True)
+class ProjectUncertainty:
+    """Per-project rank uncertainty from the parametric re-runs."""
+
+    project_id: str
+    rank_low: int
+    rank_high: int
+    score_low: float
+    score_high: float
+    p_first: float  # share of replicates ranked 1
+    p_top: float  # share of replicates ranked <= top_k
+    p_above_next: float | None  # share beating the next official project
+
+
+@dataclass(frozen=True)
+class Uncertainty:
+    """Per-project rank uncertainty for one fitted ranking."""
+
+    available: bool
+    replicates: int
+    seed: int
+    level: float
+    top_k: int
+    tie_threshold: float
+    sigma: float
+    df: int
+    projects: dict[str, ProjectUncertainty]
+    order: tuple[str, ...]  # official best-first order
+    tied_pairs: tuple[tuple[str, str], ...]  # adjacent pairs below tie_threshold
+    groups: tuple[tuple[str, ...], ...]  # maximal tied runs (singletons allowed)
+    summary: str
+    assumption: str
+    reason: str = ""
+
+
+def _nearest_rank_interval(
+    values: Sequence[float], level: float
+) -> tuple[float, float]:
+    """Nearest-rank central interval of ``values`` at ``level``.
+
+    Sort ascending and take index ``floor(((1 - level) / 2) * B)`` and index
+    ``ceil(((1 + level) / 2) * B) - 1`` (B=200, level=0.9 -> indices 10 and
+    189). No interpolation: the bounds are observed replicate values.
+    """
+    xs = sorted(values)
+    n = len(xs)
+    if n == 0:
+        raise ValueError("_nearest_rank_interval needs at least one value")
+    if not 0.0 <= level <= 1.0:
+        raise ValueError("level must be between 0 and 1")
+    lo = math.floor(((1.0 - level) / 2.0) * n + 1e-9)
+    hi = math.ceil(((1.0 + level) / 2.0) * n - 1e-9) - 1
+    lo = min(max(lo, 0), n - 1)
+    hi = min(max(hi, 0), n - 1)
+    return (xs[lo], xs[hi])
+
+
+def rank_uncertainty(
+    scored: Sequence[ScoredReview],
+    lam: float,
+    *,
+    replicates: int = 200,
+    seed: int = 20260929,
+    level: float = 0.90,
+    top_k: int = 3,
+    tie_threshold: float = 0.95,
+) -> Uncertainty:
+    """Parametric re-runs of the additive fit, per project.
+
+    Reuses the official ``lam`` (never re-selected). Fits once, estimates
+    the noise SD as ``sqrt(SSE / (n - P))`` from the residuals, then draws
+    ``replicates`` synthetic review sets (``fitted value + N(0, sigma)`` in
+    ``review_id`` order from ``random.Random(seed)``) and refits each one
+    warm-started from the official fit. Replicate ranks are competition
+    ranks (1 + the number of strictly greater ``mu``).
+
+    An adjacent official-order pair counts as ("statistically") tied when
+    its order holds in fewer than 95% of re-runs: ``tie_threshold`` 0.95 is
+    the one-sided form of "the two-sided 90% interval of the difference
+    includes zero". ``groups`` are maximal runs of consecutive projects
+    joined by tied pairs. Nothing is rounded except the official order key
+    ``(-round(mu, 2), id)`` shared with :func:`robustness`.
+    """
+    if lam < 0:
+        raise ValueError("lam must be non-negative")
+    if replicates < 1:
+        raise ValueError("replicates must be at least 1")
+    if not 0.0 < level < 1.0:
+        raise ValueError("level must be strictly between 0 and 1")
+    if top_k < 1:
+        raise ValueError("top_k must be at least 1")
+    if not 0.0 <= tie_threshold <= 1.0:
+        raise ValueError("tie_threshold must be between 0 and 1")
+    data = list(scored)
+    proj_ids = sorted({r.project_id for r in data})
+    n = len(data)
+    n_projects = len(proj_ids)
+    if n_projects < 2:
+        reason = (
+            "Too few projects to estimate rank uncertainty: "
+            f"{n_projects} project(s)."
+        )
+        return Uncertainty(
+            available=False,
+            replicates=replicates,
+            seed=seed,
+            level=level,
+            top_k=top_k,
+            tie_threshold=tie_threshold,
+            sigma=0.0,
+            df=n - n_projects,
+            projects={},
+            order=(),
+            tied_pairs=(),
+            groups=(),
+            summary=reason,
+            assumption=UNCERTAINTY_ASSUMPTION,
+            reason=reason,
+        )
+    if n <= n_projects:
+        reason = (
+            "Too few reviews to estimate noise: "
+            f"{n} reviews for {n_projects} projects."
+        )
+        return Uncertainty(
+            available=False,
+            replicates=replicates,
+            seed=seed,
+            level=level,
+            top_k=top_k,
+            tie_threshold=tie_threshold,
+            sigma=0.0,
+            df=n - n_projects,
+            projects={},
+            order=(),
+            tied_pairs=(),
+            groups=(),
+            summary=reason,
+            assumption=UNCERTAINTY_ASSUMPTION,
+            reason=reason,
+        )
+    fit = fit_additive(data, lam)
+    ordered = sorted(data, key=lambda r: r.review_id)
+    fitted = [fit.mu[r.project_id] + fit.offset[r.judge_id] for r in ordered]
+    sse = sum((r.score - f) ** 2 for r, f in zip(ordered, fitted))
+    df = n - n_projects
+    sigma = math.sqrt(sse / df)
+    rng = random.Random(seed)
+    mus: dict[str, list[float]] = {p: [] for p in proj_ids}
+    for _ in range(replicates):
+        copies = [
+            ScoredReview(
+                r.review_id,
+                r.judge_id,
+                r.project_id,
+                f + rng.gauss(0.0, sigma),
+            )
+            for r, f in zip(ordered, fitted)
+        ]
+        refit = fit_additive(copies, lam, init=fit)
+        for p in proj_ids:
+            mus[p].append(refit.mu[p])
+    ranks: dict[str, list[int]] = {p: [] for p in proj_ids}
+    for b in range(replicates):
+        for p in proj_ids:
+            mu_p = mus[p][b]
+            ranks[p].append(
+                1 + sum(1 for q in proj_ids if mus[q][b] > mu_p)
+            )
+    order = tuple(sorted(proj_ids, key=lambda p: (-round(fit.mu[p], 2), p)))
+    info: dict[str, ProjectUncertainty] = {}
+    for i, p in enumerate(order):
+        rank_low, rank_high = _nearest_rank_interval(ranks[p], level)
+        score_low, score_high = _nearest_rank_interval(mus[p], level)
+        p_first = sum(1 for v in ranks[p] if v == 1) / replicates
+        p_top = sum(1 for v in ranks[p] if v <= top_k) / replicates
+        if i + 1 < len(order):
+            q = order[i + 1]
+            greater = sum(1 for a, b in zip(mus[p], mus[q]) if a > b)
+            equal = sum(1 for a, b in zip(mus[p], mus[q]) if a == b)
+            p_above: float | None = (greater + 0.5 * equal) / replicates
+        else:
+            p_above = None
+        info[p] = ProjectUncertainty(
+            project_id=p,
+            rank_low=rank_low,
+            rank_high=rank_high,
+            score_low=score_low,
+            score_high=score_high,
+            p_first=p_first,
+            p_top=p_top,
+            p_above_next=p_above,
+        )
+    tied_pairs = tuple(
+        (order[i], order[i + 1])
+        for i in range(len(order) - 1)
+        if (info[order[i]].p_above_next or 0.0) < tie_threshold
+    )
+    tied_set = set(tied_pairs)
+    groups: list[tuple[str, ...]] = []
+    current = [order[0]]
+    for i in range(len(order) - 1):
+        if (order[i], order[i + 1]) in tied_set:
+            current.append(order[i + 1])
+        else:
+            groups.append(tuple(current))
+            current = [order[i + 1]]
+    groups.append(tuple(current))
+    if len(order) < 2:
+        summary = (
+            f"Only one project ({order[0]}): no pairwise order to assess "
+            f"in {replicates} re-runs."
+        )
+    else:
+        first, second = order[0], order[1]
+        held = info[first].p_above_next
+        held = 0.0 if held is None else held
+        pct = f"{100.0 * held:.0f}%"
+        if round(fit.mu[first], 2) == round(fit.mu[second], 2):
+            summary = (
+                f"1st place is tied at 2 decimals: {first} and {second} "
+                f"share first; the order held in {pct} of {replicates} re-runs."
+            )
+        elif held >= tie_threshold:
+            summary = (
+                f"1st place is clear: it stayed ahead of 2nd in {pct} "
+                f"of {replicates} re-runs."
+            )
+        else:
+            summary = (
+                f"1st and 2nd are statistically tied: the order held in {pct} "
+                f"of {replicates} re-runs."
+            )
+    return Uncertainty(
+        available=True,
+        replicates=replicates,
+        seed=seed,
+        level=level,
+        top_k=top_k,
+        tie_threshold=tie_threshold,
+        sigma=sigma,
+        df=df,
+        projects=info,
+        order=order,
+        tied_pairs=tied_pairs,
+        groups=tuple(groups),
+        summary=summary,
+        assumption=UNCERTAINTY_ASSUMPTION,
+        reason="",
+    )

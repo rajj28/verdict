@@ -6,6 +6,7 @@ from results.api import (
     ProjectFeedbackView,
     PublicationDetailView,
     PublicationVerifyView,
+    ResultsConsequencesView,
     ResultsPreviewView,
     ResultsPublicView,
     ResultsPublishView,
@@ -14,6 +15,8 @@ from results.api import (
 urlpatterns = [
     # Preview (organizer) and public results
     path("events/<slug:slug>/results/preview", ResultsPreviewView.as_view(), name="results-preview"),
+    path("events/<slug:slug>/results/consequences", ResultsConsequencesView.as_view(),
+         name="results-consequences"),
     path("events/<slug:slug>/results/publish", ResultsPublishView.as_view(), name="results-publish"),
     path("events/<slug:slug>/results", ResultsPublicView.as_view(), name="results-public"),
     # Decision record and verification

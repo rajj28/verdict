@@ -100,6 +100,11 @@ class AutoAssignmentWriteSerializer(serializers.Serializer):
 
 class ExclusionWriteSerializer(serializers.Serializer):
     reason = serializers.CharField(max_length=300)
+    expected_digest = serializers.CharField(required=False, allow_blank=False, max_length=64)
+
+
+class InclusionWriteSerializer(serializers.Serializer):
+    expected_digest = serializers.CharField(required=False, allow_blank=False, max_length=64)
 
 
 class RebalanceWriteSerializer(serializers.Serializer):
@@ -1321,7 +1326,10 @@ class ReviewExclusionView(APIView):
             raise ApiError("review_not_found", "No review was found.", status_code=404)
         serializer = ExclusionWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        exclusion = services.exclude_review(request.user, review, serializer.validated_data["reason"])
+        exclusion = services.exclude_review(
+            request.user, review, serializer.validated_data["reason"],
+            expected_digest=serializer.validated_data.get("expected_digest"),
+        )
         return Response({"review": review.public_id, "reason": exclusion.reason}, status=201)
 
     @extend_schema(
@@ -1329,13 +1337,13 @@ class ReviewExclusionView(APIView):
         summary="Put an excluded review back into the results.",
         description="Manager only. Clears the exclusion and is audited; the review itself "
                     "was never deleted, so re-including restores it unchanged.",
-        request=None,
+        request=InclusionWriteSerializer,
         parameters=[
             OpenApiParameter("slug", str, OpenApiParameter.PATH, description="Event slug."),
             OpenApiParameter("review_id", str, OpenApiParameter.PATH,
                              description="Review public id."),
         ],
-        responses={204: None, **error_responses(401, 403, 404)},
+        responses={204: None, **error_responses(400, 401, 403, 404, 409)},
         tags=TAGS,
     )
     def delete(self, request, slug: str, review_id: str):
@@ -1344,5 +1352,10 @@ class ReviewExclusionView(APIView):
         review = visible_reviews(request.user, event).filter(public_id=review_id).first()
         if review is None:
             raise ApiError("review_not_found", "No review was found.", status_code=404)
-        services.include_review(request.user, review)
+        serializer = InclusionWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        services.include_review(
+            request.user, review,
+            expected_digest=serializer.validated_data.get("expected_digest"),
+        )
         return Response(status=204)

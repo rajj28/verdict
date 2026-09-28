@@ -84,6 +84,9 @@ def _canonical_inputs(
     excluded: list[dict],
     params: dict,
     comparisons: list[dict] | None = None,
+    *,
+    eligible_project_ids: list[str] | None = None,
+    project_status_overrides: dict[str, str] | None = None,
 ) -> dict:
     """The canonical input object stored and hashed on every publication."""
     inputs = {
@@ -95,11 +98,11 @@ def _canonical_inputs(
         "reviews_per_project": event.reviews_per_project,
         "included": sorted(included, key=lambda r: r["review_id"]),
         "excluded": sorted(excluded, key=lambda r: r["review_id"]),
-        "projects": sorted(
+        "projects": sorted(eligible_project_ids) if eligible_project_ids is not None else sorted(
             Project.objects.filter(event=event, status=ProjectStatus.SUBMITTED)
             .values_list("public_id", flat=True)
         ),
-        "project_snapshot": _public_project_snapshot(event),
+        "project_snapshot": _public_project_snapshot(event, project_status_overrides),
         "prizes": _prize_config(event),
         "one_prize_per_team": event.one_prize_per_team,
         "params": params,
@@ -109,8 +112,11 @@ def _canonical_inputs(
     return inputs
 
 
-def _public_project_snapshot(event: Event) -> list[dict]:
+def _public_project_snapshot(
+    event: Event, status_overrides: dict[str, str] | None = None,
+) -> list[dict]:
     """Public display and status fields needed to replay and compare a publication."""
+    overrides = status_overrides or {}
     return [
         {
             "project_id": project.public_id,
@@ -119,13 +125,13 @@ def _public_project_snapshot(event: Event) -> list[dict]:
             "team_id": project.team.public_id,
             "track": project.track.name if project.track_id else None,
             "track_id": project.track.public_id if project.track_id else None,
-            "status": project.status,
+            "status": (status_overrides or {}).get(project.public_id, project.status),
             "status_reason": project.status_reason or None,
         }
         for project in Project.objects.filter(event=event)
-        .exclude(status=ProjectStatus.DRAFT)
         .select_related("team", "track")
         .order_by("public_id")
+        if overrides.get(project.public_id, project.status) != ProjectStatus.DRAFT
     ]
 
 
@@ -193,6 +199,19 @@ def _live_digest(event: Event) -> str:
         "rubric_version": rubric_version,
     }
     return _digest(_canonical_inputs(event, inc, exc, params_stub))
+
+
+def check_expected_digest(event: Event, expected_digest: str | None) -> None:
+    """Reject a confirmed write when its locked event no longer matches the preview."""
+    if expected_digest is None:
+        return
+    if preview(event)["input_digest"] != expected_digest:
+        raise ApiError(
+            "stale_preview",
+            "The results changed since you previewed this action. Review the new "
+            "consequences and confirm again.",
+            status_code=409,
+        )
 
 
 def _rubric_version(event: Event) -> int:
@@ -287,6 +306,22 @@ def preview(event: Event) -> dict:
     data.
     """
     inc, exc = _build_input_lists(event)
+    eligible_project_ids = list(
+        Project.objects.filter(event=event, status=ProjectStatus.SUBMITTED)
+        .values_list("public_id", flat=True)
+    )
+    return _preview_from(event, inc, exc, eligible_project_ids)
+
+
+def _preview_from(
+    event: Event,
+    inc: list[dict],
+    exc: list[dict],
+    eligible_project_ids: list[str],
+    *,
+    project_status_overrides: dict[str, str] | None = None,
+) -> dict:
+    """Run the official computation from explicit inputs for live and hypothetical data."""
     comparisons = _comparison_inputs(event)
     live_enabled = _uses_live_pairwise(event, comparisons)
     criteria = engine_criteria(event)
@@ -308,10 +343,7 @@ def preview(event: Event) -> dict:
         )
         for r in inc
     ]
-    all_submitted = list(
-        Project.objects.filter(event=event, status=ProjectStatus.SUBMITTED)
-        .values_list("public_id", flat=True)
-    )
+    all_submitted = list(eligible_project_ids)
     # 'auto' lambda selection requires at least one review; fall back to 2.0
     # when there are no reviews so preview doesn't crash on empty events.
     effective_lam: float | str = lam_val
@@ -343,8 +375,12 @@ def preview(event: Event) -> dict:
         params["lambda_cv_baseline_rmse"] = result.lambda_choice.baseline_rmse
         params["lambda_cv_n"] = result.lambda_choice.n
         params["lambda_cv_folds"] = result.lambda_choice.folds
-    input_digest = _digest(_canonical_inputs(event, inc, exc, params, comparisons))
-    snapshot = _project_snapshot(result, event)
+    input_digest = _digest(_canonical_inputs(
+        event, inc, exc, params, comparisons,
+        eligible_project_ids=all_submitted,
+        project_status_overrides=project_status_overrides,
+    ))
+    snapshot = _project_snapshot(result, event, project_status_overrides)
     allocation = _allocate(result, event, snapshot)
     return {
         "method": result.method,
@@ -402,16 +438,19 @@ def _official_score(result: engine.Result, project_id: str) -> float | None:
     return result.normalized.get(project_id)
 
 
-def _project_outcome(result: engine.Result, project: Project) -> tuple[str, float | None]:
+def _project_outcome(
+    result: engine.Result, project: Project, status_override: str | None = None,
+) -> tuple[str, float | None]:
     """Result status and official score for one project (score None unless ranked)."""
     raw_entry = result.raw.get(project.public_id)
-    if project.status == ProjectStatus.DRAFT:
+    project_status = status_override or project.status
+    if project_status == ProjectStatus.DRAFT:
         status = "draft"
-    elif project.status == ProjectStatus.WITHDRAWN:
+    elif project_status == ProjectStatus.WITHDRAWN:
         status = "withdrawn"
-    elif project.status == ProjectStatus.DISQUALIFIED:
+    elif project_status == ProjectStatus.DISQUALIFIED:
         status = "disqualified"
-    elif project.status == ProjectStatus.SUPERSEDED:
+    elif project_status == ProjectStatus.SUPERSEDED:
         status = "superseded"
     elif result.method == "pairwise" and result.live_strengths is not None:
         status = ("unranked_no_reviews" if result.live_strengths.get(project.public_id) is None else
@@ -424,14 +463,17 @@ def _project_outcome(result: engine.Result, project: Project) -> tuple[str, floa
     return status, score
 
 
-def _project_snapshot(result: engine.Result, event: Event) -> list[tuple[Project, str, float | None]]:
+def _project_snapshot(
+    result: engine.Result, event: Event, status_overrides: dict[str, str] | None = None,
+) -> list[tuple[Project, str, float | None]]:
     """Every project of the event with its result status and score (one query)."""
     projects = (
         Project.objects.filter(event=event)
         .select_related("team", "track")
         .order_by("public_id")
     )
-    return [(p, *_project_outcome(result, p)) for p in projects]
+    overrides = status_overrides or {}
+    return [(p, *_project_outcome(result, p, overrides.get(p.public_id))) for p in projects]
 
 
 def _rank_order(rank: str | None, title: str) -> tuple:
@@ -450,7 +492,7 @@ def _build_rows(
     comparison_counts = Counter(project for item in comparisons if item["winner"] is not None
                                 for project in (item["left"], item["right"]))
     for project, status, _score in snapshot:
-        if project.status == ProjectStatus.DRAFT:
+        if status == "draft":
             continue
         pid = project.public_id
         raw_tuple = result.raw.get(pid)
@@ -530,7 +572,13 @@ def _build_judge_rows(result: engine.Result) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 @transaction.atomic
-def publish(actor, event: Event, note: str = "", acknowledge_unranked: bool = False) -> ResultPublication:
+def publish(
+    actor,
+    event: Event,
+    note: str = "",
+    acknowledge_unranked: bool = False,
+    expected_digest: str | None = None,
+) -> ResultPublication:
     """Snapshot the current results and create a new publication.
 
     Requires judging closed; voting closed if configured. Raises 409 for:
@@ -544,6 +592,7 @@ def publish(actor, event: Event, note: str = "", acknowledge_unranked: bool = Fa
         raise ApiError("not_authenticated", "Authentication is required.", status_code=401)
     if not is_organizer(actor, event_locked):
         raise ApiError("forbidden", "Only organizers of this event can publish results.", status_code=403)
+    check_expected_digest(event_locked, expected_digest)
     stamp = now()
     if event_locked.judging_close_at is None or stamp < event_locked.judging_close_at:
         raise ApiError(

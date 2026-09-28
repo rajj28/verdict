@@ -458,6 +458,7 @@ def manage_results(request, slug: str):
         "latest_publication": publications[0] if publications else None,
         "judging_open": judging_window_open(event),
         "publish_api": f"/api/v1/events/{event.slug}/results/publish",
+        "consequences_api": f"/api/v1/events/{event.slug}/results/consequences",
         "feedback_api": f"/api/v1/events/{event.slug}/feedback-release",
         "close_judging_api": f"/api/v1/events/{event.slug}/close-judging",
     })

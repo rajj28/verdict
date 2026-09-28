@@ -1077,9 +1077,15 @@ def undo_comparison(actor: User, event: Event, public_id: str) -> Comparison:
 
 
 @transaction.atomic
-def exclude_review(actor: User, review: Review, reason: str) -> ReviewExclusion:
+def exclude_review(
+    actor: User, review: Review, reason: str, expected_digest: str | None = None,
+) -> ReviewExclusion:
     locked_event = Event.objects.select_for_update().get(pk=review.event_id)
     _organizer(actor, locked_event)
+    if expected_digest is not None:
+        from results.services import check_expected_digest
+
+        check_expected_digest(locked_event, expected_digest)
     locked_review = Review.objects.select_for_update().filter(pk=review.pk, event=locked_event).first()
     if locked_review is None:
         raise _not_found("review")
@@ -1101,9 +1107,13 @@ def exclude_review(actor: User, review: Review, reason: str) -> ReviewExclusion:
 
 
 @transaction.atomic
-def include_review(actor: User, review: Review) -> Review:
+def include_review(actor: User, review: Review, expected_digest: str | None = None) -> Review:
     locked_event = Event.objects.select_for_update().get(pk=review.event_id)
     _organizer(actor, locked_event)
+    if expected_digest is not None:
+        from results.services import check_expected_digest
+
+        check_expected_digest(locked_event, expected_digest)
     locked_review = Review.objects.select_for_update().filter(pk=review.pk, event=locked_event).first()
     if locked_review is None:
         raise _not_found("review")

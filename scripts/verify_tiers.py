@@ -108,6 +108,7 @@ class Evidence:
         self.auth = auth
         self.rows = []
         self.pending = []
+        self.skipped = []
 
     def req(self, actor, method, path, status):
         logged = path.split("?", 1)[0]
@@ -124,6 +125,15 @@ class Evidence:
             print(f"  wanted {wanted}, got {status or 'no response'} {detail[:300]}",
                   flush=True)
         return ok
+
+    def skip(self, tier, label, reason):
+        """A check this server's configuration does not allow; never counted as passed."""
+        self.skipped.append((tier, label, reason))
+        print(f"{tier}  {label} ..... SKIPPED", flush=True)
+        for line in self.pending:
+            print(line, flush=True)
+        self.pending = []
+        print(f"  reason: {reason}", flush=True)
 
     def request(self, actor, method, path, header=None, body=None, opener=None,
                 extra_headers=None):
@@ -644,44 +654,51 @@ def main():
                 f"/api/v1/events/{vslug}/projects/{proj_ids[0]}/comments",
                 header=auth.get("participant"),
                 body={"body": "Evidence comment one"})
-            comment_id = js(text).get("public_id", "")
-            evidence.check("T3", "comment create", status, (201,), text)
-            if comment_id:
-                status, text, _ = evidence.request(
-                    "organizer", "POST",
-                    f"/api/v1/events/{vslug}/comments/{comment_id}/hide",
-                    header=auth.get("organizer"),
-                    body={"reason": "Evidence moderation check"})
-                evidence.check("T3", "comment hide with reason", status,
-                               (200,), text)
-                status, text, _ = evidence.request(
-                    "participant", "GET",
-                    f"/api/v1/events/{vslug}/projects/{proj_ids[0]}/comments",
-                    header=auth.get("participant"))
-                evidence.check("T3", "hidden comment leaves the thread",
-                               status, (200,), text,
-                               contains='"comments":[]')
-                status, text, _ = evidence.request(
-                    "organizer", "POST",
-                    f"/api/v1/events/{vslug}/comments/{comment_id}/restore",
-                    header=auth.get("organizer"),
-                    body={"reason": "Evidence review passed"})
-                evidence.check("T3", "comment restore", status, (200,), text)
-            for number in range(2, 6):
+            if status == 429 and '"throttled"' in text:
+                # A run in the last ten minutes used up the seeded participant's five
+                # comments; that limit is the anti-spam control these checks prove.
+                evidence.skip("T3", "comment create, moderation and rate limit",
+                              "the seeded participant already posted five comments in the "
+                              "last ten minutes (an earlier run); rerun after ten minutes")
+            else:
+                comment_id = js(text).get("public_id", "")
+                evidence.check("T3", "comment create", status, (201,), text)
+                if comment_id:
+                    status, text, _ = evidence.request(
+                        "organizer", "POST",
+                        f"/api/v1/events/{vslug}/comments/{comment_id}/hide",
+                        header=auth.get("organizer"),
+                        body={"reason": "Evidence moderation check"})
+                    evidence.check("T3", "comment hide with reason", status,
+                                   (200,), text)
+                    status, text, _ = evidence.request(
+                        "participant", "GET",
+                        f"/api/v1/events/{vslug}/projects/{proj_ids[0]}/comments",
+                        header=auth.get("participant"))
+                    evidence.check("T3", "hidden comment leaves the thread",
+                                   status, (200,), text,
+                                   contains='"comments":[]')
+                    status, text, _ = evidence.request(
+                        "organizer", "POST",
+                        f"/api/v1/events/{vslug}/comments/{comment_id}/restore",
+                        header=auth.get("organizer"),
+                        body={"reason": "Evidence review passed"})
+                    evidence.check("T3", "comment restore", status, (200,), text)
+                for number in range(2, 6):
+                    status, text, _ = evidence.request(
+                        "participant", "POST",
+                        f"/api/v1/events/{vslug}/projects/{proj_ids[0]}/comments",
+                        header=auth.get("participant"),
+                        body={"body": f"Evidence comment {number}"})
+                evidence.check("T3", "fifth comment still allowed", status,
+                               (201,), text)
                 status, text, _ = evidence.request(
                     "participant", "POST",
                     f"/api/v1/events/{vslug}/projects/{proj_ids[0]}/comments",
                     header=auth.get("participant"),
-                    body={"body": f"Evidence comment {number}"})
-            evidence.check("T3", "fifth comment still allowed", status,
-                           (201,), text)
-            status, text, _ = evidence.request(
-                "participant", "POST",
-                f"/api/v1/events/{vslug}/projects/{proj_ids[0]}/comments",
-                header=auth.get("participant"),
-                body={"body": "Evidence comment six"})
-            evidence.check("T3", "comment rate limit answers 429", status,
-                           (429,), text)
+                    body={"body": "Evidence comment six"})
+                evidence.check("T3", "comment rate limit answers 429", status,
+                               (429,), text)
             status, text, _ = evidence.request(
                 "organizer", "GET", f"/api/v1/events/{vslug}/voting/manage",
                 header=auth.get("organizer"))
@@ -793,7 +810,18 @@ def main():
             body={"url": receiver_url, "event_types": ["*"]})
         hook = js(text)
         endpoint_id, secret = hook.get("public_id", ""), hook.get("secret", "")
-        if status != 201 or not endpoint_id or not secret:
+        if status == 400 and "loopback, private" in text:
+            # Default configuration: the SSRF guard refuses this checker's local
+            # receiver, which is the correct production behaviour.
+            evidence.check("T4", "private webhook destinations are refused by default",
+                           status, (400,), text[:200])
+            reason = ("the server refuses private destinations (WEBHOOKS_ALLOW_PRIVATE=0); "
+                      "restart it with WEBHOOKS_ALLOW_PRIVATE=1 to watch signed delivery "
+                      "to this checker's local receiver")
+            evidence.skip("T4", "webhook delivery carries a valid HMAC signature", reason)
+            evidence.skip("T4", "webhook secret is never listed", reason)
+            sink.stop()
+        elif status != 201 or not endpoint_id or not secret:
             evidence.check("T4", "webhook endpoint is created", status,
                            (201,), "endpoint creation failed")
             sink.stop()
@@ -1016,9 +1044,12 @@ def main():
     for tier in ("T1", "T2", "T3", "T4"):
         rows = [row for row in evidence.rows if row[0] == tier]
         done = sum(1 for row in rows if row[2])
-        print(f"{tier} summary {done}/{len(rows)} checks passed")
+        skipped = sum(1 for row in evidence.skipped if row[0] == tier)
+        note = f", {skipped} skipped (see SKIPPED lines)" if skipped else ""
+        print(f"{tier} summary {done}/{len(rows)} checks passed{note}")
+    note = f", {len(evidence.skipped)} skipped" if evidence.skipped else ""
     print(f"summary {sum(row[2] for row in evidence.rows)}/"
-          f"{len(evidence.rows)} checks passed")
+          f"{len(evidence.rows)} checks passed{note}")
     return 0
 
 

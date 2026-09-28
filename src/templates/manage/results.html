@@ -34,6 +34,7 @@ word. Judge names appear here because this page is organizer-only.
 {% endblock %}
 
 {% block content %}
+<div data-tour-publish data-tour-consequence>
 
 {% if preview_error %}
   <div class="alert alert-warning" role="alert">
@@ -646,7 +647,7 @@ word. Judge names appear here because this page is organizer-only.
           <form data-api-method="DELETE" data-api-url="{{ feedback_api }}" data-success="reload"
                 class="mt-3">
             <button class="btn btn-outline-secondary" type="button"
-                    data-confirm="Retract team feedback? Teams lose access to their scores and comments again.">
+                    data-confirm="Retract team feedback? Teams lose access to their scores again.">
               Retract team feedback
             </button>
           </form>
@@ -654,14 +655,14 @@ word. Judge names appear here because this page is organizer-only.
           <form data-api-method="POST" data-api-url="{{ feedback_api }}" data-success="reload"
                 class="mt-3">
             <button class="btn btn-outline-primary" type="button"
-                    data-confirm="Release feedback to every team? Each team then sees its own weighted score, per-criterion averages and de-attributed comments.">
+                    data-confirm="Release feedback to every team? Each team then sees its own weighted score, rank and per-criterion averages. Private judge notes are never released.">
               Release feedback to teams
             </button>
           </form>
         {% endif %}
         <p class="form-hint">
-          Feedback is de-attributed: a team sees its own score, rank and shuffled comments,
-          never a judge name or id.
+          Feedback is de-attributed: a team sees its own score, rank and per-criterion
+          averages, never a judge name, id or private note.
         </p>
       {% else %}
         <p class="form-hint">Nothing published yet. The public page says so until you publish.</p>
@@ -677,6 +678,7 @@ word. Judge names appear here because this page is organizer-only.
   </div>
 {% endif %}
 
+</div>
 {% endblock %}
 
 {% block extra_js %}

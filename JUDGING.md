@@ -66,8 +66,13 @@ Fixture effect, same command: 19 of 40 projects move rank raw → normalized
 Method lineage: the fit is the shrinkage-penalized least-squares (Henderson
 BLUP / linear mixed-model) solution where lambda is the variance ratio
 `noise / judge variance`; rater-severity models of this form are the
-workhorse of Many-Facet Rasch measurement, and this calibration style was
-studied for peer review by Ge, Welling and Ghahramani (2013). Linear-bias
+workhorse of Many-Facet Rasch measurement. The objective is the same one NIPS
+(now NeurIPS) minimised to calibrate reviewer scores from 2006 to 2012, the
+Platt–Burges model `score = quality + reviewer bias + noise` with a ridge
+penalty on the biases, as described by Ge, Welling and Ghahramani ("A Bayesian
+Model for Calibrating Reviewer Scores"), who replaced it with a Bayesian variant
+for 2013–2014; VERDICT's difference is that lambda is chosen by predeclared
+cross-validation instead of by hand. Linear-bias
 models break under strategic or correlated miscalibration (Wang and Shah,
 2019) — hence the outlier list and the stated offset-only limit, not a wider
 claim. The Bradley–Terry cross-check is fitted by the Hunter (2004) MM

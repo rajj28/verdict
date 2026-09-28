@@ -367,3 +367,6 @@ Prepare a technical write-up from actual discoveries: PostgreSQL race failures, 
 ## Final decision
 
 **Our route to a credible first-place case is not "add everything". It is complete product journeys + a memorable, honest judging-readiness workflow + independently repeatable operational proof.** Protect T1/T2, finish manual tier evidence, make the interface comfortable, make adoption boring, and show the failure recovery. If an extra feature delays those outcomes, it moves below the release line.
+
+## Worker allocation (Mon 28 Sep, by orchestrator)
+- Qoder and Kiro: out of credits. OpenCode (free): bulk, precisely specified tasks. Copilot (metered, strongest): only the hardest correctness/security work. Max 2 OpenCode + 1 Copilot while RAM ≈ 2 GB; no Docker builds while three workers run.

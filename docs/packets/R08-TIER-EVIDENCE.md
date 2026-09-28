@@ -1,0 +1,9 @@
+# Packet R08: auditable T3/T4 evidence (next free OpenCode slot)
+
+Context (Discord, Mon 28 Sep): run.py only checks T1/T2; T3/T4 are judged by hand (organizer confirmation via mentor). A participant (hans) backs T3/T4 claims with a second stdlib checker whose committed report lists the exact requests behind every PASS, plus a README map of every T3/T4 bullet to its checks. Another participant noted judges will not trust a self-made checker unless it is easy to audit. Our tier-evidence-report.txt currently has only 25 T1/T2 checks and no request details.
+
+Extend scripts/verify_tiers.py (stdlib only, reads .dogfood.toml, creates its own disposable event, never touches fixture data) to cover EVERY T3 and T4 bullet from the brief:
+- T3: open-link, email-gated (via the offline outbox) and authenticated voting; quadratic budget enforced; results hidden from non-organizers during the window (API, page, export); ballot order random per voter and stable per ballot; rate limit 429; duplicate ballot refused; comments create/moderate/hide; abuse audit trail readable.
+- T4: every UI action has a documented endpoint (schema check); webhook delivery with a valid HMAC signature received by scripts/webhook_receiver.py; certificate access (owner yes, stranger no); signed judge record verifies and a tampered copy fails; embed route public with frame-ancestors relaxed only there; event.json export then import round trip with equal counts.
+Output: under each `TIER  label ..... PASS|FAIL` line, one indented line per request: `METHOD path  as <actor>  -> status` (no tokens printed). Summary line per tier. Write the committed report to tier-evidence-report.txt.
+Also add a README section "How to verify T3 and T4 yourself" mapping each bullet to its check name and code file (the orchestrator will merge wording). Tests: tests/test_verify_tiers.py runs the script against Django's LiveServerTestCase on PostgreSQL.

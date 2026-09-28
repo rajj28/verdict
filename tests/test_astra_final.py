@@ -1,10 +1,13 @@
 """Regressions found during the final PostgreSQL integrity audit."""
 import copy
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
+from accounts.models import User
+from core.bootstrap import ORGANIZER_EMAIL, bootstrap
 from events import services as event_services
+from events.models import Event
 from events.models import Prize
 from interop.certificates import verification_code
 from projects import services as project_services
@@ -87,3 +90,24 @@ class FinalPublicationTests(TestCase):
                          {"valid": False, "kind": "winner"})
         self.assertNotIn("people", replaced)
         self.assertNotIn("owner_ids", replaced)
+
+
+@override_settings(DEMO_MODE=True)
+class ImportedEventVerifyTests(TestCase):
+    """A fresh publication of an imported event must verify as identical.
+
+    Publishing reads reviews in database order; Verify replays the stored,
+    canonically ordered inputs. The engine sorts its inputs so both paths sum
+    floating-point values in the same order and match bit for bit.
+    """
+
+    def test_fresh_publication_of_the_organizers_fixture_verifies_identical(self):
+        bootstrap()
+        event = Event.objects.get(slug="sample-hack-2026")
+        organizer = User.objects.get(email=ORGANIZER_EMAIL)
+        event_services.close_judging(organizer, event)
+        event.refresh_from_db()
+        publication = results_services.publish(
+            organizer, event, note="Fixture verification", acknowledge_unranked=True)
+        result = results_services.verify_publication(publication)
+        self.assertEqual(result["verdict"], "identical", result["detail"])

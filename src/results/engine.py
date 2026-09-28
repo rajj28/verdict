@@ -259,7 +259,9 @@ def fit_additive(
     """
     if lam < 0:
         raise ValueError("lam must be non-negative")
-    scored = list(scored)
+    # Canonical order: floating-point sums then match bit for bit whether the
+    # reviews come from the live database or from a publication's stored inputs.
+    scored = sorted(scored, key=lambda r: r.review_id)
     if not scored:
         return Fit(mu={}, offset={}, iterations=0, converged=True)
     proj_ids = sorted({r.project_id for r in scored})
@@ -1342,7 +1344,7 @@ def evaluate(
     """
     if method not in _OFFICIAL_METHODS:
         raise ValueError(f"method must be one of {_OFFICIAL_METHODS}")
-    reviews = list(reviews)
+    reviews = sorted(reviews, key=lambda r: r.review_id)  # order-independent sums
     scored = score_reviews(reviews, criteria)
     lambda_choice: LambdaChoice | None = None
     if isinstance(lam, str):
@@ -1887,7 +1889,7 @@ def rank_uncertainty(
         raise ValueError("top_k must be at least 1")
     if not 0.0 <= tie_threshold <= 1.0:
         raise ValueError("tie_threshold must be between 0 and 1")
-    data = list(scored)
+    data = sorted(scored, key=lambda r: r.review_id)  # order-independent output
     proj_ids = sorted({r.project_id for r in data})
     n = len(data)
     n_projects = len(proj_ids)

@@ -433,7 +433,8 @@ class ResultsPageTests(OrganizerPagesTestCase):
         page = self.client.get(self.manage("results"))
         self.assertContains(page, "Gamma Project")
         self.assertContains(page, "acknowledge_unranked")
-        self.assertContains(page, f'data-api-url="/api/v1/events/{self.event.slug}/results/publish"')
+        # Publishing goes through the consequence preview dialog (consequences.js).
+        self.assertContains(page, f'data-publish-url="/api/v1/events/{self.event.slug}/results/publish"')
 
         # With the box missing, the service refuses; the page is not the control.
         self.event.judging_close_at = timezone.now() - timedelta(seconds=1)

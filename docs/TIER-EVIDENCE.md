@@ -7,9 +7,15 @@ line per request under each `TIER  label ..... PASS|FAIL` line, plus a summary
 line per tier. Query strings and response bodies are never printed, so bearer
 tokens, voting link tokens and email tickets cannot leak into the report.
 
-Run it (needs `WEBHOOKS_ALLOW_PRIVATE=1` on the server for the webhook check,
-so the portal accepts the local receiver URL; the receiver logic mirrors
-`scripts/webhook_receiver.py`):
+Run it against a running portal. In the default configuration
+(`WEBHOOKS_ALLOW_PRIVATE=0`) the SSRF guard refuses the checker's local webhook
+receiver: the checker records that refusal as a PASS and prints the two delivery
+checks as `SKIPPED` with the reason. Start the portal with
+`WEBHOOKS_ALLOW_PRIVATE=1` to watch a real signed delivery to the local receiver
+(its logic mirrors `scripts/webhook_receiver.py`). Re-running within ten minutes
+also prints the comment checks as `SKIPPED`: the seeded participant has used up the
+five-comments-per-ten-minutes limit, which is itself a T3 control. Skips are never
+counted as passes.
 
 ```
 python scripts/verify_tiers.py .dogfood.toml | tee tier-evidence-report.txt

@@ -10,7 +10,7 @@ from judging.api import (
     EventProgressView, EventRebalanceView, EventRubricView,
     JudgeAssignmentsView, JudgeComparisonView, JudgeConflictView, JudgeInvitesView, JudgeReviewView,
     JudgeScoresView, ReviewExclusionView, SubmitJudgeReviewView, EventJudgeScoresView,
-    NextPairView,
+    NextPairView, UndoComparisonView,
 )
 
 urlpatterns = [
@@ -38,6 +38,8 @@ urlpatterns = [
     path("events/<slug:slug>/judge/pairs/next", NextPairView.as_view(), name="judge-pair-next"),
     path("events/<slug:slug>/judge/comparisons", JudgeComparisonView.as_view(),
          name="judge-comparisons"),
+    path("events/<slug:slug>/judge/comparisons/<str:comparison_id>/undo", UndoComparisonView.as_view(),
+         name="judge-comparison-undo"),
     path("events/<slug:slug>/progress", EventProgressView.as_view(), name="event-progress"),
     path("events/<slug:slug>/command-center", EventCommandCenterView.as_view(),
          name="event-command-center"),

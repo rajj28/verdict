@@ -179,7 +179,8 @@ class RegisterTests(TestCase):
 @override_settings(DEMO_MODE=False)
 class DemoLoginDisabledTests(TestCase):
     def test_demo_login_is_404_when_demo_mode_is_off(self):
-        bootstrap()
+        with override_settings(DEMO_MODE=True):
+            bootstrap()
         response = post_json(self.client, DEMO_LOGIN, {"role": "admin"})
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json()["error"]["code"], "demo_disabled")

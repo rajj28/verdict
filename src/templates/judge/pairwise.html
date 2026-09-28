@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Compare projects · {{ event.name }}{% endblock %}
+{% block heading %}Compare projects{% endblock %}
+{% block lead %}{{ event.name }} · Choose which project you prefer based on the event's criteria.{% endblock %}
+{% block page_actions %}<a class="btn btn-outline-secondary" href="/judge">Your assignments</a>{% endblock %}
+{% block content %}
+<section class="card-verdict p-3 mb-4" aria-label="Your comparison progress">
+  <p>{{ progress.comparisons }} of {{ progress.total_pairs }} distinct pairs seen.
+     {{ progress.projects_complete }} of {{ progress.assigned_projects }} projects have reached
+     {{ progress.target_per_project }} comparisons by you.</p>
+  <progress class="w-100" value="{{ progress.comparisons }}" max="{{ progress.total_pairs|default:1 }}"
+            aria-label="Distinct pairs seen"></progress>
+  <p class="form-hint mb-0">Only your assigned projects appear. “Too close” records an abstention, not a tied win.</p>
+</section>
+{% if latest %}
+<div class="alert alert-info">
+  Your latest choice was saved. Undo is available for 30 seconds after saving.
+  <button class="btn btn-sm btn-outline-primary" type="button"
+          data-api-method="POST" data-api-url="/api/v1/events/{{ event.slug }}/judge/comparisons/{{ latest.public_id }}/undo"
+          data-success="reload">Undo latest choice</button>
+</div>
+{% endif %}
+{% if done %}
+<div class="empty-state"><h2 class="h4">Comparisons complete</h2>
+  <p>{% if progress.reason == 'coverage_reached' %}Every assigned project reached your comparison target.
+     {% else %}There are no unseen pairs among your current assignments.{% endif %}</p>
+  <p>Your choices are saved. The organizer will publish results after judging closes.</p>
+</div>
+{% else %}
+<div class="row g-4 mb-4">
+  {% for project in pair %}
+  <div class="col-12 col-lg-6"><article class="card-verdict p-4 h-100">
+    <p class="form-hint">{% if forloop.first %}Left{% else %}Right{% endif %} · {{ project.team.name }} · {{ project.track.name }}</p>
+    <h2 class="h4">{{ project.title }}</h2><p class="lead">{{ project.summary }}</p>
+    {% if project.thumbnail %}<img class="img-fluid rounded mb-3" src="{{ project.thumbnail.url }}" alt="{{ project.title }}">{% endif %}
+    <div>{{ project.description|linebreaksbr }}</div>
+    <ul class="list-unstyled d-flex flex-wrap gap-3 my-3">
+      {% if project.repo_url %}<li><a href="{{ project.repo_url }}" rel="noopener noreferrer nofollow ugc">Repository</a></li>{% endif %}
+      {% if project.live_url %}<li><a href="{{ project.live_url }}" rel="noopener noreferrer nofollow ugc">Live demo</a></li>{% endif %}
+      {% if project.demo_video_url %}<li><a href="{{ project.demo_video_url }}" rel="noopener noreferrer nofollow ugc">Video</a></li>{% endif %}
+    </ul>
+    {% for answer in project.answers.all %}
+      <h3 class="h6">{{ answer.question.prompt }}{% if not answer.question.is_public %} · private evidence{% endif %}</h3>
+      <p>{{ answer.value|linebreaksbr }}</p>
+    {% endfor %}
+    {% for image in project.images.all %}<figure><img class="img-fluid rounded" src="{{ image.image.url }}" alt="{{ image.caption|default:project.title }}">
+      {% if image.caption %}<figcaption>{{ image.caption }}</figcaption>{% endif %}</figure>{% endfor %}
+  </article></div>
+  {% endfor %}
+</div>
+<div class="d-flex flex-wrap gap-3" data-pairwise-controls>
+  <form data-api-method="POST" data-api-url="/api/v1/events/{{ event.slug }}/judge/comparisons" data-success="reload">
+    <input type="hidden" name="left" value="{{ pair.0.public_id }}"><input type="hidden" name="right" value="{{ pair.1.public_id }}">
+    <input type="hidden" name="winner" value="{{ pair.0.public_id }}">
+    <div data-form-errors role="alert"></div><button class="btn btn-primary" data-pairwise-key="left" type="submit">Left is better <kbd>A</kbd> / ←</button>
+  </form>
+  <form data-api-method="POST" data-api-url="/api/v1/events/{{ event.slug }}/judge/comparisons" data-success="reload">
+    <input type="hidden" name="left" value="{{ pair.0.public_id }}"><input type="hidden" name="right" value="{{ pair.1.public_id }}">
+    <input type="hidden" name="winner" value="null" data-type="json">
+    <div data-form-errors role="alert"></div><button class="btn btn-outline-secondary" data-pairwise-key="skip" type="submit">Too close <kbd>S</kbd> / ↓</button>
+  </form>
+  <form data-api-method="POST" data-api-url="/api/v1/events/{{ event.slug }}/judge/comparisons" data-success="reload">
+    <input type="hidden" name="left" value="{{ pair.0.public_id }}"><input type="hidden" name="right" value="{{ pair.1.public_id }}">
+    <input type="hidden" name="winner" value="{{ pair.1.public_id }}">
+    <div data-form-errors role="alert"></div><button class="btn btn-primary" data-pairwise-key="right" type="submit">Right is better <kbd>D</kbd> / →</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}
+{% block extra_js %}<script src="{% static 'js/pairwise.js' %}"></script>{% endblock %}

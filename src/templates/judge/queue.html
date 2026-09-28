@@ -47,6 +47,9 @@ the review pages goes through the JSON API, never from this page.
         </div>
       </div>
 
+      {% if group.event.judging_mode != 'rubric' %}
+      <p><a class="btn btn-primary" href="/judge/{{ group.event.slug }}/pairwise">Compare assigned projects</a></p>
+      {% endif %}
       {% if group.continue %}
         <p class="form-hint mb-2">
           Continue where you left off:

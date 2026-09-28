@@ -22,8 +22,10 @@ RUN useradd --create-home --uid 10001 verdict \
 USER verdict
 
 # A throwaway key: the real one comes from SECRET_KEY or is generated on first
-# boot into /data/secret_key. No build secret is baked in.
-RUN SECRET_KEY=collectstatic-only python manage.py collectstatic --noinput
+# boot into /data/secret_key. No build secret is baked in. DATABASE_URL points
+# at an unroutable port so collectstatic fails fast instead of hitting a real
+# database if it ever tries to connect; it is build-only, not a runtime default.
+RUN SECRET_KEY=collectstatic-only DATABASE_URL=postgres://build:build@127.0.0.1:1/build python manage.py collectstatic --noinput
 
 EXPOSE 8080
 

@@ -1,6 +1,6 @@
 .git
 .venv
-.data
+.data*/
 logs
 **/__pycache__
 *.sqlite3

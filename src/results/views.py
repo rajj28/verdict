@@ -374,11 +374,15 @@ def _certificate(event: Event, preview: dict | None, inputs: dict) -> dict | Non
     """
     if not preview:
         return None
+    method = preview.get("method", event.ranking_method)
     for key in ("robustness", "certificate"):
         value = preview.get(key)
-        if isinstance(value, dict) and value:
+        if (isinstance(value, dict) and value.get("method") == method
+                and "winners" in value and "available" in value):
             return value
     lam = preview.get("lam")
+    if method == "pairwise":
+        return asdict(engine.robustness([], None, 0.0, method=method))
     criteria = judging_policy.engine_criteria(event)
     included = inputs["included"]
     if not criteria or not included or lam is None or lam == "auto":
@@ -388,7 +392,7 @@ def _certificate(event: Event, preview: dict | None, inputs: dict) -> dict | Non
                            project_id=row["project_id"], values=row["criteria"])
         for row in included
     ]
-    return asdict(engine.robustness(reviews, criteria, lam=float(lam)))
+    return asdict(engine.robustness(reviews, criteria, lam=float(lam), method=method))
 
 
 @login_required
@@ -431,6 +435,7 @@ def manage_results(request, slug: str):
                         + len(inputs["ineligible_projects"])),
         "preview": preview,
         "preview_error": preview_error,
+        "live_pairwise": preview.get("live_pairwise", {}) if preview else {},
         "method_label": METHOD_LABELS.get(event.ranking_method, event.ranking_method),
         "rows": rows,
         "judge_rows": judge_rows,

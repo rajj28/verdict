@@ -230,6 +230,18 @@ def judge_review(request, slug: str, public_id: str):
     })
 
 
+def judge_pairwise(request, slug: str):
+    """The comparison console only reads; verdicts and undo use JSON endpoints."""
+    if not request.user.is_authenticated:
+        return _login_redirect(request)
+    event = get_object_or_404(visible_events(request.user), slug=slug)
+    try:
+        state = services.pairwise_state(request.user, event)
+    except ApiError as error:
+        _refuse(error)
+    return render(request, "judge/pairwise.html", {"event": event, **state})
+
+
 def command_center(request, slug: str):
     """/manage/{slug}/command-center: is judging going to finish in time?
 

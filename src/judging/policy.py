@@ -5,9 +5,9 @@ Read scoping and permission predicates. Every queryset in a view starts here.
 from django.db.models import F, Q, QuerySet
 
 from core.errors import ApiError
-from events.models import Event, EventRole, Role
+from events.models import Event, EventRole, JudgingMode, Role
 from events.policy import is_organizer
-from judging.models import Assignment, Conflict, Criterion, Review, ReviewStatus
+from judging.models import Assignment, Comparison, Conflict, Criterion, Review, ReviewStatus
 from projects.models import Project, ProjectStatus
 from results import engine
 
@@ -114,6 +114,37 @@ def require_judge(user, event: Event) -> EventRole:
         raise ApiError("forbidden", "Only a judge assigned to this event can do that.",
                        status_code=403)
     return role
+
+
+def visible_pairwise_projects(user, event: Event, role=None) -> QuerySet[Project]:
+    """Only currently submitted, assigned, in-track evidence without declared conflicts."""
+    role = role or require_judge(user, event)
+    if event.judging_mode not in (JudgingMode.PAIRWISE, JudgingMode.BOTH):
+        raise ApiError("pairwise_disabled", "Pairwise judging is not enabled.", status_code=409)
+    return (Project.objects.filter(
+        event=event, team__event=event, track__event=event, status=ProjectStatus.SUBMITTED,
+        assignments__event=event, assignments__judge=role, track__in=role.tracks.all(),
+    ).exclude(team__conflicts__judge=role).select_related("team", "track")
+            .prefetch_related("answers__question", "images").distinct().order_by("public_id"))
+
+
+def visible_comparisons(user, event: Event) -> QuerySet[Comparison]:
+    """Own judgments only; organizers may export the complete event history."""
+    rows = Comparison.objects.filter(event=event).select_related("left", "right", "winner", "judge")
+    if is_organizer(user, event):
+        return rows
+    return rows.filter(judge=require_judge(user, event))
+
+
+def included_comparisons(event: Event) -> QuerySet[Comparison]:
+    """Active historical judgments between still-eligible projects in this event."""
+    return Comparison.objects.filter(
+        event=event, judge__event=event, retracted_at__isnull=True,
+        left__event=event, right__event=event,
+        left__team__event=event, right__team__event=event,
+        left__track__event=event, right__track__event=event,
+        left__status=ProjectStatus.SUBMITTED, right__status=ProjectStatus.SUBMITTED,
+    ).select_related("judge", "left", "right", "winner").order_by("public_id")
 
 
 def require_judge_or_manager(user, event: Event) -> EventRole | None:

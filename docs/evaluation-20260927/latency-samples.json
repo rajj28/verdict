@@ -1,0 +1,86 @@
+[
+  {
+    "path": "/api/v1/events/sample-hack-2026/results/preview",
+    "iteration": 1,
+    "status": 200,
+    "seconds": 0.8053,
+    "bytes": 18052
+  },
+  {
+    "path": "/api/v1/events/sample-hack-2026/results/preview",
+    "iteration": 2,
+    "status": 200,
+    "seconds": 0.8046,
+    "bytes": 18052
+  },
+  {
+    "path": "/api/v1/events/sample-hack-2026/results/preview",
+    "iteration": 3,
+    "status": 200,
+    "seconds": 0.754,
+    "bytes": 18052
+  },
+  {
+    "path": "/api/v1/events/sample-hack-2026/exports/results.csv",
+    "iteration": 1,
+    "status": 200,
+    "seconds": 0.8394,
+    "bytes": 2508
+  },
+  {
+    "path": "/api/v1/events/sample-hack-2026/exports/results.csv",
+    "iteration": 2,
+    "status": 200,
+    "seconds": 0.7999,
+    "bytes": 2508
+  },
+  {
+    "path": "/api/v1/events/sample-hack-2026/exports/results.csv",
+    "iteration": 3,
+    "status": 200,
+    "seconds": 0.7967,
+    "bytes": 2508
+  },
+  {
+    "path": "/projects",
+    "iteration": 1,
+    "status": 200,
+    "seconds": 0.0186,
+    "bytes": 39943
+  },
+  {
+    "path": "/projects",
+    "iteration": 2,
+    "status": 200,
+    "seconds": 0.0189,
+    "bytes": 39943
+  },
+  {
+    "path": "/projects",
+    "iteration": 3,
+    "status": 200,
+    "seconds": 0.0173,
+    "bytes": 39943
+  },
+  {
+    "path": "/embed/sample-hack-2026",
+    "iteration": 1,
+    "status": 200,
+    "seconds": 0.0182,
+    "bytes": 18813
+  },
+  {
+    "path": "/embed/sample-hack-2026",
+    "iteration": 2,
+    "status": 200,
+    "seconds": 0.015,
+    "bytes": 18813
+  },
+  {
+    "path": "/embed/sample-hack-2026",
+    "iteration": 3,
+    "status": 200,
+    "seconds": 0.0149,
+    "bytes": 18813
+  }
+]

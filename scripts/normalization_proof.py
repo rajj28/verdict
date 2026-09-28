@@ -55,14 +55,15 @@ CAL_RANK_SIGMA_B = 0.6
 CAL_RANK_SEED = 2202  # same seed as the sigma_b = 0.6 row above
 
 # Review-budget planner (packet P7-PLANNER, steps 1-2): balanced random
-# designs with the fixture's 30 judges / 40 projects, sigma estimated
-# from the fixture's included reviews.
+# designs with the fixture's 30 judges / 40 projects. Generating noise
+# is assumed explicitly across sensitivity scenarios, not estimated.
 BUDGET_JUDGES = 30
 BUDGET_PROJECTS = 40
 BUDGET_GRID = (3, 4, 6, 8, 10, 12, 16)
 BUDGET_BIAS = 8.0
 BUDGET_REPS = 200
 BUDGET_SEED = "verdict-budget"
+BUDGET_NOISE_MULTIPLIERS = (0.75, 1.0, 1.5, 2.0)
 
 
 # ---------------------------------------------------------------- fixtures
@@ -424,10 +425,9 @@ def main():
         f"{f2(base.spread_before)} raw to {f2(base.spread_after)} after offset "
         "removal: with the adaptive choice (near-maximal shrinkage) the "
         "fitted offsets are close to zero, so almost nothing is removed. "
-        "The raw spread of judge means on this sparse fixture mostly "
-        "reflects which projects each judge happened to receive, not an "
-        "estimable judge level \u2014 consistent with the leave-one-out and "
-        "permutation results below.")
+        "Raw spread can reflect assigned project quality, judge scoring "
+        "levels, and noise. These summaries do not identify how much "
+        "comes from each source; nonzero spread alone does not establish bias.")
     add("")
     add("### Judge spread, organizers' definition")
     add("")
@@ -693,22 +693,37 @@ def main():
             f"nil to negative, which is itself the design-time lesson: "
             f"check the estimability meter before buying anchors.")
     add("")
-    add("### How many reviews does normalization need?")
+    add("### Experimental review-budget scenarios: sensitivity to assumed noise")
     add("")
-    budget = E.review_budget_curve(
+    budget_scored = E.score_reviews(reviews, criteria)
+    residual_dispersion = E.pooled_residual_sd(budget_scored, lam=2.0)
+    budgets = [E.review_budget_curve(
         BUDGET_JUDGES, BUDGET_PROJECTS,
         reviews_per_judge_grid=BUDGET_GRID, bias=BUDGET_BIAS,
-        sigma_noise=None, scored=E.score_reviews(reviews, criteria),
-        reps=BUDGET_REPS, seed=BUDGET_SEED,
-    )
+        sigma_noise=multiplier * residual_dispersion, scored=budget_scored,
+        reps=BUDGET_REPS, seed=BUDGET_SEED, lam=2.0,
+    ) for multiplier in BUDGET_NOISE_MULTIPLIERS]
+    budget = budgets[BUDGET_NOISE_MULTIPLIERS.index(1.0)]
+    add(f"The fixture's in-sample residual dispersion sqrt(SSE/n) is "
+        f"{residual_dispersion:.2f} at fixed \u03bb=2. This is descriptive, "
+        "not a calibrated estimate of generating noise: the fitted project "
+        "means and judge offsets consume degrees of freedom, and shrinkage "
+        "affects residuals. We explicitly assume noise at "
+        + ", ".join(f"{m:g}\u00d7" for m in BUDGET_NOISE_MULTIPLIERS)
+        + " that dispersion to test sensitivity. These are illustrative "
+        "scenarios, not an estimated confidence interval for noise.")
+    add("")
     add(f"Balanced random designs with {BUDGET_JUDGES} judges and "
         f"{BUDGET_PROJECTS} projects (same id sets, track-agnostic; "
         f"`results.engine.review_budget_curve` with seed `{BUDGET_SEED}`, "
-        f"{BUDGET_REPS} reps, additive \u03bb=2.0), noise "
-        f"\u03c3={budget.sigma_noise:.2f} estimated from the fixture's "
-        f"included reviews (pooled residual SD of the additive fit). "
-        f"Each row reports the median expected offset SE and the mean "
-        f"share of judges whose injected bias is detected:")
+        f"{BUDGET_REPS} reps, fixed additive \u03bb=2.0). The adaptive "
+        "live lambda procedure is not simulated. Noise is independent "
+        "homoskedastic Gaussian and scores are not clipped. One positive "
+        "judge offset is injected at a time; detection means the fitted "
+        "offset exceeds +2 null-simulation SD. The threshold is not calibrated "
+        "for multiple judges, and this does not model collusion or varying "
+        "track eligibility. The first table shows only the explicit "
+        f"1\u00d7 noise assumption (\u03c3={budget.sigma_noise:.2f}):")
     add("")
     add("| Reviews per judge | Median SE | Power at 8 pts | Power at 12 pts |")
     add("|---:|---:|---:|---:|")
@@ -716,12 +731,24 @@ def main():
         add(f"| {brow.reviews_per_judge} | {brow.median_se:.2f} | "
             f"{brow.power[8.0]:.3f} | {brow.power[12.0]:.3f} |")
     add("")
-    need80 = budget.reviews_needed(power=0.8)
-    need_label = f"\u2248{need80}" if isinstance(need80, int) else need80
-    pow4 = next(r for r in budget.rows if r.reviews_per_judge == 4)
-    add(f"In plain language: at ~4 reviews per judge an 8-point harsh "
-        f"judge is caught ~{pow4.power[8.0]:.0%} of the time; "
-        f"{need_label} reviews per judge reaches 80%.")
+    add("Assumed-noise sensitivity (same designs and seeds):")
+    add("")
+    add("| Noise multiplier | Assumed noise SD | Detection at 4 reviews, +8 pts | Detection at 16 reviews, +8 pts | First tested budget at 0.8 share |")
+    add("|---:|---:|---:|---:|---|")
+    for multiplier, scenario in zip(BUDGET_NOISE_MULTIPLIERS, budgets):
+        at4 = next(row for row in scenario.rows if row.reviews_per_judge == 4)
+        at16 = next(row for row in scenario.rows if row.reviews_per_judge == 16)
+        add(f"| {multiplier:g} | {scenario.sigma_noise:.2f} | "
+            f"{at4.power[8.0]:.3f} | {at16.power[8.0]:.3f} | "
+            f"{scenario.reviews_needed(0.8)} |")
+    add("")
+    at16_values = [scenario.rows[-1].power[8.0] for scenario in budgets]
+    add(f"At 16 reviews per judge the conditional detection share ranges "
+        f"from {min(at16_values):.3f} to {max(at16_values):.3f} across these "
+        "assumptions. This range measures scenario sensitivity, not sampling "
+        "uncertainty. Monte Carlo error and variation between assignment "
+        "designs are not quantified here. The planner remains experimental; "
+        "it does not promise an organizer a detection rate or required budget.")
     add("")
     add("### Leave-one-review-out cross-validation (predicting unseen reviews)")
     add("")
@@ -779,17 +806,16 @@ def main():
         f"observed).")
     add("")
     if perm.p_value < 0.05:
-        add("The observed spread of judge offsets is larger than chance "
-            "relabeling can explain: systematic judge habits are present, "
-            "which is what the shrinkage fit removes.")
+        add("The observed spread is unusual under this within-track "
+            "relabeling null. This is evidence against that null, not proof "
+            "of a particular cause or judge intent.")
     else:
-        add("The test does not reject the null: with about three reviews "
-            "per project the fitted offsets are mostly sampling noise, and "
-            "random relabelings produce as much spread as the real labels. "
-            "The test has low power on this sparse design \u2014 it guards "
-            "against strong systematic effects rather than proving none \u2014 "
-            "so the positive case for shrinkage rests on the "
-            "leave-one-out check and the simulations above.")
+        add("The test does not reject this relabeling null at the 5% level. "
+            "Nondetection is not proof of no bias, non-identifiability, or "
+            "non-estimable offsets. This p-value alone does not quantify "
+            "the test's power or attribute fitted offsets to sampling noise. "
+            "Predictive cross-validation and the explicitly assumed "
+            "simulations answer different questions.")
     add("")
     add("### Agreement between the normalized and Bradley\u2013Terry rankings")
     add("")
@@ -809,8 +835,8 @@ def main():
     add("")
     add("The Bradley\u2013Terry cross-check uses only within-judge orderings "
         "(derived pairwise comparisons), so judge levels cancel out of it "
-        "entirely; its broad agreement with the additive ranking is "
-        "independent evidence that the offsets removed are level, not order.")
+        "entirely. Its agreement is a descriptive cross-check on the same "
+        "reviews, not independent evidence that the offset model is correct.")
     add("")
     add(f"### Robustness of the fixture result (adaptive lambda = {auto.value:g})")
     add("")
@@ -822,7 +848,8 @@ def main():
         f"The winner leads the runner-up by {gap:.2f} normalized points. "
         "Every refit below reuses the already-chosen "
         f"`lambda = {rb.lam:g}` (no lambda re-selection: the certificate is "
-        "about the published ranking) and warm-starts from the full-data "
+        "conditional on that choice, not the complete adaptive procedure) "
+        "and warm-starts from the full-data "
         "fit; iteration is in sorted-id order, so the certificate is "
         "deterministic.")
     add("")
@@ -834,8 +861,9 @@ def main():
     if rb.judges_flip:
         for j in rb.judges_flip:
             new_top = ", ".join(f"`{p}`" for p in rb.judge_topk[j])
-            add(f"- without `{j}` ({names.get(j, '?')}): 1st goes to "
-                f"`{rb.judge_winner[j]}` ({titles.get(rb.judge_winner[j], '?')}); "
+            first = ", ".join(f"`{p}` ({titles[p]})" for p in rb.judge_winners[j])
+            add(f"- without `{j}` ({names.get(j, '?')}): first-place set "
+                f"{first or 'empty'}; "
                 f"new top-{rb.k}: {new_top}")
     else:
         add("None: every single-judge removal keeps the winner.")
@@ -847,34 +875,27 @@ def main():
     if rb.reviews_flip:
         for rid in rb.reviews_flip:
             judge, _, proj = rid.partition("__")
+            first = ", ".join(f"`{p}` ({titles[p]})" for p in rb.review_winners[rid])
             add(f"- without `{rid}` ({names.get(judge, '?')} on "
-                f"`{proj}` ({titles.get(proj, '?')})): 1st goes to "
-                f"`{rb.review_winner[rid]}` ({titles.get(rb.review_winner[rid], '?')})")
+                f"`{proj}` ({titles.get(proj, '?')})): first-place set {first or 'empty'}")
     else:
         add("None: every single-review removal keeps the winner.")
     add("")
-    if rb.flip_margin is None:
-        tried = min(rb.flip_cap, sum(1 for r in reviews if r.project_id == rb.winner))
-        add(f"Flip margin: 1st place holds even when {tried} of its reviews "
-            f"move to the rubric midpoint (score {rb.flip_midpoint:g}); "
-            f"flip margin > {rb.flip_cap}.")
-    elif rb.flip_margin == 1:
-        add(f"Flip margin: moving 1 review of `{rb.winner}` "
-            f"to the rubric midpoint (score {rb.flip_midpoint:g}) flips 1st "
-            f"place: `{rb.flip_reviews[0]}`.")
-    else:
-        add(f"Flip margin: moving {rb.flip_margin} reviews of `{rb.winner}` "
-            f"to the rubric midpoint (score {rb.flip_midpoint:g}) flips 1st "
-            "place: " + ", ".join(f"`{r}`" for r in rb.flip_reviews) + ".")
+    add(rb.flip_summary)
+    add(f"Search status `{rb.flip_status}`; {rb.flip_evaluations} subsets "
+        f"tested, maximum subset size {rb.flip_cap}, maximum evaluations "
+        f"{rb.flip_max_evaluations}. Only above-midpoint reviews of the "
+        "unique winner can be lowered; creating a rounded first-place tie "
+        "counts as a change. First-place sets use the official two-decimal "
+        "tie rule and top-k sets include boundary ties.")
     add("")
     add(f"In plain language: {rb.summary}")
     add("")
     if rb.flip_margin == 1:
-        frag = ("moving its single most favourable review to the midpoint "
+        frag = ("moving one of its above-midpoint reviews to the midpoint "
                 "is enough")
     elif rb.flip_margin is None:
-        frag = (f"even moving {rb.flip_cap} of its reviews to the midpoint "
-                "is not enough")
+        frag = "the tested midpoint subsets do not establish a flip count"
     else:
         frag = (f"moving {rb.flip_margin} of its reviews to the midpoint "
                 "is enough")
@@ -966,7 +987,8 @@ def main():
         f"({CAL_RANK_REPS} reps). Budget planner: "
         f"{BUDGET_JUDGES} judges / {BUDGET_PROJECTS} projects, grid "
         f"{{{', '.join(str(k) for k in BUDGET_GRID)}}}, bias {BUDGET_BIAS:g}, "
-        f"\u03c3 estimated from the fixture, {BUDGET_REPS} reps, seed "
+        f"noise explicitly assumed at {BUDGET_NOISE_MULTIPLIERS} times "
+        f"the in-sample residual dispersion, {BUDGET_REPS} reps, seed "
         f"`{BUDGET_SEED}`. No timestamps are written, so regenerating "
         f"twice gives identical bytes.")
     add("")

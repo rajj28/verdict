@@ -147,10 +147,10 @@ class T4Tests(TestCase):
         retry_time = timezone.now()
         with patch("interop.webhooks.now", return_value=retry_time), patch(
             "interop.webhooks._send", return_value=(503, 12, "Receiver returned HTTP 503.")
-        ), patch("interop.webhooks.start_delivery"):
-            from interop.webhooks import _delivery_loop
+        ), patch("interop.webhooks.connections.close_all"):
+            from interop.webhooks import claim_due, deliver_claim
 
-            _delivery_loop(delivery.pk)
+            deliver_claim(*claim_due(1)[0])
         delivery.refresh_from_db()
         self.assertEqual(delivery.attempt, 1)
         self.assertEqual(delivery.status, WebhookDelivery.Status.PENDING)
@@ -193,7 +193,7 @@ class T4Tests(TestCase):
         self.assertEqual(error, "")
         self.assertEqual(received["signature"], _signature(endpoint.secret, received["body"]))
 
-    def test_audit_actions_enqueue_after_commit_without_network_blocking_write(self):
+    def test_audit_actions_enqueue_without_network_blocking_write(self):
         endpoint = WebhookEndpoint.objects.create(
             event=self.event,
             url="https://example.invalid/hooks",
@@ -201,7 +201,7 @@ class T4Tests(TestCase):
             event_types=["project.submitted"],
             created_by=self.organizer,
         )
-        with patch("interop.webhooks.start_delivery") as start_delivery:
+        with patch("interop.webhooks._send") as send:
             with self.captureOnCommitCallbacks(execute=True):
                 audit_record(
                     self.participant,
@@ -214,7 +214,8 @@ class T4Tests(TestCase):
         delivery = WebhookDelivery.objects.get(endpoint=endpoint)
         self.assertEqual(delivery.event_type, "project.submitted")
         self.assertNotIn("private_score", json.dumps(delivery.payload))
-        start_delivery.assert_called_once_with(delivery.pk)
+        self.assertEqual(delivery.status, WebhookDelivery.Status.PENDING)
+        send.assert_not_called()
 
     @override_settings(WEBHOOKS_ALLOW_PRIVATE=False)
     def test_loopback_webhook_destination_is_refused(self):

@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Private outbox{% if event %} · {{ event.name }}{% endif %}{% endblock %}
+{% block heading %}Private outbox{% endblock %}
+{% block lead %}{% if event %}{{ event.name }} · organizer delivery{% else %}All events · administrators only{% endif %}{% endblock %}
+{% block page_actions %}
+  {% if event %}<a class="btn btn-outline-secondary" href="/manage/{{ event.slug }}/">Event overview</a>
+  {% else %}<a class="btn btn-outline-secondary" href="/admin-panel/">Admin panel</a>{% endif %}
+  <a class="btn btn-outline-secondary" href="{{ api_url }}">Read as JSON</a>
+{% endblock %}
+{% block content %}
+  <p class="alert alert-info">These messages are stored locally; no email was sent. Share each private link only with its intended recipient through a trusted channel. Organizer delivery does not independently verify mailbox ownership.</p>
+  {% for item in outbox_page %}
+    <article class="card-verdict p-4 mb-3">
+      <h2 class="h5">{{ item.subject }}</h2>
+      <dl class="row">
+        <dt class="col-sm-2">To</dt><dd class="col-sm-10">{{ item.recipients|join:", " }}</dd>
+        <dt class="col-sm-2">From</dt><dd class="col-sm-10">{{ item.from_email }}</dd>
+        <dt class="col-sm-2">Event</dt><dd class="col-sm-10">{{ item.event.name|default:"Platform message" }}</dd>
+        <dt class="col-sm-2">Queued</dt><dd class="col-sm-10"><time datetime="{{ item.created_at|date:'c' }}">{{ item.created_at }} UTC</time></dd>
+      </dl>
+      <div class="text-break">{{ item.body|linebreaksbr }}</div>
+      <p class="form-hint mt-3 mb-0">{{ item.public_id }} · stored for organizer delivery</p>
+    </article>
+  {% empty %}
+    <p class="empty-state">No messages are queued in this outbox.</p>
+  {% endfor %}
+  {% if outbox_page.has_other_pages %}
+    <nav aria-label="Outbox pages" class="d-flex gap-3">
+      {% if outbox_page.has_previous %}<a href="?page={{ outbox_page.previous_page_number }}">Previous</a>{% endif %}
+      <span>Page {{ outbox_page.number }} of {{ outbox_page.paginator.num_pages }}</span>
+      {% if outbox_page.has_next %}<a href="?page={{ outbox_page.next_page_number }}">Next</a>{% endif %}
+    </nav>
+  {% endif %}
+{% endblock %}

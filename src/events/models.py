@@ -64,6 +64,7 @@ class Event(models.Model):
     voting_close_at = models.DateTimeField(null=True, blank=True)
     max_team_size = models.PositiveSmallIntegerField(default=4)
     reviews_per_project = models.PositiveSmallIntegerField(default=3)
+    pairwise_min_comparisons = models.PositiveSmallIntegerField(default=3)
     judging_mode = models.CharField(max_length=16, choices=JudgingMode.choices,
                                     default=JudgingMode.RUBRIC)
     ranking_method = models.CharField(max_length=16, choices=RankingMethod.choices,
@@ -111,6 +112,8 @@ class Event(models.Model):
                 condition=models.Q(reviews_per_project__gte=1),
                 name="event_reviews_per_project_positive",
             ),
+            models.CheckConstraint(condition=models.Q(pairwise_min_comparisons__gte=1),
+                                   name="event_pairwise_min_positive"),
         ]
 
     def __str__(self) -> str:

@@ -23,6 +23,7 @@ from results.api_urls import urlpatterns as results_api
 from results.urls import urlpatterns as results_html
 from teams.api_urls import urlpatterns as teams_api
 from teams.urls import urlpatterns as teams_html
+from core.decision_views import DecisionRoomView, decision_page
 
 
 def api_root(request):
@@ -30,6 +31,8 @@ def api_root(request):
 
 
 urlpatterns = [
+    path("api/v1/events/<slug:slug>/decision-room", DecisionRoomView.as_view(), name="decision-room-api"),
+    path("manage/<slug:slug>/decision-room", decision_page, name="decision-room"),
     path("api/v1/", api_root, name="api-root"),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     # Split view: the Swagger bootstrap is a separate file, so the page needs no

@@ -1,0 +1,26 @@
+T1  public gallery ..... PASS
+T1  gallery search returns matching projects ..... PASS
+T1  create disposable verification event ..... PASS
+T1  create event track ..... PASS
+T1  participant creates a team ..... PASS
+T1  create project draft ..... PASS
+T1  submit project draft ..... PASS
+T1  edit submitted project ..... PASS
+T1  create invite link ..... PASS
+T1  invite-link join ..... PASS
+T1  close submissions ..... PASS
+T1  edit after close is refused ..... PASS
+T2  locked rubric rejects edits ..... PASS
+T2  organizer progress ..... PASS
+T2  other-track review isolation ..... PASS
+T2  participants CSV export ..... PASS
+T2  teams CSV export ..... PASS
+T2  projects CSV export ..... PASS
+T2  judges CSV export ..... PASS
+T2  assignments CSV export ..... PASS
+T2  reviews CSV export ..... PASS
+T2  progress CSV export ..... PASS
+T2  results CSV export ..... PASS
+T2  audit CSV export ..... PASS
+T2  normalization preview is available ..... PASS
+summary 25/25 checks passed

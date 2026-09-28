@@ -9,7 +9,7 @@ You are a worker on VERDICT, a hackathon submission/judging portal (Django 5.2 +
 ## Environment
 - Windows host. Use the repo virtualenv: `.venv\Scripts\python.exe` (create it with `python -m venv .venv` and `.venv\Scripts\python.exe -m pip install -r requirements.txt` if missing).
 - Application code lives in `src/` (Django apps, `src/templates/`, `src/static/`); `manage.py` is at the repo root and adds `src/` to `sys.path`. Tests live in the top-level `tests/` package, one `test_<area>.py` module per area; only edit the test modules your packet names.
-- Run tests with `.venv\Scripts\python.exe manage.py test tests -v 1` (or one module: `... test tests.test_import`). Local tests use SQLite (no DATABASE_URL). Do not start Docker unless your packet says so.
+- Run tests with `.venv\Scripts\python.exe manage.py test tests -v 1` (or one module: `... test tests.test_import`) after setting `DATABASE_URL` to an isolated PostgreSQL database. VERDICT only supports PostgreSQL, everywhere, including tests — there is no SQLite fallback, so a missing/invalid `DATABASE_URL` fails fast at startup. Django's test runner creates and drops its own `test_<name>` database on top of whatever you point at, so never point it at a shared/production database. If Postgres isn't reachable from the host (e.g. the Compose `db` service has no published port), run inside the container instead: `docker compose exec web python manage.py test tests`. Do not start Docker unless your packet says so.
 - Write files with LF line endings. No shell scripts. Container entrypoints are Python.
 
 ## Rules (from BUILD-SPEC section 2, do not break them)

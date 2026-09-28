@@ -3,6 +3,7 @@ import hashlib
 import secrets
 from datetime import timedelta
 
+from django.conf import settings
 from django.db import transaction
 
 from accounts.models import ApiToken
@@ -43,8 +44,12 @@ def authenticate_token(plaintext: str | None):
     """
     if not plaintext or not plaintext.startswith(TOKEN_PREFIX):
         return None
+    if not settings.DEMO_MODE and plaintext.startswith("vd_demo_"):
+        return None
     token = ApiToken.objects.select_related("user").filter(key_hash=hash_token(plaintext)).first()
     if token is None or token.revoked_at is not None:
+        return None
+    if token.is_demo and not settings.DEMO_MODE:
         return None
     user = token.user
     if not user.is_active:

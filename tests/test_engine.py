@@ -554,7 +554,7 @@ class RobustnessTests(unittest.TestCase):
     def test_dominant_winner_is_robust(self):
         # W leads by 60 points on a complete 3x3 design: no single judge
         # or review removal can touch it, and even moving all three of
-        # its reviews to the midpoint leaves it ahead (margin beyond cap).
+        # its reviews to the midpoint leaves it ahead in this named scenario.
         reviews = [
             scored(j, p, v)
             for j in ("J1", "J2", "J3")
@@ -573,7 +573,9 @@ class RobustnessTests(unittest.TestCase):
         self.assertEqual(r.reviews_flip, ())
         self.assertIsNone(r.flip_margin)
         self.assertEqual(r.flip_reviews, ())
-        self.assertIn("> 5", r.flip_summary)
+        self.assertEqual(r.flip_status, "no_change_possible")
+        self.assertEqual(r.flip_evaluations, 7)
+        self.assertIn("No first-place change", r.flip_summary)
         self.assertIn("holds in 3 of 3 single-judge removals", r.judge_summary)
         self.assertIn("holds in 9 of 9 single-review removals", r.review_summary)
 
@@ -810,7 +812,7 @@ class ReviewBudgetCurveTests(unittest.TestCase):
         )
         self.assertEqual(curve.rows[0].n_pairs, 24)
 
-    def test_sigma_estimated_from_supplied_reviews(self):
+    def test_explicit_noise_is_separate_from_residual_dispersion(self):
         reviews = [
             scored("A", f"P{i}", 60) for i in range(4)
         ] + [
@@ -818,17 +820,20 @@ class ReviewBudgetCurveTests(unittest.TestCase):
         ]
         s = score_reviews(reviews, CRIT_0_100)
         curve = review_budget_curve(
-            4, 4, reviews_per_judge_grid=(2,), sigma_noise=None,
+            4, 4, reviews_per_judge_grid=(2,), sigma_noise=15.0,
             scored=s, reps=5, seed="verdict-test",
         )
-        self.assertTrue(curve.sigma_estimated)
+        self.assertFalse(curve.sigma_estimated)
+        self.assertEqual(curve.sigma_noise, 15.0)
+        self.assertTrue(curve.experimental)
+        self.assertEqual(curve.noise_source, "explicit_simulation_assumption")
         self.assertAlmostEqual(
-            curve.sigma_noise, pooled_residual_sd(s), delta=1e-12
+            curve.residual_dispersion, pooled_residual_sd(s), delta=1e-12
         )
         with self.assertRaises(ValueError):
             review_budget_curve(
                 4, 4, reviews_per_judge_grid=(2,), sigma_noise=None,
-                reps=5, seed="verdict-test",
+                scored=s, reps=5, seed="verdict-test",
             )
 
     def test_reviews_needed_logic(self):
@@ -837,7 +842,7 @@ class ReviewBudgetCurveTests(unittest.TestCase):
             reps=20, seed="verdict-test",
         )
         needed = curve.reviews_needed(power=0.8)
-        self.assertTrue(needed in (3, 4) or needed == "> 4")
+        self.assertTrue(needed in (3, 4) or needed == "not reached on tested grid")
         # Hand-made curve: threshold logic without simulation noise.
         made = BudgetCurve(
             n_judges=2, n_projects=2, grid=(3, 4), bias=8.0,
@@ -849,7 +854,7 @@ class ReviewBudgetCurveTests(unittest.TestCase):
             ),
         )
         self.assertEqual(made.reviews_needed(power=0.8), 4)
-        self.assertEqual(made.reviews_needed(power=0.9), "> 4")
+        self.assertEqual(made.reviews_needed(power=0.9), "not reached on tested grid")
 
     def test_bad_input_raises(self):
         with self.assertRaises(ValueError):
@@ -867,6 +872,44 @@ class ReviewBudgetCurveTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             review_budget_curve(
                 6, 8, reviews_per_judge_grid=(3,), sigma_noise=1.0, reps=0)
+
+
+class LivePairwiseEngineTests(unittest.TestCase):
+    def test_live_official_ranking_preserves_derived_crosscheck(self):
+        data = [scored("J", "A", 90), scored("J", "B", 60)]
+        result = evaluate(data, CRIT_0_100, method="pairwise",
+                          comparisons=[Comparison("B", "A")])
+        self.assertEqual(result.rank["B"], "1")
+        self.assertEqual(result.rank_live, result.rank)
+        self.assertEqual(result.rank_bt["A"], "1")
+        self.assertGreater(result.live_strengths["B"], result.live_strengths["A"])
+        self.assertGreater(result.strengths["A"], result.strengths["B"])
+        self.assertFalse(result.robustness.available)
+
+    def test_explicit_empty_live_source_never_substitutes_derived_votes(self):
+        data = [scored("J", "A", 90), scored("J", "B", 60)]
+        empty = evaluate(data, CRIT_0_100, method="pairwise", comparisons=[])
+        self.assertEqual(empty.rank, {"A": "unranked", "B": "unranked"})
+        self.assertEqual(empty.live_strengths, {"A": None, "B": None})
+        self.assertEqual(empty.pairwise_components, [])
+        legacy = evaluate(data, CRIT_0_100, method="pairwise")
+        self.assertEqual(legacy.rank, legacy.rank_bt)
+        self.assertIsNone(legacy.live_strengths)
+
+    def test_live_components_exclude_unplayed_projects_and_prior_edges(self):
+        result = evaluate([], [], method="pairwise", projects=["A", "B", "C", "D", "E"],
+                          comparisons=[Comparison("B", "A"), Comparison("D", "C")])
+        self.assertEqual(result.pairwise_components, [["A", "B"], ["C", "D"]])
+        self.assertEqual(result.rank_live["E"], "unranked")
+        self.assertIsNone(result.live_strengths["E"])
+        self.assertEqual(result.strengths, dict.fromkeys(["A", "B", "C", "D", "E"]))
+
+    def test_live_outcomes_do_not_change_official_rubric_ranking(self):
+        data = [scored("J", "A", 90), scored("J", "B", 60)]
+        result = evaluate(data, CRIT_0_100, method="raw", comparisons=[Comparison("B", "A")])
+        self.assertEqual(result.rank["A"], "1")
+        self.assertEqual(result.rank_live["B"], "1")
+        self.assertEqual(result.robustness.winners, ("A",))
 
 
 if __name__ == "__main__":

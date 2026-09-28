@@ -7,7 +7,9 @@ import os
 import secrets
 import sys
 from pathlib import Path
-from urllib.parse import parse_qsl, urlparse
+from urllib.parse import parse_qsl, unquote, urlparse
+
+from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent  # src/
 REPO_DIR = BASE_DIR.parent
@@ -22,6 +24,21 @@ STATIC_ROOT = Path(os.environ.get("STATIC_ROOT") or (DATA_DIR / "static")).resol
 DEBUG = os.environ.get("DEBUG", "0") == "1"
 DEMO_MODE = os.environ.get("DEMO_MODE", "0") == "1"
 WEBHOOKS_ALLOW_PRIVATE = os.environ.get("WEBHOOKS_ALLOW_PRIVATE") == "1"
+
+# Offline messages stay in a private database outbox. Demo mode never uses SMTP.
+# Tests can still override EMAIL_BACKEND with Django's in-memory backend.
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "").strip()
+EMAIL_BACKEND = (
+    "core.mail.OutboxBackend" if DEMO_MODE or not EMAIL_HOST
+    else "django.core.mail.backends.smtp.EmailBackend"
+)
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_SSL = os.environ.get("EMAIL_USE_SSL", "0") == "1"
+EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "0" if EMAIL_USE_SSL else "1") == "1"
+EMAIL_TIMEOUT = 10
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "no-reply@verdict.local")
 
 
 def _secret_key() -> str:
@@ -116,19 +133,28 @@ TEMPLATES = [
 
 
 def _database_from_url(url: str) -> dict:
-    """Parse postgres://user:pass@host:port/name (and query params like sslmode)."""
+    """Parse postgres://user:pass@host:port/name (and query params like sslmode).
+
+    VERDICT only supports PostgreSQL; any other scheme (including sqlite://)
+    is rejected here so misconfiguration fails at startup, not at first query.
+    """
     parsed = urlparse(url)
-    if parsed.scheme not in {"postgres", "postgresql", "psql"}:
-        raise ValueError(f"Unsupported DATABASE_URL scheme: {parsed.scheme!r}")
+    if parsed.scheme not in {"postgres", "postgresql"}:
+        raise ImproperlyConfigured(
+            "DATABASE_URL must use the postgres:// or postgresql:// scheme "
+            f"(got {parsed.scheme or '<empty>'!r}). VERDICT only supports "
+            "PostgreSQL. See .env.example and AGENTS.md for how to point this "
+            "at your local Postgres (Docker Compose or an isolated container)."
+        )
     name = (parsed.path or "/").lstrip("/")
     if not name:
-        raise ValueError("DATABASE_URL is missing a database name")
+        raise ImproperlyConfigured("DATABASE_URL is missing a database name.")
     options = dict(parse_qsl(parsed.query)) if parsed.query else {}
     return {
         "ENGINE": "django.db.backends.postgresql",
         "NAME": name,
-        "USER": parsed.username or "",
-        "PASSWORD": parsed.password or "",
+        "USER": unquote(parsed.username or ""),
+        "PASSWORD": unquote(parsed.password or ""),
         "HOST": parsed.hostname or "",
         "PORT": str(parsed.port or 5432),
         "CONN_MAX_AGE": 60,
@@ -137,16 +163,16 @@ def _database_from_url(url: str) -> dict:
 
 
 _database_url = os.environ.get("DATABASE_URL") or ""
-if _database_url:
-    DATABASES = {"default": _database_from_url(_database_url)}
-else:
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.sqlite3",
-            "NAME": str(DATA_DIR / "dev.sqlite3"),
-            "OPTIONS": {"timeout": 20},
-        }
-    }
+if not _database_url:
+    raise ImproperlyConfigured(
+        "DATABASE_URL is required and must be a PostgreSQL URL "
+        "(postgres://user:pass@host:port/name). VERDICT does not support "
+        "SQLite anywhere, including tests. Point it at your local Postgres: "
+        "the Docker Compose 'db' service (via 'docker compose exec web ...' "
+        "if it has no published host port) or an isolated PostgreSQL "
+        "container/test database. See .env.example and AGENTS.md."
+    )
+DATABASES = {"default": _database_from_url(_database_url)}
 
 AUTH_USER_MODEL = "accounts.User"
 

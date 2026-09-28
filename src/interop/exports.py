@@ -16,7 +16,7 @@ import json
 from core.csvutil import write_csv
 from core.errors import ApiError
 from events.models import Event, EventRole, Role
-from judging.models import Assignment, Review, ReviewStatus
+from judging.models import Assignment, Comparison, Review, ReviewStatus
 from judging.policy import (
     engine_criteria,
     engine_reviews,
@@ -40,6 +40,7 @@ EXPORT_KINDS = (
     "progress",
     "results",
     "audit",
+    "pairwise",
 )
 
 
@@ -296,6 +297,16 @@ def results_csv(event: Event) -> str:
     acceptance-checker contract: rank, project_id, title, team, track,
     reviews, raw_mean, status.
     """
+    if event.ranking_method == "pairwise":
+        from results.services import preview
+        data = preview(event)
+        return write_csv(
+            ["rank", "project_id", "title", "team", "track", "reviews", "raw_mean", "status",
+             "live_strength", "comparisons"],
+            [[row["rank"] or "unranked", row["project_id"], row["title"], row["team"],
+              row["track"] or "", row["n_reviews"], _score_text(row["raw_mean"]), row["status"],
+              _score_text(row["live_strength"]), row["n_comparisons"]] for row in data["rows"]],
+        )
     projects = _ranked_projects(event)
     by_public_id = {project.public_id: project for project in projects}
     reviews = [
@@ -339,7 +350,18 @@ def _rank_order(rank_str: str) -> tuple[int, int]:
     """"3" sorts before "=3" for the same position, unranked rows go last."""
     if rank_str == "unranked":
         return (2, 0)
-    return (1 if rank_str.startswith("=") else 0, int(rank_str.lstrip("=")))
+    return (0, int(rank_str.lstrip("=")))
+
+
+def pairwise_csv(event: Event) -> str:
+    """Organizer history keeps abstentions and retractions explicit."""
+    comparisons = Comparison.objects.filter(event=event).select_related("judge", "left", "right", "winner")
+    return write_csv(
+        ["comparison_id", "judge_id", "left", "right", "winner", "created_at", "retracted_at"],
+        [[item.public_id, item.judge.public_id, item.left.public_id, item.right.public_id,
+          item.winner.public_id if item.winner_id else "", item.created_at.isoformat(),
+          item.retracted_at.isoformat() if item.retracted_at else ""] for item in comparisons],
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -507,6 +529,7 @@ def export_csv(event: Event, kind: str) -> str:
         "progress": progress_csv,
         "results": results_csv,
         "audit": audit_csv,
+        "pairwise": pairwise_csv,
     }
     if kind not in _dispatch:
         raise ApiError(

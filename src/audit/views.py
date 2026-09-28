@@ -10,6 +10,7 @@ from django.core.paginator import Paginator
 from django.shortcuts import get_object_or_404, render
 
 from audit.policy import visible_audit_events
+from audit.services import verify_chain
 from events.models import Event, EventRole, Role
 from events.policy import can_manage, visible_events
 
@@ -92,4 +93,6 @@ def audit_log(request, slug: str):
         "since": since,
         "action_groups": ACTION_GROUPS,
         "export_url": f"/api/v1/events/{event.slug}/exports/audit.csv",
+        "integrity": verify_chain(event),
+        "checkpoint_url": f"/api/v1/events/{event.slug}/audit/checkpoint",
     })

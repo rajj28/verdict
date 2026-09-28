@@ -15,13 +15,24 @@ services:
     restart: unless-stopped
   web:
     build: .
+    image: verdict-local
     ports:
       - "${VERDICT_PORT:-8080}:8080"
     environment:
       DATABASE_URL: postgres://verdict:${POSTGRES_PASSWORD:-verdict}@db:5432/verdict
       DEMO_MODE: ${DEMO_MODE:-1}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       SECRET_KEY: ${SECRET_KEY:-}
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:-}
+      EMAIL_HOST: ${EMAIL_HOST:-}
+      EMAIL_PORT: ${EMAIL_PORT:-587}
+      EMAIL_HOST_USER: ${EMAIL_HOST_USER:-}
+      EMAIL_HOST_PASSWORD: ${EMAIL_HOST_PASSWORD:-}
+      EMAIL_USE_TLS: ${EMAIL_USE_TLS:-1}
+      EMAIL_USE_SSL: ${EMAIL_USE_SSL:-0}
+      DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-no-reply@verdict.local}
+      WEBHOOKS_ALLOW_PRIVATE: ${WEBHOOKS_ALLOW_PRIVATE:-0}
     volumes:
       - appdata:/data
     depends_on:
@@ -33,6 +44,25 @@ services:
       timeout: 5s
       start_period: 20s
       retries: 30
+    restart: unless-stopped
+  webhook-worker:
+    build: .
+    image: verdict-local
+    command: ["python", "manage.py", "deliver_webhooks", "--workers", "2"]
+    environment:
+      DATABASE_URL: postgres://verdict:${POSTGRES_PASSWORD:-verdict}@db:5432/verdict
+      DEMO_MODE: ${DEMO_MODE:-1}
+      SECRET_KEY: ${SECRET_KEY:-}
+      WEBHOOKS_ALLOW_PRIVATE: ${WEBHOOKS_ALLOW_PRIVATE:-0}
+    volumes:
+      - appdata:/data
+    depends_on:
+      web:
+        condition: service_healthy
+    # The web image's HTTP probe is not applicable to a queue consumer.
+    healthcheck:
+      disable: true
+    stop_grace_period: 40s
     restart: unless-stopped
 volumes:
   pgdata:

@@ -27,6 +27,7 @@ from core.errors import ApiError
 INVALID_CREDENTIALS = "Email or password is incorrect."
 RESET_TOKEN_TTL = timedelta(hours=24)
 MIN_PASSWORD_LENGTH = 8
+SESSION_MODE_KEY = "verdict_session_mode"
 _dummy_hash: str | None = None
 
 
@@ -106,12 +107,17 @@ def authenticate(email: str, password: str) -> User | None:
         return None
     if not check_password(password or "", user.password):
         return None
+    # The published demo secret must stop working as soon as demo mode is off,
+    # including before bootstrap has retired credentials from an existing volume.
+    if not settings.DEMO_MODE and password == "verdict-demo":
+        return None
     return user
 
 
 def start_session(request, user: User) -> None:
     """Log the user in. The session id is rotated to defeat fixation."""
     django_login(request, user, backend="django.contrib.auth.backends.ModelBackend")
+    request.session[SESSION_MODE_KEY] = "demo" if settings.DEMO_MODE else "production"
 
 
 def end_session(request) -> None:

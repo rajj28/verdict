@@ -10,10 +10,16 @@ from datetime import timedelta
 from decimal import Decimal
 
 import audit.services
-from accounts.models import ApiToken, User
+from accounts.models import ApiToken, PasswordResetToken, User
+from accounts.services import SESSION_MODE_KEY
 from django.conf import settings
-from django.contrib.auth.hashers import make_password
+from django.contrib.auth.hashers import check_password, make_password
+from django.contrib.auth.password_validation import validate_password
+from django.contrib.sessions.models import Session
+from django.core.exceptions import ImproperlyConfigured, ValidationError
+from django.core.validators import validate_email
 from django.db import transaction
+from django.db.models import Q
 from accounts.tokens import hash_token
 from core.clock import now
 from core.ids import new_public_id
@@ -93,6 +99,9 @@ def _ensure_user(email: str, display_name: str, password_hash: str | None, *,
             user.set_unusable_password()
         user.save()
         return user
+    if not settings.DEMO_MODE:
+        # Production restarts must not reactivate accounts or restore credentials.
+        return user
     changed = []
     if password_hash and not user.has_usable_password():
         user.password = password_hash
@@ -116,10 +125,13 @@ def bootstrap() -> BootstrapReport:
     """Run every seed step. Repeated calls change nothing."""
     report = BootstrapReport()
     shared_hash = shared_password_hash()
-    admin = _ensure_user(
-        admin_email(), "Portal admin", _admin_password_hash(shared_hash),
-        is_admin=True, is_host=True,
-    )
+    if settings.DEMO_MODE:
+        admin = _ensure_user(
+            ADMIN_EMAIL, "Portal admin", shared_hash, is_admin=True, is_host=True,
+        )
+    else:
+        _retire_demo_credentials()
+        admin = _ensure_production_admin()
     organizer = _ensure_user(ORGANIZER_EMAIL, "Event organizer", shared_hash, is_host=True)
 
     if not Event.objects.filter(source_id="evt_01").exists():
@@ -141,20 +153,100 @@ def bootstrap() -> BootstrapReport:
     return report
 
 
-def admin_email() -> str:
-    """Outside DEMO_MODE the admin comes from ADMIN_EMAIL, not the demo address."""
-    if settings.DEMO_MODE:
-        return ADMIN_EMAIL
-    return (os.environ.get("ADMIN_EMAIL") or "").strip() or ADMIN_EMAIL
+def _retire_demo_credentials() -> None:
+    """Invalidate public secrets, preserving passwords already changed by operators.
+
+    Changing the password hash also invalidates existing Django sessions. Check
+    each distinct hash once: fixture accounts deliberately share a costly hash.
+    """
+    matches = {}
+    affected = []
+    for user in User.objects.select_for_update().exclude(password__startswith="!"):
+        if user.password not in matches:
+            matches[user.password] = check_password(DEMO_PASSWORD, user.password)
+        if matches[user.password]:
+            affected.append(user.pk)
+    stamp = now()
+    if affected:
+        User.objects.filter(pk__in=affected).update(password=make_password(None))
+        # Reset links and API tokens minted using public demo access must not
+        # become an alternative way back into a retired account.
+        PasswordResetToken.objects.filter(
+            Q(user_id__in=affected) | Q(created_by_id__in=affected), used_at__isnull=True,
+        ).update(used_at=stamp)
+    revoked = ApiToken.objects.filter(
+        Q(is_demo=True) | Q(prefix__startswith="vd_demo_") | Q(user_id__in=affected),
+        revoked_at__isnull=True,
+    ).update(revoked_at=stamp)
+    shortcut_users = {str(pk) for pk in User.objects.filter(
+        email__in=[email for _name, email, _plaintext in DEMO_TOKENS],
+    ).values_list("pk", flat=True)}
+    session_keys = []
+    for session in Session.objects.select_for_update().filter(expire_date__gt=stamp):
+        data = session.get_decoded()
+        mode = data.get(SESSION_MODE_KEY)
+        if mode == "demo" or (
+            mode != "production" and data.get("_auth_user_id") in shortcut_users
+        ):
+            session_keys.append(session.session_key)
+    # Legacy shortcuts did not mark their sessions. Their users must sign in
+    # again once, even if they had changed passwords before leaving demo mode.
+    sessions_retired = Session.objects.filter(session_key__in=session_keys).update(expire_date=stamp)
+    if affected or revoked or sessions_retired:
+        audit.services.record(
+            None, "bootstrap.demo_credentials_retired",
+            summary="Retired public demo credentials for production.",
+            data={"passwords_retired": len(affected), "tokens_revoked": revoked,
+                  "sessions_retired": sessions_retired},
+        )
 
 
-def _admin_password_hash(shared_hash: str) -> str:
-    """Outside DEMO_MODE the admin password comes from ADMIN_PASSWORD, not the demo one."""
-    if not settings.DEMO_MODE:
-        password = os.environ.get("ADMIN_PASSWORD") or ""
-        if password:
-            return make_password(password)
-    return shared_hash
+def _ensure_production_admin() -> User:
+    """Provision once from explicit credentials; never reset an operator's password."""
+    email = (os.environ.get("ADMIN_EMAIL") or "").strip().lower()
+    password = os.environ.get("ADMIN_PASSWORD") or ""
+    if not email:
+        for user in User.objects.filter(is_admin=True, is_active=True):
+            if user.has_usable_password():
+                return user
+        raise ImproperlyConfigured(
+            "Set ADMIN_EMAIL and ADMIN_PASSWORD to provision a production administrator."
+        )
+    try:
+        validate_email(email)
+    except ValidationError as error:
+        raise ImproperlyConfigured("ADMIN_EMAIL must be a valid email address.") from error
+    user = User.objects.select_for_update().filter(email=email).first()
+    if user is not None and user.has_usable_password():
+        if user.is_active and user.is_admin:
+            return user
+        # An existing account may only be promoted/reactivated by proving its
+        # current credential; an email collision is not authority to take it over.
+        if not password or not check_password(password, user.password):
+            raise ImproperlyConfigured(
+                "ADMIN_EMAIL names an existing account; ADMIN_PASSWORD must match its current password."
+            )
+    else:
+        if not password or password == DEMO_PASSWORD:
+            raise ImproperlyConfigured(
+                "Set a non-demo ADMIN_PASSWORD to provision the production administrator."
+            )
+        try:
+            validate_password(password, user=user)
+        except ValidationError as error:
+            raise ImproperlyConfigured("ADMIN_PASSWORD does not meet the password requirements.") from error
+        if user is None:
+            user = User(email=email, display_name="Portal admin")
+        user.set_password(password)
+    user.is_admin = True
+    user.is_host = True
+    user.is_active = True
+    user.save()
+    audit.services.record(
+        user, "bootstrap.admin_provisioned", target=user,
+        summary="Provisioned the production administrator from explicit credentials.",
+    )
+    return user
 
 
 def _import_fixture_event(admin: User) -> ImportReport:
@@ -295,6 +387,8 @@ def _ensure_demo_tokens() -> list:
 
 def banner(report: BootstrapReport) -> str:
     """The block printed on every boot so the demo credentials are never a secret."""
+    if not settings.DEMO_MODE:
+        return "VERDICT is running at http://localhost:8080 (production mode; demo credentials disabled)."
     lines = [
         "VERDICT is running at http://localhost:8080   "
         "(DEMO MODE: demo credentials below, never use in production)",

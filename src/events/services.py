@@ -17,10 +17,10 @@ EVENT_FIELDS = {
     "name", "tagline", "description", "submissions_open_at", "submissions_close_at",
     "judging_open_at", "judging_close_at", "max_team_size", "reviews_per_project",
     "judging_mode", "ranking_method", "shrinkage_lambda", "gallery_public",
-    "one_prize_per_team",
+    "one_prize_per_team", "pairwise_min_comparisons",
 }
 WINDOW_FIELDS = {"submissions_open_at", "submissions_close_at", "judging_open_at", "judging_close_at"}
-LOCKED_FIELDS = {"ranking_method", "shrinkage_lambda"}
+LOCKED_FIELDS = {"ranking_method", "shrinkage_lambda", "pairwise_min_comparisons", "judging_mode"}
 
 
 def _require_authenticated(actor):
@@ -62,6 +62,9 @@ def _validate_event_fields(data: dict) -> None:
     reviews_per_project = data.get("reviews_per_project")
     if reviews_per_project is not None and int(reviews_per_project) < 1:
         fields["reviews_per_project"] = ["Must be at least 1."]
+    minimum = data.get("pairwise_min_comparisons")
+    if minimum is not None and not 1 <= int(minimum) <= 32767:
+        fields["pairwise_min_comparisons"] = ["Must be between 1 and 32767."]
     if fields:
         raise ApiError("invalid", "Please correct the highlighted fields.", status_code=400, fields=fields)
 

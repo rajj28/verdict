@@ -1,16 +1,16 @@
 {% extends "base.html" %}
 {% block title %}Verify your vote · {{ event.name }}{% endblock %}
-{% block heading %}Verify your email{% endblock %}
+{% block heading %}Use your voting link{% endblock %}
 {% block lead %}One final step to vote in {{ event.name }}.{% endblock %}
 {% block content %}
   <section class="card-verdict p-4">
     {% if ticket %}
-      <p>Your email address is verified when you continue. It will not appear publicly.</p>
+      <p>This private link grants access to your ballot. If an organizer delivered it offline, it does not independently verify mailbox ownership. Your email will not appear publicly.</p>
       <form data-api-method="POST" data-api-url="{{ api_url }}"
             data-success="redirect:/events/{{ event.slug }}/vote?token={{ ticket|urlencode }}">
         <input type="hidden" name="token" value="{{ ticket }}">
         <div data-form-errors class="text-danger mb-2" role="alert"></div>
-        <button class="btn btn-primary" type="submit">Verify and create ballot</button>
+        <button class="btn btn-primary" type="submit">Continue and create ballot</button>
       </form>
     {% else %}
       <p class="mb-0">This verification link is missing its token.</p>

@@ -6,6 +6,7 @@ import secrets
 from django.db import transaction
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404
+from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import serializers
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -41,6 +42,12 @@ class EmailVerificationSerializer(serializers.Serializer):
 
 class EmailTicketSerializer(serializers.Serializer):
     token = serializers.CharField()
+
+
+class EmailDeliverySerializer(serializers.Serializer):
+    sent = serializers.BooleanField()
+    delivery = serializers.ChoiceField(choices=("queued", "sent"))
+    detail = serializers.CharField()
 
 
 class CommentWriteSerializer(serializers.Serializer):
@@ -151,14 +158,31 @@ class BallotView(APIView):
 class EmailVotingView(APIView):
     permission_classes = (AllowAny,)
 
+    @extend_schema(
+        operation_id="request_voting_email", tags=["Community voting"],
+        request=EmailVerificationSerializer,
+        responses={202: EmailDeliverySerializer,
+                   400: OpenApiResponse(description="Invalid email or access mode."),
+                   403: OpenApiResponse(description="Voting is closed."),
+                   409: OpenApiResponse(description="A ballot already exists."),
+                   429: OpenApiResponse(description="Request limit reached."),
+                   503: OpenApiResponse(description="Configured email service unavailable.")},
+        description="Queues a private organizer-delivered link offline, or sends via the configured email "
+                    "backend. The response never contains the link. Offline delivery does not prove mailbox ownership.",
+    )
     def post(self, request, slug):
         event = _event(slug)
         serializer = EmailVerificationSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        services.request_email_verification(
+        delivery = services.request_email_verification(
             event, serializer.validated_data["email"], request
         )
-        return Response({"sent": True}, status=202)
+        return Response({
+            "sent": delivery == "sent", "delivery": delivery,
+            "detail": ("Your link is queued for the event organizer to deliver. Contact the organizer; "
+                       "no email was sent. This offline process does not verify mailbox ownership."
+                       if delivery == "queued" else "Your voting link was accepted by the email service. Check your email."),
+        }, status=202)
 
 
 class EmailVotingVerifyView(APIView):

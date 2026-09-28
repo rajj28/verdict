@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Decision Room — {{ room.event_name }}{% endblock %}
+{% block heading %}Decision Room{% endblock %}
+{% block lead %}{{ room.event_name }} · What is unresolved, why it matters, and what to do next.{% endblock %}
+{% block page_actions %}
+<a class="btn btn-outline-secondary" href="/manage/{{ room.event }}/">Event overview</a>
+<a class="btn btn-primary" href="{{ room.links.results }}">Review results and publication</a>
+{% endblock %}
+{% block content %}
+<section class="card mb-4"><div class="card-body">
+  <h2 class="h4">{{ room.blocker_count }} blockers · {{ room.warning_count }} warnings</h2>
+  <p>Current method: {{ room.method }}. Checked {{ room.as_of }}.</p>
+  {% if not room.findings %}<p>No listed blockers were found. Complete your final review before publishing; this is not a fairness guarantee.</p>{% endif %}
+  {% if room.publication %}<p>Publication {{ room.publication.id }} ({{ room.publication.row_count|default:"unknown" }} rows, published {{ room.publication.published_at }}) · verification: {{ room.publication.verification }}. This page never runs verification automatically; open the decision record below and click Verify to check it explicitly.</p>{% endif %}
+  <p class="mb-0">No decisions are made automatically. Every action below opens its existing review workflow.</p>
+</div></section>
+{% for item in room.findings %}
+<section class="alert {% if item.severity == 'blocker' %}alert-danger{% else %}alert-warning{% endif %}">
+  <h2 class="h5">{{ item.title }}{% if item.count %} ({{ item.count }}){% endif %}</h2>
+  <p>{{ item.detail }}</p>
+  <a href="{{ item.action.href }}">{{ item.action.label }}</a>
+</section>
+{% endfor %}
+{% if room.coverage %}
+<section class="mb-4"><h2 class="h4">Missing review coverage</h2>
+<p>Showing up to 25 of {{ room.coverage_count }} projects below target. Excluded reviews do not count.</p>
+<div class="table-responsive"><table class="table"><thead><tr><th scope="col">Project</th><th scope="col">Included / target</th></tr></thead><tbody>
+{% for row in room.coverage %}<tr><td>{{ row.title }}</td><td>{{ row.reviews }} / {{ row.target }}</td></tr>{% endfor %}
+</tbody></table></div></section>
+{% endif %}
+<section class="mb-4"><h2 class="h4">Panel operations</h2>
+<p>{{ room.panel.at_risk }} judges flagged · {{ room.panel.proposed_moves }} possible untouched-work moves · {{ room.panel.unknown_pace }} unfinished judges with unknown pace.</p>
+<a href="{{ room.links.command_center }}">Inspect forecast and rebalance preview</a></section>
+<section class="mb-4"><h2 class="h4">Evidence and limits</h2>
+{% if room.preview_digest %}<p>Current preview input digest: <code class="text-break">{{ room.preview_digest }}</code></p>{% endif %}
+<ul>{% for line in room.limits %}<li>{{ line }}</li>{% endfor %}</ul>
+<a href="{{ room.links.audit }}">Inspect audit history</a> · <a href="{{ room.links.exports }}">Export event evidence</a>
+</section>
+{% endblock %}

@@ -2,7 +2,6 @@
 
 Read scoping and permission predicates. Every queryset in a view starts here.
 """
-from django.db import connection
 from django.db.models import Q, QuerySet
 
 from events.policy import is_organizer
@@ -30,19 +29,16 @@ def public_projects(event=None) -> QuerySet[Project]:
 
 
 def _filter_tag(queryset: QuerySet[Project], tag: str) -> QuerySet[Project]:
-    """Match one whole tag inside the JSON list, on either supported backend.
+    """Match one whole tag inside the JSON list.
 
-    Postgres has @> for jsonb containment; SQLite has no contains lookup on a
-    JSONField, so the same question is asked with json_each. A substring match
+    PostgreSQL is the only supported backend, and `contains` is jsonb
+    containment (`@>`) on an array: it matches the exact element `"tag"` and
+    nothing else. That exactness is the point. A substring or prefix match
     would put "go" next to every project tagged "django", which is worse than
-    useless in a filter.
+    useless in a filter, so tags are matched whole or not at all. The caller
+    lowercases the tag because tags are stored lowercased.
     """
-    if connection.vendor == "postgresql":
-        return queryset.filter(tech_tags__contains=[tag])
-    return queryset.extra(
-        where=["EXISTS (SELECT 1 FROM json_each(tech_tags) WHERE json_each.value = %s)"],
-        params=[tag],
-    )
+    return queryset.filter(tech_tags__contains=[tag])
 
 
 def filter_gallery(projects: QuerySet[Project], *, q: str = "", track: str = "",

@@ -9,7 +9,7 @@ the same selection. Nothing on this page can change state.
 {% block heading %}Audit log{% endblock %}
 {% block lead %}
   Every state change in {{ event.name }}, newest first, with who did it and what
-  it changed. Append-only: entries are never edited or removed.
+  it changed. Application writes append entries to a tamper-evident hash chain.
 {% endblock %}
 
 {% block breadcrumbs %}
@@ -24,10 +24,26 @@ the same selection. Nothing on this page can change state.
 
 {% block page_actions %}
 <a class="btn btn-outline-secondary" href="{{ export_url }}">Download CSV</a>
+<a class="btn btn-outline-secondary" href="{{ checkpoint_url }}">Save integrity checkpoint</a>
 <a class="btn btn-outline-secondary" href="/manage/{{ event.slug }}/exports">Exports</a>
 {% endblock %}
 
 {% block content %}
+
+<section class="card-verdict p-3 mb-3" aria-label="Audit integrity">
+  <h2 class="h5">{% if integrity.ok %}Retained chain verifies{% else %}Audit integrity check failed{% endif %}</h2>
+  <p>{{ integrity.checked }} entries checked against stored sequence {{ integrity.sequence }}.
+    Chain <code>{{ integrity.chain_id|default:"not started" }}</code>;
+    head <code>{{ integrity.head_hash }}</code>.</p>
+  {% for error in integrity.errors %}<p class="text-danger">{{ error }}</p>{% endfor %}
+  {% if integrity.checkpoint.legacy_entries %}
+    <p>{{ integrity.checkpoint.legacy_entries }} legacy entries were backfilled when hashing began.
+      Their earlier history was not authenticated.</p>
+  {% endif %}
+  <p class="form-hint">This detects edits, broken links, missing entries and tail deletion against the
+    retained head. A database owner can rewrite the chain and head together. Save the checkpoint
+    independently to retain an external trust anchor. This log is not tamper-proof.</p>
+</section>
 
 <form class="card-verdict p-3 mb-3" method="get" action="/manage/{{ event.slug }}/audit">
   <div class="row g-2 align-items-end">

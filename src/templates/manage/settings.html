@@ -129,11 +129,16 @@
         </div>
         <div class="col-md-4">
           <label class="form-label" for="id_judging_mode">Judging mode</label>
-          <select class="form-select" id="id_judging_mode" name="judging_mode">
+          <select class="form-select" id="id_judging_mode" name="judging_mode" {% if event.scoring_locked_at %}disabled{% endif %}>
             <option value="rubric" {% if event.judging_mode == "rubric" %}selected{% endif %}>Rubric</option>
             <option value="pairwise" {% if event.judging_mode == "pairwise" %}selected{% endif %}>Pairwise</option>
             <option value="both" {% if event.judging_mode == "both" %}selected{% endif %}>Both</option>
           </select>
+          <label class="form-label mt-3" for="id_pairwise_min">Comparisons per project per judge</label>
+          <input class="form-control" id="id_pairwise_min" name="pairwise_min_comparisons"
+                 type="number" min="1" max="32767" data-type="int" value="{{ event.pairwise_min_comparisons }}"
+                 {% if event.scoring_locked_at %}disabled{% endif %}>
+          <p class="form-hint">Pairwise judging stops at this target or when all distinct pairs are seen.</p>
         </div>
       </div>
 

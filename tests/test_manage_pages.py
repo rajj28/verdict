@@ -471,6 +471,9 @@ class ResultsPageTests(OrganizerPagesTestCase):
     def test_the_robustness_certificate_is_shown_in_plain_words(self):
         self.client.force_login(self.organizer)
         certificate = {
+            "method": "normalized",
+            "available": True,
+            "winners": (self.project.public_id,),
             "summary": "1st place holds in 1 of 1 single-judge removals.",
             "judge_summary": "The winner stays 1st when any one judge is removed.",
             "review_summary": "The winner stays 1st when any one review is removed.",

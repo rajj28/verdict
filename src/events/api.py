@@ -23,7 +23,7 @@ class EventSerializer(serializers.ModelSerializer):
             "slug", "name", "tagline", "description", "submissions_open_at", "submissions_close_at",
             "judging_open_at", "judging_close_at", "max_team_size", "reviews_per_project",
             "judging_mode", "ranking_method", "shrinkage_lambda", "gallery_public", "phase",
-            "submission_window_open",
+            "submission_window_open", "pairwise_min_comparisons",
         ]
 
     def get_phase(self, event: Event) -> str:
@@ -49,6 +49,7 @@ class EventWriteSerializer(serializers.Serializer):
     judging_close_at = serializers.DateTimeField(required=False, allow_null=True)
     max_team_size = serializers.IntegerField(required=False, min_value=1, max_value=10)
     reviews_per_project = serializers.IntegerField(required=False, min_value=1)
+    pairwise_min_comparisons = serializers.IntegerField(required=False, min_value=1, max_value=32767)
     judging_mode = serializers.ChoiceField(choices=JudgingMode.choices, required=False)
     ranking_method = serializers.ChoiceField(choices=RankingMethod.choices, required=False)
     shrinkage_lambda = serializers.DecimalField(max_digits=5, decimal_places=2, required=False)

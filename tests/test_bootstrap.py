@@ -1,5 +1,7 @@
 """core.bootstrap: repeated boots must not duplicate or reset anything."""
+import os
 from io import StringIO
+from unittest.mock import patch
 
 from django.core.management import call_command
 from django.test import TestCase, override_settings
@@ -170,6 +172,14 @@ class BootstrapDemoTests(TestCase):
 
 
 class BootstrapWithoutDemoModeTests(TestCase):
+    def setUp(self):
+        environment = patch.dict(os.environ, {
+            "ADMIN_EMAIL": "admin@verdict.local",
+            "ADMIN_PASSWORD": "production-admin-password",
+        })
+        environment.start()
+        self.addCleanup(environment.stop)
+
     @override_settings(DEMO_MODE=False)
     def test_no_demo_tokens_exist(self):
         report = bootstrap()
@@ -183,10 +193,12 @@ class BootstrapWithoutDemoModeTests(TestCase):
     @override_settings(DEMO_MODE=False)
     def test_seeded_users_get_unusable_passwords(self):
         bootstrap()
-        for email in ("priya1@example.org", "organizer@verdict.local", "admin@verdict.local"):
+        for email in ("priya1@example.org", "organizer@verdict.local"):
             user = User.objects.get(email=email)
             self.assertFalse(user.has_usable_password(), f"{email} can still be logged into")
             self.assertFalse(user.check_password(DEMO_PASSWORD))
+        self.assertTrue(User.objects.get(email="admin@verdict.local")
+                        .check_password("production-admin-password"))
 
     @override_settings(DEMO_MODE=False)
     def test_both_events_are_still_seeded(self):

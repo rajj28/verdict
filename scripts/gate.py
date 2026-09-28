@@ -23,6 +23,7 @@ passed, else 1.
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -134,6 +135,25 @@ def _run(cmd: list[str], timeout: float) -> tuple[int, str, str, float]:
         )
 
 
+def _database_url_error() -> str | None:
+    """Return an actionable error message if DATABASE_URL is missing/invalid."""
+    url = os.environ.get("DATABASE_URL") or ""
+    if not url:
+        return (
+            "DATABASE_URL is not set. VERDICT requires PostgreSQL: set it to "
+            "postgres://user:pass@host:port/name (see .env.example). If the "
+            "Compose 'db' service has no published host port, run gate steps "
+            "inside the container instead: docker compose exec web ..."
+        )
+    scheme = url.split("://", 1)[0].lower() if "://" in url else ""
+    if scheme not in {"postgres", "postgresql"}:
+        return (
+            f"DATABASE_URL scheme {scheme or '<none>'!r} is not supported; use "
+            "postgres:// or postgresql://. SQLite is not supported anywhere."
+        )
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the gate steps in order; return 0 iff every step passed."""
     parser = argparse.ArgumentParser(description="VERDICT quality gate.")
@@ -145,6 +165,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     overall = True
+
+    db_error = _database_url_error()
+    if db_error:
+        print(format_step("database", False, db_error, 0.0), flush=True)
+        return 1
 
     # (1) Django system check.
     code, out, err, seconds = _run([PY, "manage.py", "check"], 180)

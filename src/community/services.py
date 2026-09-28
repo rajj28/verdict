@@ -9,7 +9,6 @@ from typing import Any
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core import signing
-from django.core.mail import send_mail
 from django.db import models, transaction
 
 import audit.services
@@ -27,6 +26,7 @@ from community.models import (
 )
 from core.clock import now
 from core.errors import ApiError
+from core.mail import EmailDeliveryError, send_event_mail, uses_outbox
 from events.models import Event, EventRole, Role
 from events.policy import is_organizer
 from projects.models import Project
@@ -194,7 +194,9 @@ def _get_or_create_ballot(event: Event, user: Any, request: Any, *,
     _reject_duplicate(voter)
     return _make_voter(
         event, VoterKind.EMAIL, request, email_hash=email_hash,
-        verified_at=now(),
+        # Legacy tickets still grant ballot access, but unknown delivery does
+        # not establish mailbox ownership.
+        verified_at=now() if payload.get("delivery") == "email" else None,
     )[1]
 
 
@@ -203,7 +205,7 @@ def secrets_compare(first: str, second: str) -> bool:
     return hmac.compare_digest(first, second)
 
 
-def request_email_verification(event: Event, email: str, request: Any) -> None:
+def request_email_verification(event: Event, email: str, request: Any) -> str:
     with transaction.atomic():
         locked_event = Event.objects.select_for_update().get(pk=event.pk)
         config = _get_config(locked_event)
@@ -217,23 +219,28 @@ def request_email_verification(event: Event, email: str, request: Any) -> None:
         existing = _existing_voter(locked_event, email_hash=email_hash)
         _reject_duplicate(existing)
         ticket = signing.dumps(
-            {"event": locked_event.slug, "email_hash": email_hash}, salt=EMAIL_SALT
+            {"event": locked_event.slug, "email_hash": email_hash,
+             "delivery": "outbox" if uses_outbox() else "email"}, salt=EMAIL_SALT
         )
         link = request.build_absolute_uri(
             f"/events/{locked_event.slug}/vote/verify?token={ticket}"
         )
-        send_mail(
-            subject=f"Verify your vote for {locked_event.name}",
-            message=f"Open this link to verify your email and vote: {link}",
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[normalized],
-            fail_silently=False,
-        )
+        try:
+            delivery = send_event_mail(
+                event=locked_event, subject=f"Your voting link for {locked_event.name}",
+                message=f"Use this private link to access your ballot: {link}",
+                recipient_list=[normalized],
+            )
+        except EmailDeliveryError as exc:
+            raise ApiError("email_unavailable", "The email service is unavailable. Please try again later.",
+                           status_code=503) from exc
         audit.services.record(
-            None, "community.voter.verification_sent", event=locked_event,
-            summary="An email voting verification link was sent.",
-            data={"email_hash": email_hash[:16]}, request=request,
+            None, f"community.voter.verification_{delivery}", event=locked_event,
+            summary=("A voting link was queued for organizer delivery."
+                     if delivery == "queued" else "A voting link was accepted by the email service."),
+            data={"delivery": delivery}, request=request,
         )
+        return delivery
 
 
 def configure_voting(event: Event, user: Any, data: dict[str, Any],

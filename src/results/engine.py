@@ -17,6 +17,7 @@ import math
 import random
 from collections import Counter
 from dataclasses import dataclass, field
+from itertools import combinations
 from typing import Collection, Iterable, Mapping, Sequence
 
 #: Convergence tolerance for the iterative fits (BUILD-SPEC 9).
@@ -175,6 +176,9 @@ class Result:
     spread_before: float = 0.0
     spread_after: float = 0.0
     strengths: dict[str, float | None] = field(default_factory=dict)
+    live_strengths: dict[str, float | None] | None = None
+    rank_live: dict[str, str] = field(default_factory=dict)
+    pairwise_components: list[list[str]] = field(default_factory=list)
     components: list[set[str]] = field(default_factory=list)
     robustness: Robustness | None = None
 
@@ -972,16 +976,16 @@ def select_lambda(
 #: half its weight, so the 0-100 score is exactly 50 whatever the weights.
 FLIP_MIDPOINT = 50.0
 
-#: Max winner reviews moved in the flip-margin probe; a winner that still
-#: holds after that is reported as needing more than the cap (``"> 5"``).
+#: Maximum subset size and total refits in the midpoint perturbation search.
 FLIP_CAP = 5
+FLIP_MAX_EVALUATIONS = 256
 
 
 @dataclass(frozen=True)
 class Robustness:
     """Winner-robustness certificate for one fitted ranking (see :func:`robustness`)."""
 
-    winner: str | None  # official 1st place (None when there are no reviews)
+    winner: str | None  # unique first place only; None for ties or unavailable
     top_k: tuple[str, ...]  # official top-k, best first
     lam: float  # the reused official lambda (never re-selected here)
     k: int
@@ -995,7 +999,7 @@ class Robustness:
     review_holds: int  # single-review removals where 1st place holds
     reviews_flip: tuple[str, ...]  # review ids whose removal changes the winner
     review_winner: dict[str, str | None]  # review id -> new winner
-    flip_margin: int | None  # smallest flipping prefix; None means > flip_cap
+    flip_margin: int | None  # exact minimum in the named search; see flip_status
     flip_cap: int
     flip_reviews: tuple[str, ...]  # winner reviews moved at the margin
     flip_midpoint: float
@@ -1003,11 +1007,26 @@ class Robustness:
     judge_summary: str
     review_summary: str
     flip_summary: str
+    method: str = "normalized"
+    available: bool = True
+    winners: tuple[str, ...] = ()
+    judge_winners: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    review_winners: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    assumption: str = ""
+    flip_status: str = "not_applicable"
+    flip_evaluations: int = 0
+    flip_max_evaluations: int = FLIP_MAX_EVALUATIONS
+    flip_searched_through: int = 0
 
 
-def _ordered(mu: Mapping[str, float]) -> list[str]:
-    """Best-first project order; ties break by project id (deterministic)."""
-    return sorted(mu, key=lambda p: (-mu[p], p))
+def _rank_sets(values: Mapping[str, float], top_k: int):
+    """Official rounded winner/top-k sets, including ties at the boundary."""
+    ranks = rank(values)
+    ordered = sorted(values, key=lambda p: (-round(values[p], 2), p))
+    return (
+        tuple(p for p in ordered if ranks[p].lstrip("=") == "1"),
+        tuple(p for p in ordered if int(ranks[p].lstrip("=")) <= top_k),
+    )
 
 
 def robustness(
@@ -1016,32 +1035,31 @@ def robustness(
     lam: float,
     top_k: int = 3,
     flip_cap: int = FLIP_CAP,
+    *,
+    method: str = "normalized",
+    flip_max_evaluations: int = FLIP_MAX_EVALUATIONS,
 ) -> Robustness:
-    """Certify how hard the fitted winner is to dislodge.
+    """Conditional sensitivity under the official rounded ranking rule.
 
-    Three probes, all refits reusing the official ``lam`` (no lambda
-    re-selection: the certificate is about the published ranking, and it
-    keeps the fixture cost to ~150 warm-started fits) and warm-starting
-    from the full-data fit. Iteration is in sorted-id order throughout,
-    so the certificate is deterministic.
+    Raw means or normalized scores are recomputed after each removal.
+    Normalized refits hold the selected lambda fixed, not the complete
+    adaptive procedure. Pairwise sensitivity is explicitly unavailable.
+    Winner sets (including ties) must be identical for a removal to hold.
 
-    - Leave-one-judge-out: drop each judge's reviews, refit, record the
-      new winner and top-k.
-    - Leave-one-review-out: same per review.
-    - Flip margin: move the winner's reviews to the rubric midpoint
-      (0-100 score 50, whatever the weights) greedily, most favourable
-      first; the margin is the smallest prefix that drops the winner
-      from 1st place, capped at ``flip_cap`` (``None`` means more than
-      the cap is needed).
-
-    ``reviews`` may be :class:`ReviewInput` (then ``criteria`` is
-    required to score them) or already-scored :class:`ScoredReview`
-    (then ``criteria`` is unused). ``top_k`` must be at least 1.
+    For a unique winner, test subsets of its above-midpoint reviews in
+    increasing size, replacing those scores with 50. A found margin is
+    the exact minimum for this named perturbation, including creating a
+    first-place tie. ``None`` means consult ``flip_status``; the search
+    stops at either cap and makes no claim about untested subsets.
     """
+    if method not in _OFFICIAL_METHODS:
+        raise ValueError(f"method must be one of {_OFFICIAL_METHODS}")
     if top_k < 1:
         raise ValueError("top_k must be at least 1")
     if flip_cap < 1:
         raise ValueError("flip_cap must be at least 1")
+    if flip_max_evaluations < 1:
+        raise ValueError("flip_max_evaluations must be at least 1")
     items = list(reviews)
     if items and isinstance(items[0], ReviewInput):
         if criteria is None:
@@ -1054,14 +1072,17 @@ def robustness(
     if lam < 0:
         raise ValueError("lam must be non-negative")
 
+    scored.sort(key=lambda r: r.review_id)
     midpoint = FLIP_MIDPOINT
-    base = fit_additive(scored, lam)
-    ordered = _ordered(base.mu)
-    winner = ordered[0] if ordered else None
-    topk = tuple(ordered[:top_k])
-    topk_set = set(topk)
+    assumption = (
+        f"Official normalized ranking, rounded to 2 decimals; conditional on "
+        f"the selected lambda = {lam:g}, held fixed in every refit. "
+        "The adaptive lambda selection procedure is not rerun."
+        if method == "normalized" else
+        "Official raw means, rounded to 2 decimals; no lambda adjustment."
+    )
 
-    def empty(summary: str, part: str) -> Robustness:
+    def empty(summary: str, part: str, available: bool = True) -> Robustness:
         return Robustness(
             winner=None,
             top_k=(),
@@ -1085,25 +1106,57 @@ def robustness(
             judge_summary=part,
             review_summary=part,
             flip_summary=part,
+            method=method,
+            available=available,
+            assumption=assumption if available else part,
+            flip_max_evaluations=flip_max_evaluations,
         )
 
-    if winner is None:
+    if method == "pairwise":
+        return empty(
+            "Robustness unavailable for the official pairwise ranking.",
+            "Pairwise removal and midpoint sensitivity are not implemented; "
+            "rubric normalization is not a substitute for pairwise outcomes.",
+            available=False,
+        )
+    if not scored:
         return empty(
             "No included reviews, so there is no winner to defend.",
             "No included reviews.",
         )
 
+    base = fit_additive(scored, lam) if method == "normalized" else None
+
+    def ranking(data):
+        if method == "normalized":
+            # A removed edge can split the graph. With lambda=0, a warm
+            # start can preserve component levels that a fresh fit would
+            # not choose; follow the official cold-start convention.
+            values = fit_additive(data, lam, init=base if lam > 0 else None).mu
+        else:
+            totals: dict[str, list[float]] = {}
+            for r in data:
+                totals.setdefault(r.project_id, []).append(r.score)
+            values = {p: sum(xs) / len(xs) for p, xs in totals.items()}
+        return _rank_sets(values, top_k)
+
+    winners, topk = _rank_sets(base.mu, top_k) if base is not None else ranking(scored)
+    winner = winners[0] if len(winners) == 1 else None
+    topk_set = set(topk)
+
+    def label(ids):
+        return ", ".join(ids) if ids else "no ranked project"
+
     judges = sorted({r.judge_id for r in scored})
     judge_winner: dict[str, str | None] = {}
+    judge_winners: dict[str, tuple[str, ...]] = {}
     judge_topk: dict[str, tuple[str, ...]] = {}
     for j in judges:
-        refit = fit_additive(
-            [r for r in scored if r.judge_id != j], lam, init=base
-        )
-        sub = _ordered(refit.mu)
-        judge_winner[j] = sub[0] if sub else None
-        judge_topk[j] = tuple(sub[:top_k])
-    judges_flip = tuple(j for j in judges if judge_winner[j] != winner)
+        first, top = ranking([r for r in scored if r.judge_id != j])
+        judge_winners[j] = first
+        judge_winner[j] = first[0] if len(first) == 1 else None
+        judge_topk[j] = top
+    judges_flip = tuple(j for j in judges if judge_winners[j] != winners)
     judge_holds = len(judges) - len(judges_flip)
     topk_holds = sum(
         1 for j in judges if set(judge_topk[j]) == topk_set
@@ -1111,75 +1164,91 @@ def robustness(
 
     rids = sorted(r.review_id for r in scored)
     review_winner: dict[str, str | None] = {}
+    review_winners: dict[str, tuple[str, ...]] = {}
     for rid in rids:
-        refit = fit_additive(
-            [r for r in scored if r.review_id != rid], lam, init=base
-        )
-        sub = _ordered(refit.mu)
-        review_winner[rid] = sub[0] if sub else None
-    reviews_flip = tuple(rid for rid in rids if review_winner[rid] != winner)
+        first, _ = ranking([r for r in scored if r.review_id != rid])
+        review_winners[rid] = first
+        review_winner[rid] = first[0] if len(first) == 1 else None
+    reviews_flip = tuple(rid for rid in rids if review_winners[rid] != winners)
     review_holds = len(rids) - len(reviews_flip)
 
     flip_margin: int | None = None
     flip_reviews: tuple[str, ...] = ()
     won = sorted(
-        (r for r in scored if r.project_id == winner),
-        key=lambda r: (-r.score, r.review_id),
+        (r for r in scored if r.project_id == winner and r.score > midpoint),
+        key=lambda r: r.review_id,
     )
-    tried = min(flip_cap, len(won))
-    for m in range(1, tried + 1):
-        moved = {r.review_id for r in won[:m]}
-        altered = [
-            ScoredReview(r.review_id, r.judge_id, r.project_id,
-                         midpoint if r.review_id in moved else r.score)
-            for r in scored
-        ]
-        refit = fit_additive(altered, lam, init=base)
-        sub = _ordered(refit.mu)
-        if not sub or sub[0] != winner:
-            flip_margin = m
-            flip_reviews = tuple(r.review_id for r in won[:m])
+    evaluations = 0
+    searched_through = 0
+    flip_status = "no_change_possible" if len(won) <= flip_cap else "size_capped"
+    for m in range(1, min(flip_cap, len(won)) + 1):
+        for subset in combinations(won, m):
+            if evaluations >= flip_max_evaluations:
+                flip_status = "search_capped"
+                break
+            moved = {r.review_id for r in subset}
+            altered = [
+                ScoredReview(r.review_id, r.judge_id, r.project_id,
+                             midpoint if r.review_id in moved else r.score)
+                for r in scored
+            ]
+            evaluations += 1
+            first, _ = ranking(altered)
+            if first != winners:
+                flip_margin = m
+                flip_reviews = tuple(r.review_id for r in subset)
+                flip_status = "found"
+                break
+        if flip_status in ("found", "search_capped"):
             break
+        searched_through = m
 
     if judges_flip:
         detail = "; " + "; ".join(
-            f"without {j} 1st goes to {judge_winner[j]}" for j in judges_flip
+            f"without {j} 1st goes to {label(judge_winners[j])}" for j in judges_flip
         )
     else:
-        detail = "; no single-judge removal changes the winner"
+        detail = "; no single-judge removal changes the first-place set"
     judge_summary = (
-        f"1st place ({winner}) holds in {judge_holds} of {len(judges)} "
-        f"single-judge removals; the top-{top_k} set holds in "
+        f"1st place ({label(winners)}) holds in {judge_holds} of {len(judges)} "
+        f"single-judge removals; the top-{top_k} set (including boundary ties) holds in "
         f"{topk_holds} of {len(judges)}{detail}."
     )
     if reviews_flip:
         rdetail = "; flipping removals: " + ", ".join(
-            f"{rid} -> {review_winner[rid]}" for rid in reviews_flip
+            f"{rid} -> {label(review_winners[rid])}" for rid in reviews_flip
         )
     else:
-        rdetail = "; no single-review removal changes the winner"
+        rdetail = "; no single-review removal changes the first-place set"
     review_summary = (
-        f"1st place ({winner}) holds in {review_holds} of {len(rids)} "
+        f"1st place ({label(winners)}) holds in {review_holds} of {len(rids)} "
         f"single-review removals{rdetail}."
     )
-    if flip_margin is None:
+    if winner is None:
+        flip_status = "not_applicable"
+        flip_summary = "Shared first place: no unique winner to perturb."
+    elif flip_status == "no_change_possible":
         flip_summary = (
-            f"1st place ({winner}) holds even when {tried} of its reviews "
-            f"move to the rubric midpoint ({midpoint:g}); "
-            f"flip margin > {flip_cap}."
+            f"No first-place change in any subset of the {len(won)} "
+            f"above-midpoint reviews of {winner} moved down to {midpoint:g}. "
+            "This is only a midpoint scenario, not a general robustness guarantee."
         )
-    elif flip_margin == 1:
+    elif flip_margin is None:
         flip_summary = (
-            f"Moving 1 review of {winner} to the rubric midpoint "
-            f"({midpoint:g}) flips 1st place (review: {flip_reviews[0]})."
+            f"Midpoint search capped after {evaluations} subsets; all subsets "
+            f"of size up to {searched_through} were tested without a change. "
+            "The minimum changed-review count is unknown."
         )
     else:
         flip_summary = (
-            f"Moving {flip_margin} reviews of {winner} to the rubric "
-            f"midpoint ({midpoint:g}) flips 1st place "
-            f"(reviews: {', '.join(flip_reviews)})."
+            f"Moving {flip_margin} review(s) of {winner} down to the rubric "
+            f"midpoint ({midpoint:g}) changes the first-place set "
+            f"(reviews: {', '.join(flip_reviews)}). This is the exact minimum "
+            "among subsets of this winner's above-midpoint reviews; "
+            "creating a first-place tie counts as a change."
         )
-    summary = f"{judge_summary} {review_summary} {flip_summary}"
+    tie_note = "Shared first place; no unique winner. " if winner is None else ""
+    summary = f"{assumption} {tie_note}{judge_summary} {review_summary} {flip_summary}"
     return Robustness(
         winner=winner,
         top_k=topk,
@@ -1203,7 +1272,44 @@ def robustness(
         judge_summary=judge_summary,
         review_summary=review_summary,
         flip_summary=flip_summary,
+        method=method,
+        winners=winners,
+        judge_winners=judge_winners,
+        review_winners=review_winners,
+        assumption=assumption,
+        flip_status=flip_status,
+        flip_evaluations=evaluations,
+        flip_max_evaluations=flip_max_evaluations,
+        flip_searched_through=searched_through,
     )
+
+
+def _comparison_components(
+    comparisons: Sequence[Comparison], projects: Collection[str]
+) -> list[list[str]]:
+    """Observed project components; the virtual prior creates no real edges."""
+    known = set(projects)
+    adjacency: dict[str, set[str]] = {}
+    for outcome in comparisons:
+        if (outcome.weight <= 0 or outcome.winner == outcome.loser
+                or outcome.winner not in known or outcome.loser not in known):
+            continue
+        adjacency.setdefault(outcome.winner, set()).add(outcome.loser)
+        adjacency.setdefault(outcome.loser, set()).add(outcome.winner)
+    unseen = set(adjacency)
+    groups = []
+    while unseen:
+        pending = [min(unseen)]
+        group = set()
+        while pending:
+            project = pending.pop()
+            if project in group:
+                continue
+            group.add(project)
+            pending.extend(adjacency[project] - group)
+        unseen -= group
+        groups.append(sorted(group))
+    return groups
 
 
 def evaluate(
@@ -1213,6 +1319,7 @@ def evaluate(
     target: int = 3,
     method: str = "normalized",
     projects: Collection[str] | None = None,
+    comparisons: Sequence[Comparison] | None = None,
 ) -> Result:
     """Bundle every engine output for a results preview.
 
@@ -1222,7 +1329,16 @@ def evaluate(
     :func:`select_lambda` procedure; the chosen value is stored on
     ``Result.lam`` and the full choice on ``Result.lambda_choice``.
     ``Result.robustness`` always carries the :func:`robustness`
-    certificate for the fitted (normalized) ranking at that lambda.
+    certificate for the official rule, or an explicit unavailable result
+    for pairwise sensitivity. Normalized sensitivity holds lambda fixed.
+
+    Explicit ``comparisons`` selects the live source for a pairwise official
+    ranking, including an empty list (all unranked). ``None`` preserves the
+    legacy rubric-derived source. ``strengths`` and ``rank_bt`` always remain
+    the derived cross-check; ``live_strengths``/``rank_live`` hold live output.
+    ``pairwise_components`` includes only observed outcome vertices. The
+    prior cannot establish comparison evidence between those groups; callers
+    must withhold an overall official order when there are multiple groups.
     """
     if method not in _OFFICIAL_METHODS:
         raise ValueError(f"method must be one of {_OFFICIAL_METHODS}")
@@ -1238,7 +1354,16 @@ def evaluate(
         lam_value = lambda_choice.value
     else:
         lam_value = float(lam)
-    known = sorted(set(projects or ()) | {r.project_id for r in reviews})
+    live = None if comparisons is None else sorted(
+        comparisons, key=lambda c: (c.winner, c.loser, c.weight)
+    )
+    if live is not None and any(not math.isfinite(c.weight) for c in live):
+        raise ValueError("comparison weights must be finite")
+    known_set = set(projects or ()) | {r.project_id for r in reviews}
+    if projects is None and live is not None:
+        known_set.update(c.winner for c in live)
+        known_set.update(c.loser for c in live)
+    known = sorted(known_set)
     raw = {
         p: (sum(r.score for r in scored if r.project_id == p) / n, n)
         for p in known
@@ -1252,13 +1377,22 @@ def evaluate(
     rank_bt = rank({i: s for i, s in strengths.items() if s is not None})
     for i in known:
         rank_bt.setdefault(i, "unranked")
-    primary = {"normalized": rank_norm, "raw": rank_raw, "pairwise": rank_bt}[
+    live_strengths = None if live is None else bradley_terry(live, known)
+    rank_live = {}
+    live_components = []
+    if live_strengths is not None:
+        rank_live = rank({p: s for p, s in live_strengths.items() if s is not None})
+        for p in known:
+            rank_live.setdefault(p, "unranked")
+        live_components = _comparison_components(live, known)
+    primary = {"normalized": rank_norm, "raw": rank_raw,
+               "pairwise": rank_live if live is not None else rank_bt}[
         method
     ]
     judges = judge_table(scored, fit)
     diag = diagnostics(reviews, target, known)
     sp = spread(scored, fit)
-    rob = robustness(reviews, criteria, lam_value)
+    rob = robustness(reviews, criteria, lam_value, method=method)
     return Result(
         method=method,
         lam=lam_value,
@@ -1279,6 +1413,9 @@ def evaluate(
         spread_before=sp.before,
         spread_after=sp.after,
         strengths=strengths,
+        live_strengths=live_strengths,
+        rank_live=rank_live,
+        pairwise_components=live_components,
         components=components(scored),
         robustness=rob,
     )
@@ -1454,7 +1591,7 @@ class BudgetRow:
 
 @dataclass(frozen=True)
 class BudgetCurve:
-    """Review-budget curve over a grid of reviews-per-judge values."""
+    """Experimental simulation scenarios, not calibrated live-event power."""
 
     n_judges: int
     n_projects: int
@@ -1462,31 +1599,43 @@ class BudgetCurve:
     bias: float  # primary bias for reviews_needed()
     biases: tuple[float, ...]  # all reported bias points
     sigma_noise: float
-    sigma_estimated: bool
+    sigma_estimated: bool  # retained for compatibility; now always False
     reps: int
     seed: str | int
     lam: float
     rows: tuple[BudgetRow, ...]
+    residual_dispersion: float | None = None
+    noise_source: str = "explicit_simulation_assumption"
+    experimental: bool = True
+    assumptions: tuple[str, ...] = (
+        "Fixed lambda; adaptive selection is not simulated.",
+        "Balanced track-agnostic assignments, one seeded design per budget.",
+        "Independent homoskedastic Gaussian errors; scores are not clipped.",
+        "One positive judge offset injected at a time; threshold is +2 null SD.",
+        "Monte Carlo detection shares are conditional, not calibrated guarantees.",
+    )
 
     def reviews_needed(self, power: float = 0.8) -> int | str:
-        """Smallest grid value reaching ``power`` at the primary bias.
+        """Smallest tested budget reaching ``power`` in this assumed scenario.
 
-        Returns the grid value, or ``"> {max grid}"`` when no grid
-        value reaches it.
+        No extrapolation to untested budgets or real-event detection.
         """
-        for row in self.rows:
+        if not 0 <= power <= 1:
+            raise ValueError("power must be between 0 and 1")
+        for row in sorted(self.rows, key=lambda row: row.reviews_per_judge):
             if row.power.get(self.bias, 0.0) >= power:
                 return row.reviews_per_judge
-        return f"> {max(self.grid)}"
+        return "not reached on tested grid"
 
 
 def pooled_residual_sd(
     scored: Sequence[ScoredReview], lam: float = 2.0
 ) -> float:
-    """Pooled residual SD of the additive fit at ``lam``.
+    """In-sample residual dispersion of the additive fit at ``lam``.
 
-    Residuals are ``s_r - mu_p - b_j``; the estimate is
-    ``sqrt(SSE / n)`` (population SD of the residuals).
+    Residuals are ``s_r - mu_p - b_j``; return ``sqrt(SSE / n)``.
+    This is not a calibrated estimate of generating noise: fitting
+    consumes degrees of freedom and shrinkage affects the residuals.
     """
     data = list(scored)
     if not data:
@@ -1544,7 +1693,7 @@ def review_budget_curve(
     lam: float = 2.0,
     bias_grid: Sequence[float] | None = None,
 ) -> BudgetCurve:
-    """Median offset SE and bias-detection power vs reviews per judge.
+    """Experimental conditional detection shares vs reviews per judge.
 
     For each grid value a balanced random design with ``n_judges``
     judges and ``n_projects`` projects (same id sets, track-agnostic;
@@ -1554,14 +1703,15 @@ def review_budget_curve(
     (default: the primary ``bias`` plus 12.0, so the proof's power-at-8
     and power-at-12 columns come from one call).
 
-    When ``sigma_noise`` is None it is estimated from ``scored`` via
-    :func:`pooled_residual_sd` at ``lam`` and reported (``scored`` is
-    then required). Use ``BudgetCurve.reviews_needed(power=0.8)`` for
-    the smallest grid value reaching 80% power at the primary bias
-    (or ``"> max"``). Pure and deterministic: designs derive from
+    ``sigma_noise`` must be an explicit simulation assumption. Optional
+    ``scored`` inputs report in-sample residual dispersion separately;
+    this dispersion is never silently used as generating noise. Compare
+    calls at different assumed noise levels to assess sensitivity. This
+    does not calibrate the full adaptive live procedure. Pure and
+    deterministic: designs derive from
     ``seed`` per grid value and estimability reseeds per row.
     """
-    grid = tuple(int(k) for k in reviews_per_judge_grid)
+    grid = tuple(sorted({int(k) for k in reviews_per_judge_grid}))
     if n_judges < 1:
         raise ValueError("review_budget_curve needs at least 1 judge")
     if n_projects < 1:
@@ -1570,14 +1720,16 @@ def review_budget_curve(
         raise ValueError("review_budget_curve needs a non-empty grid")
     if any(k < 1 for k in grid):
         raise ValueError("reviews-per-judge grid values must be positive")
+    if any(k > n_projects for k in grid):
+        raise ValueError("reviews per judge cannot exceed distinct projects")
     if bias <= 0:
         raise ValueError("bias must be positive")
     if reps < 1:
         raise ValueError("review_budget_curve needs at least 1 rep")
     if lam < 0:
         raise ValueError("lam must be non-negative")
-    if sigma_noise is not None and sigma_noise < 0:
-        raise ValueError("sigma_noise must be non-negative")
+    if sigma_noise is None or not math.isfinite(sigma_noise) or sigma_noise < 0:
+        raise ValueError("sigma_noise must be an explicit finite non-negative assumption")
     if bias_grid is None:
         biases = tuple(sorted({float(bias), 12.0}))
     else:
@@ -1586,15 +1738,7 @@ def review_budget_curve(
             raise ValueError("bias_grid must be non-empty")
         if any(b <= 0 for b in biases):
             raise ValueError("bias_grid values must be positive")
-    estimated = False
-    if sigma_noise is None:
-        if scored is None:
-            raise ValueError(
-                "review_budget_curve needs scored reviews "
-                "to estimate sigma_noise"
-            )
-        sigma_noise = pooled_residual_sd(list(scored), lam)
-        estimated = True
+    residual_dispersion = pooled_residual_sd(scored, lam) if scored else None
     sigma = float(sigma_noise)
     rows: list[BudgetRow] = []
     for k in grid:
@@ -1627,9 +1771,10 @@ def review_budget_curve(
         bias=float(bias),
         biases=biases,
         sigma_noise=sigma,
-        sigma_estimated=estimated,
+        sigma_estimated=False,
         reps=reps,
         seed=seed,
         lam=float(lam),
         rows=tuple(rows),
+        residual_dispersion=residual_dispersion,
     )

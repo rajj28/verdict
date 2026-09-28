@@ -56,6 +56,8 @@ class WebhookDelivery(models.Model):
     response_ms = models.PositiveIntegerField(null=True, blank=True)
     error = models.CharField(max_length=500, blank=True)
     next_attempt_at = models.DateTimeField(null=True, blank=True)
+    lease_token = models.CharField(max_length=32, blank=True, default="")
+    lease_expires_at = models.DateTimeField(null=True, blank=True)
     delivered_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 

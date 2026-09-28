@@ -25,6 +25,13 @@ def require_organizer(user, event: Event) -> None:
         )
 
 
+def require_admin(user) -> None:
+    if user is None or not getattr(user, "is_authenticated", False):
+        raise ApiError("not_authenticated", "Authentication is required.", status_code=401)
+    if not getattr(user, "is_admin", False):
+        raise ApiError("forbidden", "Only administrators may inspect global or archived audit chains.", status_code=403)
+
+
 def visible_audit_events(
     user,
     event: Event,
@@ -34,21 +41,24 @@ def visible_audit_events(
 ) -> QuerySet[AuditEvent]:
     """All audit events for an event, optionally filtered.
 
-    Organizers and admins only (enforced before this call via require_organizer).
+    Organizers and admins only; enforced here so a caller cannot read the log by
+    forgetting the check.
     Filters:
       - action: prefix match (e.g. "project" matches all "project.*" actions)
-      - actor_public_id: filter by the actor's user public_id
+      - actor_public_id: the immutable actor snapshot, so entries stay findable
+        after the actor account is deleted
       - since: ISO 8601 datetime string
     """
+    require_organizer(user, event)
     qs = (
         AuditEvent.objects.filter(event=event)
-        .select_related("actor")
+        .select_related("actor", "chain")
         .order_by("-created_at", "-id")
     )
     if action:
         qs = qs.filter(action__startswith=action)
     if actor_public_id:
-        qs = qs.filter(actor__public_id=actor_public_id)
+        qs = qs.filter(actor_public_id=actor_public_id)
     if since:
         since_dt = parse_datetime(since)
         if since_dt is not None:

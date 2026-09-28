@@ -73,6 +73,11 @@ def disable_endpoint(actor: User, endpoint: WebhookEndpoint) -> WebhookEndpoint:
         if endpoint.is_active:
             endpoint.is_active = False
             endpoint.save(update_fields=["is_active"])
+            endpoint.deliveries.filter(status=WebhookDelivery.Status.PENDING).update(
+                status=WebhookDelivery.Status.FAILED,
+                error="Endpoint disabled; delivery cancelled.",
+                next_attempt_at=None, lease_token="", lease_expires_at=None,
+            )
             audit.services.record(actor, "webhook.endpoint_disabled", event=endpoint.event, target=endpoint,
                                   summary=f"Disabled webhook endpoint {endpoint.public_id}.")
     return endpoint

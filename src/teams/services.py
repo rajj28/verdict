@@ -74,6 +74,30 @@ def _locked_event(event: Event) -> Event:
     return Event.objects.select_for_update().get(pk=event.pk)
 
 
+def _locked_team(team_pk: int) -> Team | None:
+    """Lock the team's event, then the team: the order every team write takes.
+
+    projects.services locks in the same order, so two writers never wait on
+    each other crosswise, and the event lock is what stops two teams of one
+    event admitting the same person at once. None when the team is gone.
+    """
+    event_id = Team.objects.filter(pk=team_pk).values_list("event_id", flat=True).first()
+    if event_id is None:
+        return None
+    event = Event.objects.select_for_update().get(pk=event_id)
+    team = Team.objects.select_for_update().filter(pk=team_pk).first()
+    if team is not None:
+        team.event = event
+    return team
+
+
+def _lock_team_or_404(team: Team) -> Team:
+    locked = _locked_team(team.pk)
+    if locked is None:
+        raise ApiError("team_not_found", f"{team.name} no longer exists.", status_code=404)
+    return locked
+
+
 @transaction.atomic
 def create_team(actor, event: Event, name: str) -> Team:
     """Create a team with the actor as its owner, registering them if needed."""
@@ -132,11 +156,14 @@ def invite_problem(invite: TeamInvite) -> str | None:
 @transaction.atomic
 def rotate_invite(actor, team: Team) -> TeamInvite:
     """Mint a fresh invite link and revoke the one it replaces."""
-    locked = Team.objects.select_for_update().get(pk=team.pk)
+    locked = _lock_team_or_404(team)
+    at = now()
+    # A closed window freezes the roster, so no link is minted for it; the old
+    # one expired at the close and accept_invite refuses every link after it.
+    check_submission_window(locked.event, at)
     if not is_team_member(actor, locked):
         raise ApiError("not_a_member", f"Only members of {locked.name} can share its invite link.",
                        status_code=403)
-    at = now()
     # Rotating is the revocation: the old link stops working immediately, so a
     # link pasted into a chat cannot be used after the team owner changes their mind.
     TeamInvite.objects.filter(team=locked, revoked_at__isnull=True).update(revoked_at=at)
@@ -155,16 +182,21 @@ def rotate_invite(actor, team: Team) -> TeamInvite:
 def accept_invite(actor, token: str) -> TeamMember:
     """Join the team an invite points at, under one lock and one transaction."""
     _require_authenticated(actor)
-    invite = TeamInvite.objects.filter(token=(token or "").strip()).select_related("team").first()
+    # The first read only finds the team. The event, the team and then the
+    # invite are locked in that order and the invite is read again under its
+    # lock, so a link rotated or used up while this request waited is refused.
+    found = TeamInvite.objects.filter(token=(token or "").strip()).only("team").first()
+    team = _locked_team(found.team_id) if found is not None else None
+    invite = (TeamInvite.objects.select_for_update().filter(pk=found.pk).first()
+              if team is not None else None)
     if invite is None:
         raise ApiError("invite_invalid", "That invite link is not valid.", status_code=410)
-    team = Team.objects.select_for_update().get(pk=invite.team_id)
     at = now()
     problem = _invite_problem(invite, at)
     if problem is not None:
         raise ApiError("invite_invalid", problem, status_code=410)
     event = team.event
-    check_submission_window(event)
+    check_submission_window(event, at)
     _require_no_other_role(actor, event)
     if team_of(actor, event) is not None:
         raise ApiError("already_in_team", "You are already in a team for this event.",
@@ -190,7 +222,7 @@ def accept_invite(actor, token: str) -> TeamMember:
 def leave_team(actor, team: Team) -> None:
     """Leave a team, handing ownership on; the last member out takes an empty team with them."""
     _require_authenticated(actor)
-    locked = Team.objects.select_for_update().get(pk=team.pk)
+    locked = _lock_team_or_404(team)
     member = locked.memberships.filter(user=actor).first()
     check_submission_window(locked.event)
     if member is None:
@@ -241,7 +273,8 @@ def _remove_empty_team(team: Team, actor) -> None:
 @transaction.atomic
 def remove_member(actor, team: Team, user) -> None:
     """The owner removes somebody else from the team."""
-    locked = Team.objects.select_for_update().get(pk=team.pk)
+    locked = _lock_team_or_404(team)
+    check_submission_window(locked.event)
     owner = locked.memberships.filter(user=actor, is_owner=True).first()
     if owner is None:
         raise ApiError("not_team_owner", f"Only the owner of {locked.name} can remove members.",

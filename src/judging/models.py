@@ -5,6 +5,7 @@ from django.conf import settings
 from django.db import models
 
 from core.ids import new_public_id
+from core.clock import now
 
 
 def _new_asg_id() -> str:
@@ -13,6 +14,10 @@ def _new_asg_id() -> str:
 
 def _new_rev_id() -> str:
     return new_public_id("rev")
+
+
+def _new_cmp_id() -> str:
+    return new_public_id("cmp")
 TOKEN_BYTES = 32  # secrets.token_urlsafe(32) -> 43 url-safe characters
 
 def new_judge_invite_token() -> str:
@@ -234,13 +239,15 @@ class Comparison(models.Model):
     """A pairwise verdict. winner=None means the judge skipped the pair."""
 
     event = models.ForeignKey("events.Event", on_delete=models.CASCADE, related_name="comparisons")
+    public_id = models.CharField(max_length=32, unique=True, default=_new_cmp_id)
     judge = models.ForeignKey("events.EventRole", on_delete=models.CASCADE, related_name="comparisons")
     left = models.ForeignKey("projects.Project", on_delete=models.CASCADE, related_name="comparisons_left")
     right = models.ForeignKey("projects.Project", on_delete=models.CASCADE,
                               related_name="comparisons_right")
     winner = models.ForeignKey("projects.Project", on_delete=models.CASCADE, null=True, blank=True,
                                related_name="comparisons_won")
-    created_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(default=now, editable=False)
+    retracted_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "judging_comparison"
@@ -248,4 +255,13 @@ class Comparison(models.Model):
         constraints = [
             models.CheckConstraint(condition=~models.Q(left=models.F("right")),
                                    name="comparison_distinct_projects"),
+            models.CheckConstraint(condition=models.Q(left__lt=models.F("right")),
+                                   name="comparison_canonical_pair"),
+            models.CheckConstraint(condition=models.Q(winner__isnull=True)
+                                   | models.Q(winner=models.F("left"))
+                                   | models.Q(winner=models.F("right")),
+                                   name="comparison_winner_in_pair"),
+            models.UniqueConstraint(fields=["judge", "left", "right"],
+                                    condition=models.Q(retracted_at__isnull=True),
+                                    name="comparison_unique_active_pair"),
         ]

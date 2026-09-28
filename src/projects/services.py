@@ -214,6 +214,7 @@ def create_project(actor, event: Event, data: dict) -> Project:
         raise ApiError("not_authenticated", "Sign in to create a project.", status_code=401)
     if event is None:
         raise ApiError("event_not_found", "That event does not exist.", status_code=404)
+    event = Event.objects.select_for_update().get(pk=event.pk)
     check_submission_window(event)
 
     team = team_of(actor, event)
@@ -262,7 +263,13 @@ def _require_authenticated(actor):
 
 
 def _lock_project(project: Project) -> Project:
-    return Project.objects.select_for_update().select_related("team", "track").get(pk=project.pk)
+    # Event first, matching deadline changes/publication, then the project and
+    # its team. PostgreSQL cannot lock the nullable side of the track outer join.
+    event = Event.objects.select_for_update().get(pk=project.event_id)
+    locked = (Project.objects.select_for_update(of=("self", "team"))
+              .select_related("team", "track").get(pk=project.pk))
+    locked.event = event
+    return locked
 
 
 def _require_editor(actor, project: Project) -> None:
@@ -317,6 +324,7 @@ def update_project(actor, event: Event, project: Project, data: dict) -> Project
         raise ApiError("project_not_found", "That project belongs to a different event.",
                        status_code=404)
     locked = _lock_project(project)
+    event = locked.event
     check_submission_window(event)
     _require_editor(actor, locked)
     _require_active(locked)
@@ -597,4 +605,3 @@ def save_answers(actor, project: Project, answers: dict) -> Project:
               "revision": revision.number if revision is not None else None},
     )
     return locked
-

@@ -2,7 +2,7 @@
 from datetime import timedelta
 from unittest.mock import patch
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.test import APIRequestFactory
@@ -92,6 +92,7 @@ class TokenTests(TestCase):
             authenticate_token(plaintext)
         self.assertGreater(ApiToken.objects.get(user=self.user).last_used_at, first)
 
+    @override_settings(DEMO_MODE=True)
     def test_deterministic_plaintext_can_be_reissued(self):
         token, plaintext = issue_token(self.user, "demo organizer", DEMO_TOKEN, is_demo=True)
         self.assertEqual(plaintext, DEMO_TOKEN)

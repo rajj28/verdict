@@ -581,14 +581,41 @@ class NextPairView(APIView):
 
     def get(self, request, slug: str):
         event = _event(slug)
-        pair = services.next_pair(request.user, event)
-        return Response({"pair": None if pair is None else {
-            "left": _project_detail(pair[0]), "right": _project_detail(pair[1]),
-        }})
+        state = services.pairwise_state(request.user, event)
+        pair = state["pair"]
+        details = None if pair is None else {
+            "left": _pairwise_project_detail(pair[0]), "right": _pairwise_project_detail(pair[1]),
+        }
+        return Response({"pair": details, "left": details["left"] if details else None,
+                         "right": details["right"] if details else None,
+                         "done": state["done"], "progress": state["progress"],
+                         "latest": _comparison_payload(state["latest"]) if state["latest"] else None})
+
+
+def _pairwise_project_detail(project):
+    data = _project_detail(project)
+    data["images"] = [{"url": image.image.url, "caption": image.caption} for image in project.images.all()]
+    data["thumbnail"] = project.thumbnail.url if project.thumbnail else None
+    return data
+
+
+def _comparison_payload(comparison):
+    return {"public_id": comparison.public_id, "left": comparison.left.public_id,
+            "right": comparison.right.public_id,
+            "winner": comparison.winner.public_id if comparison.winner_id else None,
+            "created_at": comparison.created_at, "retracted_at": comparison.retracted_at}
 
 
 class JudgeComparisonView(APIView):
     permission_classes = [IsAuthenticated]
+
+    def get(self, request, slug: str):
+        event = _event(slug)
+        role = policy.require_judge(request.user, event)
+        if request.query_params.get("judge", role.public_id) != role.public_id:
+            raise ApiError("forbidden", "You can only read your own comparisons.", status_code=403)
+        return Response({"comparisons": [_comparison_payload(item)
+                                        for item in policy.visible_comparisons(request.user, event)]})
 
     def post(self, request, slug: str):
         event = _event(slug)
@@ -599,11 +626,15 @@ class JudgeComparisonView(APIView):
             request.user, event, serializer.validated_data["left"], serializer.validated_data["right"],
             serializer.validated_data.get("winner"),
         )
-        return Response({
-            "left": comparison.left.public_id,
-            "right": comparison.right.public_id,
-            "winner": comparison.winner.public_id if comparison.winner_id else None,
-        }, status=201)
+        return Response(_comparison_payload(comparison), status=201)
+
+
+class UndoComparisonView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, slug: str, comparison_id: str):
+        comparison = services.undo_comparison(request.user, _event(slug), comparison_id)
+        return Response(_comparison_payload(comparison))
 
 
 class EventProgressView(APIView):

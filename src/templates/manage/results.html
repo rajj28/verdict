@@ -116,6 +116,21 @@ word. Judge names appear here because this page is organizer-only.
 
     {# ---- Ranking ---- #}
     <div class="tab-pane fade show active" id="ranking-pane" role="tabpanel" aria-labelledby="ranking-tab" tabindex="0">
+      {% if live_pairwise.enabled %}
+        <p class="form-hint">
+          {{ live_pairwise.decisive }} active decisive comparisons;
+          {{ live_pairwise.abstentions }} abstentions.
+          Live comparison strength is a Bradley&ndash;Terry log strength, not a 0&ndash;100 score.
+          Derived BT uses within-judge rubric orderings as a separate cross-check.
+        </p>
+        {% if live_pairwise.n_components > 1 %}
+          <div class="alert alert-warning" role="alert">
+            The observed comparison graph has {{ live_pairwise.n_components }} disconnected groups.
+            No overall official order is supported across those groups; pairwise publication
+            is blocked until the groups are connected by observed comparisons.
+          </div>
+        {% endif %}
+      {% endif %}
       <p class="form-hint">
         &Delta; is the rank movement caused by removing judge offsets: a positive number
         means the project gained places once judges were normalized against each other.
@@ -133,6 +148,10 @@ word. Judge names appear here because this page is organizer-only.
               <th scope="col" class="num">Raw</th>
               <th scope="col" class="num">Normalized</th>
               <th scope="col" class="num">Derived BT</th>
+              {% if live_pairwise.enabled %}
+                <th scope="col" class="num">Live comparison strength</th>
+                <th scope="col" class="num">Live comparison rank</th>
+              {% endif %}
               <th scope="col">Flags</th>
             </tr>
           </thead>
@@ -150,13 +169,17 @@ word. Judge names appear here because this page is organizer-only.
                 <td class="num">{{ row.raw_mean|floatformat:2 }}</td>
                 <td class="num">{{ row.normalized|floatformat:2 }}</td>
                 <td class="num">{{ row.rank_bt|default:"&mdash;" }}</td>
+                {% if live_pairwise.enabled %}
+                  <td class="num">{{ row.live_strength|floatformat:2|default:"&mdash;" }}</td>
+                  <td class="num">{% if live_pairwise.n_components > 1 %}&mdash;{% else %}{{ row.rank_live|default:"&mdash;" }}{% endif %}</td>
+                {% endif %}
                 <td>
                   <span class="status-badge {{ row.status_badge }}">{{ row.status_label }}</span>
                   {% if row.status_reason %}<div class="form-hint">{{ row.status_reason }}</div>{% endif %}
                 </td>
               </tr>
             {% empty %}
-              <tr><td colspan="9" class="form-hint">No projects to rank yet.</td></tr>
+              <tr><td colspan="{% if live_pairwise.enabled %}11{% else %}9{% endif %}" class="form-hint">No projects to rank yet.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -210,20 +233,21 @@ word. Judge names appear here because this page is organizer-only.
 
     {# ---- Robustness ---- #}
     <div class="tab-pane fade" id="robustness-pane" role="tabpanel" aria-labelledby="robustness-tab" tabindex="0">
-      <h3 class="h5">How hard is this winner to dislodge?</h3>
+      <h3 class="h5">Sensitivity of the official first-place set</h3>
       {% if certificate %}
         <p class="lead">{{ certificate.summary }}</p>
-        <dl>
+        {% if certificate.available %}<dl>
           <dt>Leave one judge out</dt>
           <dd>{{ certificate.judge_summary }}</dd>
           <dt>Leave one review out</dt>
           <dd>{{ certificate.review_summary }}</dd>
-          <dt>Push the winner down to the middle of the rubric</dt>
+          <dt>Move above-midpoint reviews of the unique winner down to 50</dt>
           <dd>{{ certificate.flip_summary }}</dd>
-        </dl>
+        </dl>{% endif %}
         <p class="form-hint">
-          The certificate reuses the published &lambda; and refits from the same inputs;
-          it is deterministic, so the same data always produces the same sentence.
+          {{ certificate.assumption }}
+          The top-k set includes ties at its boundary. Removal counts describe
+          these deterministic scenarios, not probabilities of a correct winner.
         </p>
       {% else %}
         <p class="form-hint">
@@ -239,8 +263,8 @@ word. Judge names appear here because this page is organizer-only.
         <strong>{{ spread.before|floatformat:2 }}</strong> raw,
         <strong>{{ spread.after|floatformat:2 }}</strong> after judge offsets are removed.
         {% if spread.before %}
-          Normalization takes {{ spread.after|floatformat:2 }} of {{ spread.before|floatformat:2 }}:
-          judges really did score from different baselines.
+          Raw spread can reflect assigned project quality, judge scoring levels,
+          and review noise. Nonzero spread alone does not establish judge bias.
         {% endif %}
       </p>
 

@@ -12,6 +12,7 @@ Three layers, each proving its own contract:
 """
 import json
 from datetime import datetime, timedelta, timezone as datetime_timezone
+from unittest import skipUnless
 from unittest import mock
 
 from accounts.models import User
@@ -577,3 +578,25 @@ class CommandCenterApiTests(CommandCenterFixture):
             with self.subTest(role=user.email):
                 self.assertEqual(self.client.get(self.page_url).status_code, 403)
         self.assertEqual(self.client.get("/manage/no-such-event/command-center").status_code, 404)
+
+
+@skipUnless(connection.vendor == "postgresql", "PostgreSQL FOR UPDATE outer-join regression")
+class CommandCenterPostgresLockingTests(CommandCenterFixture):
+    """``project__track`` is a nullable FK: PostgreSQL rejects FOR UPDATE on the
+    nullable side of the outer join it produces, so the locked queries must
+    restrict locking to the assignment row itself (``of=("self",)``).
+    """
+
+    def test_rebalance_locks_only_the_assignment_row_despite_nullable_track(self):
+        untracked_team = Team.objects.create(
+            event=self.event, name="Team Untracked", public_id="team_untracked")
+        Assignment.objects.create(
+            event=self.event, judge=self.slow,
+            project=self._project("prj_untracked", "No Track", None, untracked_team),
+            public_id="asg_untracked",
+        )
+        result = services.rebalance(self.organizer, self.event, dry_run=False)
+        self.assertEqual(result["moved"], 3)
+        self.assertTrue(result["batch_created"])
+        self.assertEqual(Assignment.objects.get(public_id="asg_slow_1").judge, self.fast)
+        self.assertEqual(Assignment.objects.get(public_id="asg_untracked").judge, self.slow)

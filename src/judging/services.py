@@ -1,5 +1,6 @@
 """Judging business rules. Every write and permission check lives here."""
 from datetime import timedelta
+from collections import Counter
 from decimal import Decimal, InvalidOperation
 import re
 
@@ -14,7 +15,7 @@ from django.db import transaction
 from django.db.models import Q
 from events.models import Event, EventRole, JudgingMode, Role, Track
 from events.policy import judging_window_open
-from judging import assign, forecast, policy
+from judging import assign, forecast, pairs, policy
 from judging.models import (
     Assignment, AssignmentBatch, AssignmentMethod, Criterion, CriterionScore, Rubric,
     Comparison, Conflict, ConflictSource, JudgeInvite, Review, ReviewExclusion, ReviewSource,
@@ -669,7 +670,7 @@ def _command_center_data(actor, event: Event, *, for_update: bool = False,
     policy.require_manager(actor, event)
     judge_roles = list(policy.visible_judges(actor, event))
     if for_update:
-        locked = Assignment.objects.select_for_update().filter(event=event)
+        locked = Assignment.objects.select_for_update(of=("self",)).filter(event=event)
         assignments = list(locked.select_related(
             "judge__user", "review", "project__track", "project__team"))
     else:
@@ -763,7 +764,7 @@ def rebalance(actor: User, event: Event, dry_run: bool = True,
         )
     moved = 0
     for move in proposal.moves:
-        row = Assignment.objects.select_for_update().filter(
+        row = Assignment.objects.select_for_update(of=("self",)).filter(
             event=locked_event, public_id=move.assignment_id
         ).select_related("judge__user", "project__team", "project__track").first()
         if row is None:
@@ -943,36 +944,34 @@ def _pairwise_context(actor: User, event: Event) -> tuple[Event, EventRole]:
                        status_code=409)
     if not judging_window_open(locked_event):
         raise ApiError("judging_closed", "The judging window is closed.", status_code=403)
+    if locked_event.result_publications.exists():
+        raise ApiError("results_published", "Published comparisons cannot be changed.", status_code=409)
     return locked_event, role
 
 
 @transaction.atomic
-def next_pair(actor: User, event: Event) -> tuple[Project, Project] | None:
-    """Select the next un-compared pair from this judge's assigned projects."""
+def pairwise_state(actor: User, event: Event) -> dict:
+    """Read the next pair and this judge's progress; no state is written by GET."""
     locked_event, role = _pairwise_context(actor, event)
-    projects = list(Project.objects.filter(
-        event=locked_event,
-        status=ProjectStatus.SUBMITTED,
-        assignments__event=locked_event,
-        assignments__judge=role,
-        track__in=role.tracks.all(),
-    ).exclude(
-        team__conflicts__judge=role,
-    ).select_related("team", "track").prefetch_related("answers__question").distinct()
-     .order_by("public_id"))
-    if any(project.team.event_id != locked_event.pk
-           or (project.track_id and project.track.event_id != locked_event.pk) for project in projects):
-        raise _cross_event()
-    compared = {
-        frozenset((left_id, right_id))
-        for left_id, right_id in Comparison.objects.filter(event=locked_event, judge=role)
-        .values_list("left_id", "right_id")
+    projects = {project.public_id: project for project in policy.visible_pairwise_projects(actor, locked_event, role)}
+    comparisons = list(policy.included_comparisons(locked_event))
+    totals = Counter(project for item in comparisons for project in (item.left.public_id, item.right.public_id))
+    own = [item for item in comparisons if item.judge_id == role.pk]
+    selected = pairs.select_pair(
+        projects, [(item.left.public_id, item.right.public_id) for item in own], totals,
+        minimum=locked_event.pairwise_min_comparisons, seed=f"{locked_event.slug}:{role.public_id}",
+    )
+    pair = selected["pair"]
+    latest = policy.visible_comparisons(actor, locked_event).filter(retracted_at__isnull=True).order_by("-created_at", "-pk").first()
+    return {
+        "pair": tuple(projects[key] for key in pair) if pair else None,
+        "progress": selected["progress"], "done": pair is None,
+        "latest": latest if latest and now() < latest.created_at + timedelta(seconds=30) else None,
     }
-    for index, left in enumerate(projects):
-        for right in projects[index + 1:]:
-            if frozenset((left.pk, right.pk)) not in compared:
-                return left, right
-    return None
+
+
+def next_pair(actor: User, event: Event) -> tuple[Project, Project] | None:
+    return pairwise_state(actor, event)["pair"]
 
 
 @transaction.atomic
@@ -1024,24 +1023,56 @@ def save_comparison(actor: User, event: Event, left: Project | str, right: Proje
         if Conflict.objects.filter(event=locked_event, judge=role, team=project.team).exists():
             raise ApiError("forbidden", "A conflict of interest prevents this comparison.",
                            status_code=403)
-    existing = Comparison.objects.filter(event=locked_event, judge=role).filter(
+    existing = Comparison.objects.filter(event=locked_event, judge=role, retracted_at__isnull=True).filter(
         Q(left=left_project, right=right_project) | Q(left=right_project, right=left_project)
     ).exists()
     if existing:
         raise ApiError("comparison_exists", "These projects have already been compared by this judge.",
                        status_code=409)
+    if pairwise_state(actor, locked_event)["done"]:
+        raise ApiError("pairwise_complete", "Your comparison target is complete.", status_code=409)
+    left_project, right_project = sorted((left_project, right_project), key=lambda project: project.pk)
+    stamp = now()
     comparison = Comparison.objects.create(
         event=locked_event, judge=role, left=left_project, right=right_project, winner=winner_project,
+        created_at=stamp,
     )
+    if locked_event.scoring_locked_at is None:
+        locked_event.scoring_locked_at = stamp
+        locked_event.save(update_fields=["scoring_locked_at", "updated_at"])
     verdict = "skipped" if winner_project is None else (
         f"preferred {winner_project.title}"
     )
     audit.services.record(
-        actor, "judging.comparison_created", event=locked_event, target=left_project,
+        actor, "judging.comparison_created", event=locked_event, target=comparison,
         summary=f"{_name(actor)} {verdict} in a comparison with {left_project.title} and {right_project.title}.",
         data={"left": left_project.public_id, "right": right_project.public_id,
               "winner": winner_project.public_id if winner_project else None},
     )
+    return comparison
+
+
+@transaction.atomic
+def undo_comparison(actor: User, event: Event, public_id: str) -> Comparison:
+    """Retract only the caller's latest verdict in the half-open 30-second undo window."""
+    locked_event, role = _pairwise_context(actor, event)
+    comparison = Comparison.objects.select_for_update().filter(
+        event=locked_event, judge=role, public_id=public_id,
+    ).first()
+    if comparison is None:
+        raise _not_found("comparison")
+    if comparison.retracted_at is not None:
+        raise ApiError("comparison_retracted", "This comparison is already retracted.", status_code=409)
+    latest = Comparison.objects.filter(event=locked_event, judge=role, retracted_at__isnull=True).order_by("-created_at", "-pk").first()
+    if latest.pk != comparison.pk:
+        raise ApiError("not_latest_comparison", "Only your latest comparison can be undone.", status_code=409)
+    stamp = now()
+    if stamp >= comparison.created_at + timedelta(seconds=30):
+        raise ApiError("undo_expired", "Comparisons can be undone for 30 seconds.", status_code=403)
+    comparison.retracted_at = stamp
+    comparison.save(update_fields=["retracted_at"])
+    audit.services.record(actor, "judging.comparison_retracted", event=locked_event, target=comparison,
+                          summary="Retracted the judge's latest pairwise comparison within 30 seconds.")
     return comparison
 
 

@@ -109,7 +109,7 @@ Duplicate handling: `prj_07` (titled "Dry Harbour") was superseded by `prj_41` a
 
 ### Spread before/after: 8.09 → 7.86
 
-Sigma of per-judge mean scores moves from 8.09 raw to 7.86 after offset removal: with the adaptive choice (near-maximal shrinkage) the fitted offsets are close to zero, so almost nothing is removed. The raw spread of judge means on this sparse fixture mostly reflects which projects each judge happened to receive, not an estimable judge level — consistent with the leave-one-out and permutation results below.
+Sigma of per-judge mean scores moves from 8.09 raw to 7.86 after offset removal: with the adaptive choice (near-maximal shrinkage) the fitted offsets are close to zero, so almost nothing is removed. Raw spread can reflect assigned project quality, judge scoring levels, and noise. These summaries do not identify how much comes from each source; nonzero spread alone does not establish bias.
 
 ### Judge spread, organizers' definition
 
@@ -233,9 +233,11 @@ Rank recovery under judge bias σ_b = 0.6 (100 replications, seed 2202, same gen
 
 Reading: at this budget the anchor pattern does not improve average detectability (0.127 vs 0.134 for the fixture pattern; median SE 4.67 vs 4.66, within sampling noise). The anchor reviews concentrate on 8 projects while 2 project(s) lose coverage entirely, so rank recovery at σ_b = 0.6 is lower on the anchor pattern (additive ρ 0.824 vs 0.930). Anchors buy shared comparisons for the covered projects at the price of thinner coverage elsewhere — under a fixed budget the net effect here is nil to negative, which is itself the design-time lesson: check the estimability meter before buying anchors.
 
-### How many reviews does normalization need?
+### Experimental review-budget scenarios: sensitivity to assumed noise
 
-Balanced random designs with 30 judges and 40 projects (same id sets, track-agnostic; `results.engine.review_budget_curve` with seed `verdict-budget`, 200 reps, additive λ=2.0), noise σ=10.92 estimated from the fixture's included reviews (pooled residual SD of the additive fit). Each row reports the median expected offset SE and the mean share of judges whose injected bias is detected:
+The fixture's in-sample residual dispersion sqrt(SSE/n) is 10.92 at fixed λ=2. This is descriptive, not a calibrated estimate of generating noise: the fitted project means and judge offsets consume degrees of freedom, and shrinkage affects residuals. We explicitly assume noise at 0.75×, 1×, 1.5×, 2× that dispersion to test sensitivity. These are illustrative scenarios, not an estimated confidence interval for noise.
+
+Balanced random designs with 30 judges and 40 projects (same id sets, track-agnostic; `results.engine.review_budget_curve` with seed `verdict-budget`, 200 reps, fixed additive λ=2.0). The adaptive live lambda procedure is not simulated. Noise is independent homoskedastic Gaussian and scores are not clipped. One positive judge offset is injected at a time; detection means the fitted offset exceeds +2 null-simulation SD. The threshold is not calibrated for multiple judges, and this does not model collusion or varying track eligibility. The first table shows only the explicit 1× noise assumption (σ=10.92):
 
 | Reviews per judge | Median SE | Power at 8 pts | Power at 12 pts |
 |---:|---:|---:|---:|
@@ -247,7 +249,16 @@ Balanced random designs with 30 judges and 40 projects (same id sets, track-agno
 | 12 | 2.76 | 0.647 | 0.937 |
 | 16 | 2.40 | 0.801 | 0.987 |
 
-In plain language: at ~4 reviews per judge an 8-point harsh judge is caught ~21% of the time; ≈16 reviews per judge reaches 80%.
+Assumed-noise sensitivity (same designs and seeds):
+
+| Noise multiplier | Assumed noise SD | Detection at 4 reviews, +8 pts | Detection at 16 reviews, +8 pts | First tested budget at 0.8 share |
+|---:|---:|---:|---:|---|
+| 0.75 | 8.19 | 0.335 | 0.962 | 10 |
+| 1 | 10.92 | 0.208 | 0.801 | 16 |
+| 1.5 | 16.38 | 0.113 | 0.466 | not reached on tested grid |
+| 2 | 21.84 | 0.077 | 0.286 | not reached on tested grid |
+
+At 16 reviews per judge the conditional detection share ranges from 0.286 to 0.962 across these assumptions. This range measures scenario sensitivity, not sampling uncertainty. Monte Carlo error and variation between assignment designs are not quantified here. The planner remains experimental; it does not promise an organizer a detection rate or required budget.
 
 ### Leave-one-review-out cross-validation (predicting unseen reviews)
 
@@ -268,7 +279,7 @@ Smallest unseen-review RMSE is λ=10 (19.17); λ=2 (19.86) is 0.58 points worse 
 
 Statistic: population variance of the fitted judge offsets (λ=2). Judge labels were shuffled 2,000 times within each track (seed 97531; each review keeps its project and score, only the judge label moves). Observed variance 24.40; null quantiles 5% 14.73, 25% 19.52, 50% 22.69, 75% 26.28, 95% 32.12, 99% 35.85; p = 0.381 (fraction of null draws at or above observed).
 
-The test does not reject the null: with about three reviews per project the fitted offsets are mostly sampling noise, and random relabelings produce as much spread as the real labels. The test has low power on this sparse design — it guards against strong systematic effects rather than proving none — so the positive case for shrinkage rests on the leave-one-out check and the simulations above.
+The test does not reject this relabeling null at the 5% level. Nondetection is not proof of no bias, non-identifiability, or non-estimable offsets. This p-value alone does not quantify the test's power or attribute fitted offsets to sampling noise. Predictive cross-validation and the explicitly assumed simulations answer different questions.
 
 ### Agreement between the normalized and Bradley–Terry rankings
 
@@ -290,34 +301,35 @@ Spearman ρ = 0.8509, Kendall τ = 0.6684 over the 40 projects ranked by both me
 - `prj_17` (Small Loom): normalized =16 vs Bradley–Terry =22
 - `prj_28` (Flat Meadow): normalized 28 vs Bradley–Terry 34
 
-The Bradley–Terry cross-check uses only within-judge orderings (derived pairwise comparisons), so judge levels cancel out of it entirely; its broad agreement with the additive ranking is independent evidence that the offsets removed are level, not order.
+The Bradley–Terry cross-check uses only within-judge orderings (derived pairwise comparisons), so judge levels cancel out of it entirely. Its agreement is a descriptive cross-check on the same reviews, not independent evidence that the offset model is correct.
 
 ### Robustness of the fixture result (adaptive lambda = 100)
 
-Winner `prj_34` (Iron Switch); top-3: `prj_34` (Iron Switch), `prj_11` (Salt Ledger), `prj_10` (Still Beacon). The winner leads the runner-up by 0.09 normalized points. Every refit below reuses the already-chosen `lambda = 100` (no lambda re-selection: the certificate is about the published ranking) and warm-starts from the full-data fit; iteration is in sorted-id order, so the certificate is deterministic.
+Winner `prj_34` (Iron Switch); top-3: `prj_34` (Iron Switch), `prj_11` (Salt Ledger), `prj_10` (Still Beacon). The winner leads the runner-up by 0.09 normalized points. Every refit below reuses the already-chosen `lambda = 100` (no lambda re-selection: the certificate is conditional on that choice, not the complete adaptive procedure) and warm-starts from the full-data fit; iteration is in sorted-id order, so the certificate is deterministic.
 
 Leave-one-judge-out (29 judges with included reviews): 1st place holds in 24 of 29 removals; the top-3 set holds in 22 of 29. 5 removal(s) change the winner:
 
-- without `jdg_04` (Noor Haddad): 1st goes to `prj_37` (Salt Loom); new top-3: `prj_37`, `prj_34`, `prj_11`
-- without `jdg_15` (Yuki Sato): 1st goes to `prj_11` (Salt Ledger); new top-3: `prj_11`, `prj_25`, `prj_37`
-- without `jdg_24` (Diego Herrera): 1st goes to `prj_18` (Open Kiln); new top-3: `prj_18`, `prj_34`, `prj_11`
-- without `jdg_25` (Thandi Dlamini): 1st goes to `prj_11` (Salt Ledger); new top-3: `prj_11`, `prj_25`, `prj_34`
-- without `jdg_29` (Ines Rocha): 1st goes to `prj_10` (Still Beacon); new top-3: `prj_10`, `prj_34`, `prj_11`
+- without `jdg_04` (Noor Haddad): first-place set `prj_37` (Salt Loom); new top-3: `prj_37`, `prj_34`, `prj_11`
+- without `jdg_15` (Yuki Sato): first-place set `prj_11` (Salt Ledger); new top-3: `prj_11`, `prj_25`, `prj_37`
+- without `jdg_24` (Diego Herrera): first-place set `prj_18` (Open Kiln); new top-3: `prj_18`, `prj_34`, `prj_11`
+- without `jdg_25` (Thandi Dlamini): first-place set `prj_11` (Salt Ledger); new top-3: `prj_11`, `prj_25`, `prj_34`
+- without `jdg_29` (Ines Rocha): first-place set `prj_10` (Still Beacon); new top-3: `prj_10`, `prj_34`, `prj_11`
 
 Leave-one-review-out (121 included reviews): 1st place holds in 115 of 121 removals (6 flip it):
 
-- without `jdg_04__prj_37` (Noor Haddad on `prj_37` (Salt Loom)): 1st goes to `prj_37` (Salt Loom)
-- without `jdg_15__prj_34` (Yuki Sato on `prj_34` (Iron Switch)): 1st goes to `prj_11` (Salt Ledger)
-- without `jdg_24__prj_18` (Diego Herrera on `prj_18` (Open Kiln)): 1st goes to `prj_18` (Open Kiln)
-- without `jdg_25__prj_11` (Thandi Dlamini on `prj_11` (Salt Ledger)): 1st goes to `prj_11` (Salt Ledger)
-- without `jdg_25__prj_25` (Thandi Dlamini on `prj_25` (Dry Relay)): 1st goes to `prj_25` (Dry Relay)
-- without `jdg_29__prj_10` (Ines Rocha on `prj_10` (Still Beacon)): 1st goes to `prj_10` (Still Beacon)
+- without `jdg_04__prj_37` (Noor Haddad on `prj_37` (Salt Loom)): first-place set `prj_37` (Salt Loom)
+- without `jdg_15__prj_34` (Yuki Sato on `prj_34` (Iron Switch)): first-place set `prj_11` (Salt Ledger)
+- without `jdg_24__prj_18` (Diego Herrera on `prj_18` (Open Kiln)): first-place set `prj_18` (Open Kiln)
+- without `jdg_25__prj_11` (Thandi Dlamini on `prj_11` (Salt Ledger)): first-place set `prj_11` (Salt Ledger)
+- without `jdg_25__prj_25` (Thandi Dlamini on `prj_25` (Dry Relay)): first-place set `prj_25` (Dry Relay)
+- without `jdg_29__prj_10` (Ines Rocha on `prj_10` (Still Beacon)): first-place set `prj_10` (Still Beacon)
 
-Flip margin: moving 1 review of `prj_34` to the rubric midpoint (score 50) flips 1st place: `jdg_15__prj_34`.
+Moving 1 review(s) of prj_34 down to the rubric midpoint (50) changes the first-place set (reviews: jdg_15__prj_34). This is the exact minimum among subsets of this winner's above-midpoint reviews; creating a first-place tie counts as a change.
+Search status `found`; 1 subsets tested, maximum subset size 5, maximum evaluations 256. Only above-midpoint reviews of the unique winner can be lowered; creating a rounded first-place tie counts as a change. First-place sets use the official two-decimal tie rule and top-k sets include boundary ties.
 
-In plain language: 1st place (prj_34) holds in 24 of 29 single-judge removals; the top-3 set holds in 22 of 29; without jdg_04 1st goes to prj_37; without jdg_15 1st goes to prj_11; without jdg_24 1st goes to prj_18; without jdg_25 1st goes to prj_11; without jdg_29 1st goes to prj_10. 1st place (prj_34) holds in 115 of 121 single-review removals; flipping removals: jdg_04__prj_37 -> prj_37, jdg_15__prj_34 -> prj_11, jdg_24__prj_18 -> prj_18, jdg_25__prj_11 -> prj_11, jdg_25__prj_25 -> prj_25, jdg_29__prj_10 -> prj_10. Moving 1 review of prj_34 to the rubric midpoint (50) flips 1st place (review: jdg_15__prj_34).
+In plain language: Official normalized ranking, rounded to 2 decimals; conditional on the selected lambda = 100, held fixed in every refit. The adaptive lambda selection procedure is not rerun. 1st place (prj_34) holds in 24 of 29 single-judge removals; the top-3 set (including boundary ties) holds in 22 of 29; without jdg_04 1st goes to prj_37; without jdg_15 1st goes to prj_11; without jdg_24 1st goes to prj_18; without jdg_25 1st goes to prj_11; without jdg_29 1st goes to prj_10. 1st place (prj_34) holds in 115 of 121 single-review removals; flipping removals: jdg_04__prj_37 -> prj_37, jdg_15__prj_34 -> prj_11, jdg_24__prj_18 -> prj_18, jdg_25__prj_11 -> prj_11, jdg_25__prj_25 -> prj_25, jdg_29__prj_10 -> prj_10. Moving 1 review(s) of prj_34 down to the rubric midpoint (50) changes the first-place set (reviews: jdg_15__prj_34). This is the exact minimum among subsets of this winner's above-midpoint reviews; creating a first-place tie counts as a change.
 
-Reading: with a 0.09-point lead the fixture winner is fragile — 5 judges and 6 single reviews can each flip it, and moving its single most favourable review to the midpoint is enough. That is the honest consequence of a near-tie at the top, not a flaw in the fit: the certificate reuses the published lambda and shows exactly where the result could break.
+Reading: with a 0.09-point lead the fixture winner is fragile — 5 judges and 6 single reviews can each flip it, and moving one of its above-midpoint reviews to the midpoint is enough. That is the honest consequence of a near-tie at the top, not a flaw in the fit: the certificate reuses the published lambda and shows exactly where the result could break.
 
 ## Properties
 
@@ -340,4 +352,4 @@ The additive fit is a shrinkage-penalized least-squares estimator of a two-way l
 
 ## Reproducibility
 
-Regenerate with `.venv\Scripts\python.exe scripts/normalization_proof.py` (standard library only; reads `fixtures.json`, imports `src/results/engine.py`). Simulation seeds: σ_b=0.0 → 4404, σ_b=0.3 → 1101, σ_b=0.6 → 2202, σ_b=1.0 → 3303. Adaptive rule: grid λ ∈ {0.5, 1, 2, 5, 10, 20, 50, 100}, 5 folds, seed `verdict`; adaptive simulation rows use 20 replications per σ_b (other rows 100). Leave-one-out grid: λ ∈ {0, 1, 2, 5, 10}. Permutation test: 2,000 within-track shuffles, seed 97531, λ=2. Calibration section: anchor pattern (anchors_per_track=1, target=3, seed `verdict`, trimmed to 121 reviews), estimability seed `verdict-cal` (200 reps), rank recovery σ_b=0.6 seed 2202 (100 reps). Budget planner: 30 judges / 40 projects, grid {3, 4, 6, 8, 10, 12, 16}, bias 8, σ estimated from the fixture, 200 reps, seed `verdict-budget`. No timestamps are written, so regenerating twice gives identical bytes.
+Regenerate with `.venv\Scripts\python.exe scripts/normalization_proof.py` (standard library only; reads `fixtures.json`, imports `src/results/engine.py`). Simulation seeds: σ_b=0.0 → 4404, σ_b=0.3 → 1101, σ_b=0.6 → 2202, σ_b=1.0 → 3303. Adaptive rule: grid λ ∈ {0.5, 1, 2, 5, 10, 20, 50, 100}, 5 folds, seed `verdict`; adaptive simulation rows use 20 replications per σ_b (other rows 100). Leave-one-out grid: λ ∈ {0, 1, 2, 5, 10}. Permutation test: 2,000 within-track shuffles, seed 97531, λ=2. Calibration section: anchor pattern (anchors_per_track=1, target=3, seed `verdict`, trimmed to 121 reviews), estimability seed `verdict-cal` (200 reps), rank recovery σ_b=0.6 seed 2202 (100 reps). Budget planner: 30 judges / 40 projects, grid {3, 4, 6, 8, 10, 12, 16}, bias 8, noise explicitly assumed at (0.75, 1.0, 1.5, 2.0) times the in-sample residual dispersion, 200 reps, seed `verdict-budget`. No timestamps are written, so regenerating twice gives identical bytes.

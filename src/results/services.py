@@ -8,6 +8,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
+from collections import Counter
+from collections.abc import Callable
 from typing import Any
 
 from django.db import transaction
@@ -19,6 +22,7 @@ from events.models import Event
 from events.policy import is_organizer
 from judging.models import Review, ReviewExclusion, ReviewStatus
 from judging.policy import engine_criteria, engine_reviews, included_reviews, review_values, scored_reviews
+from judging.policy import included_comparisons
 from projects.models import Project, ProjectStatus
 from results import engine, prizes
 from results.models import ResultPublication
@@ -79,9 +83,10 @@ def _canonical_inputs(
     included: list[dict],
     excluded: list[dict],
     params: dict,
+    comparisons: list[dict] | None = None,
 ) -> dict:
     """The canonical input object stored and hashed on every publication."""
-    return {
+    inputs = {
         "event": event.slug,
         "method": params["method"],
         "lam": params["lam"],
@@ -94,6 +99,46 @@ def _canonical_inputs(
         "one_prize_per_team": event.one_prize_per_team,
         "params": params,
     }
+    if params.get("comparison_source") == "live":
+        inputs["comparisons"] = comparisons if comparisons is not None else _comparison_inputs(event)
+        inputs["projects"] = sorted(Project.objects.filter(
+            event=event, status=ProjectStatus.SUBMITTED,
+        ).values_list("public_id", flat=True))
+    return inputs
+
+
+def _comparison_inputs(event: Event) -> list[dict]:
+    return [{"comparison_id": item.public_id, "judge_id": item.judge.public_id,
+             "left": item.left.public_id, "right": item.right.public_id,
+             "winner": item.winner.public_id if item.winner_id else None,
+             "created_at": item.created_at.isoformat()}
+            for item in included_comparisons(event)]
+
+
+def _engine_comparisons(comparisons: list[dict]) -> list[engine.Comparison]:
+    return [engine.Comparison(item["winner"], item["right"] if item["winner"] == item["left"] else item["left"])
+            for item in comparisons if item["winner"] is not None]
+
+
+def _uses_live_pairwise(event: Event, comparisons: list[dict]) -> bool:
+    return event.judging_mode in ("pairwise", "both") or event.ranking_method == "pairwise" or bool(comparisons)
+
+
+def _live_pairwise_metadata(event: Event, result: engine.Result, comparisons: list[dict]) -> dict:
+    return {"enabled": _uses_live_pairwise(event, comparisons), "comparisons": len(comparisons),
+            "decisive": sum(item["winner"] is not None for item in comparisons),
+            "abstentions": sum(item["winner"] is None for item in comparisons),
+            "components": result.pairwise_components, "n_components": len(result.pairwise_components),
+            "comparable": len(result.pairwise_components) <= 1, "official": result.method == "pairwise"}
+
+
+def _comparison_params(event, criteria, enabled):
+    if not enabled:
+        return {}
+    return {"comparison_source": "live", "pairwise_min_comparisons": event.pairwise_min_comparisons,
+            "criteria": [{"key": criterion.key, "weight": criterion.weight,
+                          "min_score": criterion.min_score, "max_score": criterion.max_score}
+                         for criterion in criteria]}
 
 
 def _digest(inputs: dict) -> str:
@@ -207,8 +252,10 @@ def preview(event: Event) -> dict:
     data.
     """
     inc, exc = _build_input_lists(event)
+    comparisons = _comparison_inputs(event)
+    live_enabled = _uses_live_pairwise(event, comparisons)
     criteria = engine_criteria(event)
-    if not criteria:
+    if not criteria and event.ranking_method != "pairwise":
         raise ApiError(
             "no_rubric",
             "This event has no rubric. Add criteria before previewing results.",
@@ -242,12 +289,16 @@ def preview(event: Event) -> dict:
         target=event.reviews_per_project,
         method=event.ranking_method,
         projects=all_submitted,
+        comparisons=_engine_comparisons(comparisons) if live_enabled else None,
     )
+    if result.method == "pairwise" and len(result.pairwise_components) > 1:
+        result.rank = {project: "unranked" for project in all_submitted}
     params = {
         "method": event.ranking_method,
         "lam": result.lam,
         "lambda_source": "auto" if lam_val == "auto" else "fixed",
         "rubric_version": rubric_version,
+        **_comparison_params(event, criteria, live_enabled),
     }
     if result.lambda_choice is not None:
         params["lambda_cv"] = {
@@ -256,7 +307,7 @@ def preview(event: Event) -> dict:
         params["lambda_cv_baseline_rmse"] = result.lambda_choice.baseline_rmse
         params["lambda_cv_n"] = result.lambda_choice.n
         params["lambda_cv_folds"] = result.lambda_choice.folds
-    input_digest = _digest(_canonical_inputs(event, inc, exc, params))
+    input_digest = _digest(_canonical_inputs(event, inc, exc, params, comparisons))
     snapshot = _project_snapshot(result, event)
     allocation = _allocate(result, event, snapshot)
     return {
@@ -274,7 +325,8 @@ def preview(event: Event) -> dict:
             else None
         ),
         "input_digest": input_digest,
-        "rows": _build_rows(result, snapshot),
+        "rows": _build_rows(result, snapshot, comparisons),
+        "live_pairwise": _live_pairwise_metadata(event, result, comparisons),
         "judge_rows": _build_judge_rows(result),
         "awards": [a.as_dict() for a in allocation.awards],
         "unawarded": [u.as_dict() for u in allocation.unawarded],
@@ -308,6 +360,8 @@ def _official_score(result: engine.Result, project_id: str) -> float | None:
         entry = result.raw.get(project_id)
         return entry[0] if entry else None
     if result.method == "pairwise":
+        if result.live_strengths is not None:
+            return result.live_strengths.get(project_id) if len(result.pairwise_components) <= 1 else None
         return result.strengths.get(project_id)
     return result.normalized.get(project_id)
 
@@ -315,12 +369,17 @@ def _official_score(result: engine.Result, project_id: str) -> float | None:
 def _project_outcome(result: engine.Result, project: Project) -> tuple[str, float | None]:
     """Result status and official score for one project (score None unless ranked)."""
     raw_entry = result.raw.get(project.public_id)
-    if project.status == ProjectStatus.WITHDRAWN:
+    if project.status == ProjectStatus.DRAFT:
+        status = "draft"
+    elif project.status == ProjectStatus.WITHDRAWN:
         status = "withdrawn"
     elif project.status == ProjectStatus.DISQUALIFIED:
         status = "disqualified"
     elif project.status == ProjectStatus.SUPERSEDED:
         status = "superseded"
+    elif result.method == "pairwise" and result.live_strengths is not None:
+        status = ("unranked_no_reviews" if result.live_strengths.get(project.public_id) is None else
+                  "unranked_disconnected" if len(result.pairwise_components) > 1 else "ranked")
     elif raw_entry is None:
         status = "unranked_no_reviews"
     else:
@@ -343,15 +402,20 @@ def _rank_order(rank: str | None, title: str) -> tuple:
     """Display order: rank first, unranked last, ties and equal titles by name."""
     if rank is None or rank == "unranked":
         return (2, 0, title.casefold())
-    return (1 if rank.startswith("=") else 0, int(rank.lstrip("=")), title.casefold())
+    return (0, int(rank.lstrip("=")), title.casefold())
 
 
 def _build_rows(
-    result: engine.Result, snapshot: list[tuple[Project, str, float | None]]
+    result: engine.Result, snapshot: list[tuple[Project, str, float | None]],
+    comparisons: list[dict] = (),
 ) -> list[dict]:
     """Build public-facing rows with status classification."""
     rows = []
+    comparison_counts = Counter(project for item in comparisons if item["winner"] is not None
+                                for project in (item["left"], item["right"]))
     for project, status, _score in snapshot:
+        if project.status == ProjectStatus.DRAFT:
+            continue
         pid = project.public_id
         raw_tuple = result.raw.get(pid)
         rows.append({
@@ -366,6 +430,9 @@ def _build_rows(
             "rank_raw": result.rank_raw.get(pid),
             "rank_norm": result.rank_norm.get(pid),
             "rank_bt": result.rank_bt.get(pid),
+            "live_strength": result.live_strengths.get(pid) if result.live_strengths is not None else None,
+            "rank_live": result.rank_live.get(pid),
+            "n_comparisons": comparison_counts[pid],
             "status": status,
             "status_reason": project.status_reason or None,
         })
@@ -437,17 +504,25 @@ def publish(actor, event: Event, note: str = "", acknowledge_unranked: bool = Fa
     """
     # Re-check state under lock so two concurrent publishes cannot race.
     event_locked = Event.objects.select_for_update().get(pk=event.pk)
-
-    if event_locked.judging_close_at is None:
+    if actor is None or not getattr(actor, "is_authenticated", False):
+        raise ApiError("not_authenticated", "Authentication is required.", status_code=401)
+    if not is_organizer(actor, event_locked):
+        raise ApiError("forbidden", "Only organizers of this event can publish results.", status_code=403)
+    stamp = now()
+    if event_locked.judging_close_at is None or stamp < event_locked.judging_close_at:
         raise ApiError(
             "judging_open",
             "Judging must be closed before results can be published. "
             "Use 'Close judging' first.",
             status_code=409,
         )
-    if (
-        event_locked.voting_close_at is not None
-        and event_locked.voting_close_at > now()
+    voting_configured = (
+        event_locked.voting_open_at is not None
+        or event_locked.voting_close_at is not None
+        or hasattr(event_locked, "voting_config")
+    )
+    if voting_configured and (
+        event_locked.voting_close_at is None or stamp < event_locked.voting_close_at
     ):
         raise ApiError(
             "voting_open",
@@ -457,8 +532,10 @@ def publish(actor, event: Event, note: str = "", acknowledge_unranked: bool = Fa
 
     # Build inputs and engine result.
     inc, exc = _build_input_lists(event_locked)
+    comparisons = _comparison_inputs(event_locked)
+    live_enabled = _uses_live_pairwise(event_locked, comparisons)
     criteria = engine_criteria(event_locked)
-    if not criteria:
+    if not criteria and event_locked.ranking_method != "pairwise":
         raise ApiError(
             "no_rubric",
             "This event has no rubric. Add criteria before publishing results.",
@@ -492,12 +569,17 @@ def publish(actor, event: Event, note: str = "", acknowledge_unranked: bool = Fa
         target=event_locked.reviews_per_project,
         method=event_locked.ranking_method,
         projects=all_submitted,
+        comparisons=_engine_comparisons(comparisons) if live_enabled else None,
     )
+    if result.method == "pairwise" and len(result.pairwise_components) > 1:
+        raise ApiError("pairwise_disconnected", "Live comparison groups are disconnected. "
+                       "Connect them through additional comparisons before publishing an overall ranking.",
+                       status_code=409)
 
     # Check for unranked eligible projects.
     unranked = [
         pid for pid in all_submitted
-        if result.raw.get(pid) is None
+        if (_official_score(result, pid) is None)
     ]
     if unranked and not acknowledge_unranked:
         raise ApiError(
@@ -513,6 +595,7 @@ def publish(actor, event: Event, note: str = "", acknowledge_unranked: bool = Fa
         "lam": result.lam,
         "lambda_source": "auto" if lam_val == "auto" else "fixed",
         "rubric_version": rubric_version,
+        **_comparison_params(event_locked, criteria, live_enabled),
     }
     if result.lambda_choice is not None:
         params["lambda_cv"] = {
@@ -522,10 +605,10 @@ def publish(actor, event: Event, note: str = "", acknowledge_unranked: bool = Fa
         params["lambda_cv_n"] = result.lambda_choice.n
         params["lambda_cv_folds"] = result.lambda_choice.folds
 
-    inputs = _canonical_inputs(event_locked, inc, exc, params)
+    inputs = _canonical_inputs(event_locked, inc, exc, params, comparisons)
     digest = _digest(inputs)
     snapshot = _project_snapshot(result, event_locked)
-    rows = _build_rows(result, snapshot)
+    rows = _build_rows(result, snapshot, comparisons)
     judge_rows = _build_judge_rows(result)
     # Awards are proposed, never final: an exact tie at a cut stays
     # unawarded until an organizer decides (results.prizes).
@@ -608,6 +691,8 @@ def public_results(event: Event) -> dict:
     # Strip judge data from rows – public rows only carry ranked fields.
     public_rows = []
     for row in pub.rows:
+        if row.get("status") == "draft":
+            continue
         public_rows.append({
             "rank": row.get("rank"),
             "project_id": row.get("project_id"),
@@ -617,6 +702,9 @@ def public_results(event: Event) -> dict:
             "n_reviews": row.get("n_reviews"),
             "raw_mean": row.get("raw_mean"),
             "normalized": row.get("normalized"),
+            "live_strength": row.get("live_strength"),
+            "rank_live": row.get("rank_live"),
+            "n_comparisons": row.get("n_comparisons", 0),
             "status": row.get("status"),
         })
     return {
@@ -712,15 +800,128 @@ def decision_record(pub: ResultPublication) -> dict:
 # Verification
 # ---------------------------------------------------------------------------
 
+# Far above any weight, score, lambda or position the models can store and far
+# below the float range, so converting a stored number can never overflow.
+_NUMBER_LIMIT = 10**12
+
+
+def _is_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and abs(value) <= _NUMBER_LIMIT
+
+
+def _is_number(value: Any) -> bool:
+    return _is_int(value) or (isinstance(value, float) and abs(value) <= _NUMBER_LIMIT)
+
+
+def _is_optional_int(value: Any) -> bool:
+    return value is None or _is_int(value)
+
+
+def _is_text(value: Any) -> bool:
+    return isinstance(value, str)
+
+
+def _is_optional_text(value: Any) -> bool:
+    return value is None or isinstance(value, str)
+
+
+def _is_values(value: Any) -> bool:
+    return isinstance(value, dict) and all(_is_number(v) for v in value.values())
+
+
+def _records(value: Any, **checks: Callable[[Any], bool]) -> bool:
+    """A list of objects whose named fields each pass their check."""
+    return isinstance(value, list) and all(
+        isinstance(item, dict) and all(check(item.get(name)) for name, check in checks.items())
+        for item in value
+    )
+
+
+def _malformed_inputs(pub: ResultPublication) -> str | None:
+    """Name the stored field recomputation cannot use, or None when all are usable.
+
+    Publications are persisted JSON, so verification treats them as
+    untrusted: a malformed field fails verification instead of crashing it.
+    Only shapes and number magnitudes are checked here; value ranges are left
+    to the engine, which raises ValueError.
+    """
+    inputs = pub.inputs
+    params = inputs.get("params") if isinstance(inputs, dict) else None
+    if not isinstance(params, dict) or not _is_text(params.get("method")) or "rubric_version" not in params:
+        return "params are not an object with a method and rubric version"
+    if "lam" not in params or not (params["lam"] is None or _is_number(params["lam"])):
+        return "params.lam is not a number"
+    checks = [
+        ("params.criteria", "criteria" not in params or _records(
+            params["criteria"], key=_is_text, weight=_is_number, min_score=_is_int, max_score=_is_int)),
+        ("included reviews", _records(inputs.get("included", []), review_id=_is_text, judge_id=_is_text,
+                                      project_id=_is_text, criteria=_is_values)),
+        ("projects", "projects" not in inputs or (
+            isinstance(inputs["projects"], list) and all(map(_is_text, inputs["projects"])))),
+        ("comparisons", inputs.get("comparisons") is None or _records(
+            inputs["comparisons"], left=_is_text, right=_is_text, winner=_is_optional_text)),
+        ("prizes", inputs.get("prizes") is None or _records(
+            inputs["prizes"], prize_id=_is_text, name=_is_text, scope=_is_text, places=_is_int,
+            track_id=_is_optional_text, position=_is_optional_int)),
+        ("rows", _records(pub.rows, project_id=_is_text)),
+    ]
+    return next((f"{name} are malformed" for name, ok in checks if not ok), None)
+
+
+def _unverifiable(pub: ResultPublication, reason: str) -> dict:
+    """An explicit failed verification for stored inputs that cannot be recomputed."""
+    return {
+        "pub_id": pub.public_id,
+        "verdict": "differs",
+        "detail": f"Stored publication cannot be recomputed: {reason}.",
+        "rows_match": False,
+        "awards_match": False,
+        "digest_match": False,
+        "stored_inputs_match": False,
+        "stored_digest": pub.input_digest,
+        "live_digest": None,
+    }
+
+
+def _unscored_review(inc: list[dict], criteria: list[engine.Criterion]) -> str | None:
+    """The first included review lacking a value for some criterion, if any."""
+    return next((r["review_id"] for r in inc if any(c.key not in r["criteria"] for c in criteria)), None)
+
+
+def _finite_result(result: engine.Result) -> bool:
+    """False when stored numbers overflowed to inf or NaN in a value the rows read."""
+    values = [result.lam, *result.normalized.values(), *(mean for mean, _n in result.raw.values()),
+              *(result.live_strengths or {}).values()]
+    return all(value is None or math.isfinite(value) for value in values)
+
+
+def _row_projection(rows: list[dict], live_pairwise: bool) -> list[dict]:
+    """The recomputable fields of each row, in project id order.
+
+    Duplicates are kept, so a repeated row cannot pass for one; the display
+    order of the stored rows is not compared.
+    """
+    fields = ("project_id", "rank", "normalized", "status", *(("live_strength",) if live_pairwise else ()))
+    return sorted(({name: row.get(name) for name in fields} for row in rows), key=lambda row: row["project_id"])
+
+
 def verify_publication(pub: ResultPublication) -> dict:
     """Recompute results from stored inputs and compare.
 
-    Three checks (BUILD-SPEC 16):
-    1. Rerun the engine on the stored inputs → rows must be identical.
+    Four checks (BUILD-SPEC 16):
+    1. Rerun the engine on the stored inputs → rank, score and status must
+       match the stored rows for exactly the live non-draft project roster.
     2. Rerun the prize allocation from the stored prize config → awards
        and unawarded prizes must be identical.
-    3. Hash the live database → digest must match the stored digest.
+    3. Hash the stored inputs → must equal the stored digest.
+    4. Hash the live database → digest must match the stored digest.
+
+    Rows and awards read live project metadata, so a roster change after
+    publication reports "differs" as well.
     """
+    problem = _malformed_inputs(pub)
+    if problem is not None:
+        return _unverifiable(pub, problem)
     stored_inputs = pub.inputs
     inc = stored_inputs.get("included", [])
     exc = stored_inputs.get("excluded", [])
@@ -729,7 +930,7 @@ def verify_publication(pub: ResultPublication) -> dict:
 
     # Rebuild engine criteria from the rubric at publication time.
     # Fall back to current rubric if not stored (older publications).
-    if criteria_dicts:
+    if "criteria" in params:
         criteria = [
             engine.Criterion(
                 key=c["key"],
@@ -741,6 +942,9 @@ def verify_publication(pub: ResultPublication) -> dict:
         ]
     else:
         criteria = engine_criteria(pub.event)
+    unscored = _unscored_review(inc, criteria)
+    if unscored is not None:
+        return _unverifiable(pub, f"included review {unscored} lacks a score for a criterion")
 
     lam_src = params.get("lambda_source", "fixed")
     lam_stored = params.get("lam")
@@ -760,37 +964,37 @@ def verify_publication(pub: ResultPublication) -> dict:
         )
         for r in inc
     ]
-    all_project_ids = list({r["project_id"] for r in inc})
-    result = engine.evaluate(
-        review_inputs,
-        criteria,
-        lam=lam_val,
-        target=pub.event.reviews_per_project,
-        method=params.get("method", pub.method),
-        projects=all_project_ids,
-    )
+    all_project_ids = stored_inputs.get("projects", list({r["project_id"] for r in inc}))
+    comparisons = stored_inputs.get("comparisons")
+    try:
+        result = engine.evaluate(
+            review_inputs,
+            criteria,
+            lam=lam_val,
+            target=pub.event.reviews_per_project,
+            method=params.get("method", pub.method),
+            projects=all_project_ids,
+            comparisons=_engine_comparisons(comparisons) if comparisons is not None else None,
+        )
+        if not _finite_result(result):
+            return _unverifiable(pub, "recomputed scores are not finite")
+        snapshot = _project_snapshot(result, pub.event)
+        # Awards: recompute from the stored prize configuration and the re-run
+        # engine, using the live project metadata (title, team, track) exactly as
+        # the rows check does. Publications made before prize allocation carry no
+        # prize configuration, so the check is skipped rather than failed.
+        awards_match = _verify_awards(pub, result, snapshot)
+    except ValueError as error:
+        # Engine and allocator reject out-of-domain stored values (negative
+        # lambda, unknown method, scores off the scale): fail, never crash.
+        return _unverifiable(pub, str(error))
 
-    recomputed_rows = []
-    for row in pub.rows:
-        pid = row.get("project_id")
-        recomputed_rows.append({
-            "project_id": pid,
-            "rank": result.rank.get(pid),
-            "normalized": result.normalized.get(pid),
-        })
-
-    stored_rows = [
-        {"project_id": r.get("project_id"), "rank": r.get("rank"), "normalized": r.get("normalized")}
-        for r in pub.rows
-    ]
-
-    rows_match = recomputed_rows == stored_rows
-
-    # Awards: recompute from the stored prize configuration and the re-run
-    # engine, using the live project metadata (title, team, track) exactly as
-    # the rows check does. Publications made before prize allocation carry no
-    # prize configuration, so the check is skipped rather than failed.
-    awards_match = _verify_awards(pub, result)
+    # Expected rows come from the live non-draft roster, not from pub.rows, so a
+    # removed, repeated or invented stored row cannot compare equal to itself.
+    live_pairwise = comparisons is not None
+    rows_match = (_row_projection(_build_rows(result, snapshot, comparisons or ()), live_pairwise)
+                  == _row_projection(pub.rows, live_pairwise))
+    stored_inputs_match = _digest(stored_inputs) == pub.input_digest
 
     # Live digest check: same params, but freshly built included/excluded lists.
     # This checks whether the live data (reviews/exclusions/prizes) has changed
@@ -801,15 +1005,18 @@ def verify_publication(pub: ResultPublication) -> dict:
     live_digest = _digest(_canonical_inputs(pub.event, live_inc, live_exc, params))
     digest_match = live_digest == pub.input_digest
 
-    if rows_match and digest_match and awards_match is not False:
+    if rows_match and stored_inputs_match and digest_match and awards_match is not False:
         verdict = "identical"
-        detail = "Recomputed rows match and live data digest matches the stored digest."
+        detail = ("Recomputed rows match, stored inputs hash to the stored digest "
+                  "and live data digest matches it.")
     else:
         parts = []
         if not rows_match:
             parts.append("recomputed rows differ from stored rows")
         if awards_match is False:
             parts.append("recomputed awards differ from stored awards")
+        if not stored_inputs_match:
+            parts.append("stored inputs no longer hash to the stored digest")
         if not digest_match:
             parts.append(
                 f"live data digest {live_digest[:12]}… differs from stored {pub.input_digest[:12]}…"
@@ -824,12 +1031,15 @@ def verify_publication(pub: ResultPublication) -> dict:
         "rows_match": rows_match,
         "awards_match": awards_match,
         "digest_match": digest_match,
+        "stored_inputs_match": stored_inputs_match,
         "stored_digest": pub.input_digest,
         "live_digest": live_digest,
     }
 
 
-def _verify_awards(pub: ResultPublication, result: engine.Result) -> bool | None:
+def _verify_awards(
+    pub: ResultPublication, result: engine.Result, snapshot: list[tuple[Project, str, float | None]]
+) -> bool | None:
     """True when the re-run allocation equals the stored one, None when absent."""
     stored_prizes = pub.inputs.get("prizes")
     if stored_prizes is None:
@@ -848,7 +1058,7 @@ def _verify_awards(pub: ResultPublication, result: engine.Result) -> bool | None
         for p in stored_prizes
     ]
     recomputed = prizes.allocate(
-        _allocation_inputs(result, _project_snapshot(result, pub.event)),
+        _allocation_inputs(result, snapshot),
         specs,
         one_per_team=bool(pub.inputs.get("one_prize_per_team", True)),
     )  # the stored policy, not today's
@@ -931,12 +1141,13 @@ def retract_feedback(actor, event: Event) -> ResultPublication:
 
 
 def project_feedback(event: Event, project: Project) -> dict:
-    """De-attributed feedback for a project: score, rank, per-criterion averages, comments.
+    """De-attributed feedback for a project: score, rank and per-criterion averages.
 
-    Judge names and IDs are stripped; comment order is shuffled with a
-    seeded RNG so it is deterministic but unlinked from any judge identifier.
+    Review.comment is collected as private to the judge and the organizers
+    (judge/review.html), so it never reaches team feedback, even after
+    release. ``comments`` stays in the payload, always empty, to keep the API
+    shape; team-facing notes would need their own separately consented field.
     """
-    import random
     pub = (
         ResultPublication.objects.filter(event=event)
         .order_by("-published_at")
@@ -976,16 +1187,9 @@ def project_feedback(event: Event, project: Project) -> dict:
             event=event, public_id__in=review_ids
         ).prefetch_related("scores__criterion")
     )
-    comments = []
     for review in reviews:
-        if review.comment:
-            comments.append(review.comment)
         for score in review.scores.all():
             per_criterion.setdefault(score.criterion.key, []).append(score.value)
-
-    # Shuffle comments deterministically by project id so they are not linkable.
-    rng = random.Random(project.public_id)
-    rng.shuffle(comments)
     criterion_averages = {
         key: sum(vals) / len(vals) for key, vals in per_criterion.items()
     }
@@ -996,5 +1200,5 @@ def project_feedback(event: Event, project: Project) -> dict:
         "rank": pub_row.get("rank"),
         "n_reviews": pub_row.get("n_reviews", 0),
         "per_criterion": criterion_averages,
-        "comments": comments,
+        "comments": [],
     }

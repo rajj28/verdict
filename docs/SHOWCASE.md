@@ -142,12 +142,9 @@ everywhere else; the pages only read.
 5. **Verify.** Open the publication's decision record from the publication
    history and run Verify: the stored inputs are replayed and the live data is
    re-hashed, and the two verdicts say whether the publication is reproducible
-   and whether anything has moved since. Known issue, not specific to this
-   event and not caused by it: a fresh publish of any imported event (this one
-   and `sample-hack-2026`) currently verifies as `differs` with a last-digit
-   float difference in the `normalized` column, because the verifier compares
-   unrounded floats. Treat that as a real finding to report, not as a showcase
-   defect.
+   and whether anything has moved since. Both should read *identical*: the
+   engine sorts its inputs canonically, so an imported event replays bit for bit
+   (fixed in b8de114, regression test `tests.test_astra_final.ImportedEventVerifyTests`).
 6. **Certificates.** `/manage/showcase/certificates`. 24 participation, 12 judge
    and 2 winner certificates, each with a verification code; issue the signed
    judge participation records from the same page. The public results page now

@@ -66,7 +66,7 @@ outside this audit; this report does not certify their integration.
   expected loopback acceptance; rerun with the production default before sign-off.
 - Rerun with `WEBHOOKS_ALLOW_PRIVATE=0`: **28/28 attacks refused and 14/14 direct
   HTTP checks passed**. No 500/traceback in either server log.
-- `scripts/astra_final_http.py .data/astra/dogfood.toml`: **191/191 checks passed**.
+- The auditor's own HTTP harness (`astra_final_http.py`, kept outside this repository): **191/191 checks passed**.
   Four seeded-role session logins plus anonymous pages; organizer pages; disposable
   weighted-rubric event through two judge submissions, close, stale/fresh publish,
   historical replay; private/public certificate access and genuine/bad codes;

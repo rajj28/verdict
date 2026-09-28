@@ -8,8 +8,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# Fully offline build: every Python package is vendored in vendor/wheels
+# (Linux x86_64 and aarch64, CPython 3.12) and pip is forbidden from reaching
+# an index, so the build works with the network off. docker-compose.yml also
+# builds with network: none to prove it. Regenerate with scripts/vendor_wheels.py.
 COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+COPY vendor/wheels /tmp/wheels
+RUN pip install --no-cache-dir --no-index --find-links=/tmp/wheels -r requirements.txt     && rm -rf /tmp/wheels
 
 COPY . .
 

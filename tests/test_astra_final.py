@@ -4,6 +4,7 @@ import copy
 from django.test import TestCase
 from rest_framework.test import APIClient
 
+from events import services as event_services
 from results import services as results_services
 from results.models import ResultPublication
 from tests import test_publication_policy as publication_tests
@@ -20,6 +21,7 @@ class FinalPublicationTests(TestCase):
         url = (f"/api/v1/events/{self.event.slug}/results/publications/"
                f"{publication.public_id}/verify")
         self.assertEqual(client.post(url).data["verdict"], "identical")
+
         original = copy.deepcopy(publication.params)
         for changes in ({"params": {**original, "lam": 999}}, {"method": "raw"},
                         {"params": ["malformed"]}):
@@ -50,3 +52,13 @@ class FinalPublicationTests(TestCase):
                 self.assertIn("malformed", response.data["detail"])
         ResultPublication.objects.filter(pk=publication.pk).update(inputs=original)
         self.assertEqual(client.post(url).data["verdict"], "identical")
+
+    def test_verify_refreshes_cached_event_policy(self):
+        publication = self.publish()
+        self.assertEqual(results_services.verify_publication(publication)["verdict"], "identical")
+        event_services.update_event(self.organizer, self.event, {"reviews_per_project": 7})
+        result = results_services.verify_publication(publication)
+        self.assertTrue(result["reproducible"]["matches"])
+        self.assertFalse(result["unchanged_since_publication"]["matches"])
+        self.assertIn("reviews_per_project changed after publication",
+                      result["unchanged_since_publication"]["differences"])

@@ -1389,9 +1389,10 @@ def _canonical_field_differences(old: Any, new: Any, path: str) -> list[str]:
     return [f"{path} changed after publication"]
 
 
+@transaction.atomic
 def _live_canonical_inputs(pub: ResultPublication) -> dict:
-    """Project current database inputs in the same shape as the stored snapshot."""
-    event = pub.event
+    """Read one current projection, serialized with Event-first guarded writes."""
+    event = Event.objects.select_for_update().get(pk=pub.event_id)
     included, excluded = _build_input_lists(event)
     comparisons = _comparison_inputs(event)
     params = dict(pub.inputs.get("params", {}))

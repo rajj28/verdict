@@ -10,8 +10,10 @@ from datetime import timedelta
 from decimal import Decimal
 
 import audit.services
+import events.services
 from accounts.models import ApiToken, PasswordResetToken, User
 from accounts.services import SESSION_MODE_KEY
+from core import showcase
 from django.conf import settings
 from django.contrib.auth.hashers import check_password, make_password
 from django.contrib.auth.password_validation import validate_password
@@ -71,6 +73,41 @@ DEMO_TOKENS = (
     ("participant", "priya1@example.org", "vd_demo_participant_2e88f1d4a6c5"),
 )
 DEMO_PASSWORD = "verdict-demo"
+#: Prizes for the showcase only, so the publish rehearsal ends in winner
+#: certificates. They are created through events.services, never by the importer.
+SHOWCASE_PRIZES = (
+    ("Best overall", "The strongest entry across every track.", "Showcase trophy"),
+    ("Most useful", "The entry a team would actually keep using.", "Hardware bundle"),
+)
+
+
+@dataclass
+class ShowcaseReport:
+    """What seeding the calibration showcase did, for the command and the boot banner."""
+
+    slug: str = showcase.SHOWCASE_SLUG
+    imported: bool = False
+    reset: bool = False
+    organizer_added: bool = False
+    judging_closed: bool = False
+    prizes_created: int = 0
+    counts: dict = field(default_factory=dict)
+
+    @property
+    def changed(self) -> bool:
+        return any((self.imported, self.organizer_added, self.judging_closed,
+                    bool(self.prizes_created)))
+
+    def as_dict(self) -> dict:
+        return {
+            "slug": self.slug,
+            "imported": self.imported,
+            "reset": self.reset,
+            "organizer_added": self.organizer_added,
+            "judging_closed": self.judging_closed,
+            "prizes_created": self.prizes_created,
+            "counts": self.counts,
+        }
 
 
 @dataclass
@@ -78,12 +115,14 @@ class BootstrapReport:
     imported: bool = False
     import_report: ImportReport | None = None
     demo_event_created: bool = False
+    showcase: ShowcaseReport | None = None
     tokens: list = field(default_factory=list)
 
     def as_dict(self) -> dict:
         return {
             "imported": self.imported,
             "demo_event_created": self.demo_event_created,
+            "showcase": self.showcase.as_dict() if self.showcase is not None else None,
             "tokens": [name for name, _email, _plaintext in self.tokens],
         }
 
@@ -149,7 +188,94 @@ def bootstrap() -> BootstrapReport:
     _ensure_organizer_role(demo_event, organizer)
 
     if settings.DEMO_MODE:
+        # After the fixture and the demo event, so a failure cannot leave a
+        # half-seeded showcase ahead of them.
+        report.showcase = seed_showcase_event(admin=admin, organizer=organizer)
         report.tokens = _ensure_demo_tokens()
+    return report
+
+
+def _showcase_event(slug: str) -> Event | None:
+    """The generated showcase, by provenance first and slug only when unclaimed."""
+    return (
+        Event.objects.filter(source_id=showcase.SHOWCASE_SOURCE_ID).first()
+        or Event.objects.filter(slug=slug, source_id__isnull=True).first()
+    )
+
+
+def _delete_showcase(slug: str) -> None:
+    """Drop the showcase event and everything hanging off it.
+
+    A plain ``Event.delete()`` is refused, because the rehearsal may have left
+    rows that protect the graph: ballot items protect projects, projects protect
+    tracks and signed judge records protect judge roles. Those go first, in that
+    order, and the cascade then takes the rest. The synthetic accounts stay: they
+    are harmless once unreferenced, and deleting users would drag in the protected
+    references they carry elsewhere.
+    """
+    from community.models import BallotItem
+    from interop.models import JudgeParticipationRecord
+
+    event = _showcase_event(slug)
+    if event is None:
+        return
+    JudgeParticipationRecord.objects.filter(event=event).delete()
+    BallotItem.objects.filter(ballot__voter__event=event).delete()
+    Project.objects.filter(event=event).delete()
+    event.delete()
+
+
+def seed_showcase_event(*, admin: User, organizer: User, reset: bool = False,
+                        slug: str = showcase.SHOWCASE_SLUG) -> ShowcaseReport:
+    """Seed the synthetic calibration showcase, or do nothing if it is there.
+
+    The event is built by :mod:`core.showcase` and imported through
+    ``interop.importer.import_fixture``, so it obeys exactly the same data-model
+    rules as the organizers' fixtures.json. Two prizes are added through
+    ``events.services.create_prize`` (the importer does not carry prizes) so the
+    publish rehearsal reaches a winner certificate, judging is closed through
+    ``events.services.close_judging`` so results can be published at all, and the
+    seeded organizer gets the same role the demo event gets.
+
+    ``reset`` drops the showcase event and everything hanging off it first. Any
+    slug other than the showcase is refused: this must never touch a real event.
+    """
+    if slug != showcase.SHOWCASE_SLUG:
+        raise ValueError(
+            f"{slug!r} is not the calibration showcase; only {showcase.SHOWCASE_SLUG!r} "
+            "can be seeded or reset."
+        )
+    report = ShowcaseReport(slug=slug, reset=reset)
+    with transaction.atomic():
+        event = _showcase_event(slug)
+        if reset and event is not None:
+            _delete_showcase(slug)
+            event = None
+        if event is None:
+            imported = import_fixture(showcase.build(), slug=slug, actor=admin)
+            report.imported = True
+            report.counts = imported.counts
+            event = _showcase_event(slug)
+        if not event.tagline:
+            events.services.update_event(admin, event, {
+                "tagline": showcase.SHOWCASE_TAGLINE,
+                "description": showcase.SHOWCASE_DESCRIPTION,
+            })
+        if not event.prizes.exists():
+            for position, (name, description, value) in enumerate(SHOWCASE_PRIZES, start=1):
+                events.services.create_prize(admin, event, {
+                    "name": name, "description": description, "value": value,
+                    "position": position, "places": 1,
+                })
+            report.prizes_created = len(SHOWCASE_PRIZES)
+        if event.judging_close_at is None:
+            events.services.close_judging(admin, event)
+            report.judging_closed = True
+        already_organizer = EventRole.objects.filter(
+            event=event, user=organizer, role=Role.ORGANIZER
+        ).exists()
+        _ensure_organizer_role(event, organizer)
+        report.organizer_added = not already_organizer
     return report
 
 

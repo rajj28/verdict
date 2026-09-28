@@ -155,6 +155,12 @@
     <a class="list-group-item list-group-item-action" href="/manage/{{ event.slug }}/results">
       Results &amp; publication
     </a>
+    {% if event.source_id == "evt_showcase" %}
+      {# Only the generated showcase has a known true order to compare against. #}
+      <a class="list-group-item list-group-item-action" href="/manage/{{ event.slug }}/calibration">
+        Calibration check &mdash; planted truth vs recovered scores
+      </a>
+    {% endif %}
     <a class="list-group-item list-group-item-action" href="/manage/{{ event.slug }}/decision-room">
       Decision Room &mdash; readiness and evidence
     </a>

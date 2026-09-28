@@ -526,11 +526,13 @@ class PageTests(TestCase):
     def test_the_home_page_shows_real_numbers(self):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.context["stats"]["events"], 2)
-        self.assertEqual(response.context["stats"]["projects"], 45)
-        self.assertEqual(response.context["stats"]["judges"], 33)
+        # A demo boot seeds three events: the fixture, the live demo and the
+        # synthetic calibration showcase (docs/SHOWCASE.md).
+        self.assertEqual(response.context["stats"]["events"], 3)
+        self.assertEqual(response.context["stats"]["projects"], 45 + 24)
+        self.assertEqual(response.context["stats"]["judges"], 33 + 12)
+        self.assertContains(response, '<span class="n">69</span>', html=False)
         self.assertContains(response, '<span class="n">45</span>', html=False)
-        self.assertContains(response, '<span class="n">33</span>', html=False)
         self.assertContains(response, "Submissions open")
 
     def test_the_home_page_is_a_fixed_number_of_queries(self):

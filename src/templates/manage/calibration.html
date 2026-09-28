@@ -1,0 +1,213 @@
+{% extends "base.html" %}
+{% comment %}
+Organizer-only calibration check for the synthetic showcase. Every number here is
+computed server-side from the event's current included reviews, so the page
+follows any exclusion an organizer makes and cannot drift from the results page.
+{% endcomment %}
+{% block title %}Calibration &middot; {{ event.name }}{% endblock %}
+{% block heading %}Calibration check{% endblock %}
+{% block lead %}
+  {{ event.name }} was generated from a truth this portal knows and the database
+  does not: the true quality of every project and the scoring habit of every
+  judge. Below, the planted values are set against what the engine recovered
+  from the same reviews.
+{% endblock %}
+
+{% block breadcrumbs %}
+<nav aria-label="Breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/events/">Events</a></li>
+    <li class="breadcrumb-item"><a href="/events/{{ event.slug }}/">{{ event.name }}</a></li>
+    <li class="breadcrumb-item"><a href="/manage/{{ event.slug }}/">Manage</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Calibration</li>
+  </ol>
+</nav>
+{% endblock %}
+
+{% block page_actions %}
+<a class="btn btn-outline-secondary" href="/manage/{{ event.slug }}/">Overview</a>
+<a class="btn btn-outline-secondary" href="/manage/{{ event.slug }}/results">Results</a>
+{% endblock %}
+
+{% block content %}
+<div data-tour-calibration>
+
+<div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+  <span class="status-badge status-submitted">Synthetic event</span>
+  <span class="form-hint">
+    method {{ calibration.method }}, &lambda; = {{ calibration.lam }}
+    {% if calibration.lambda_source == "auto" %}(chosen by 5-fold cross-validation){% else %}(pre-declared){% endif %},
+    {{ calibration.n_reviews }} included review{{ calibration.n_reviews|pluralize }},
+    {{ calibration.n_excluded }} excluded,
+    {{ calibration.components }} connected component{{ calibration.components|pluralize }}
+  </span>
+</div>
+
+{# ---- 1. Judge habits ---- #}
+<section class="mb-4" id="judge-habits">
+  <h2 class="h4">1. Judge habits</h2>
+  <p class="form-hint">
+    The planted offset is a fixed number of rubric points; the estimated offset is
+    the engine's own fit for the same judge, on the 0-100 score scale
+    ({{ calibration.scale|floatformat:0 }} points per rubric point). The label is
+    the planted value, not the estimate, so a wrong estimate cannot relabel itself.
+  </p>
+  <div class="table-responsive">
+    <table class="data-table">
+      <caption class="visually-hidden">Planted and estimated judge offsets</caption>
+      <thead>
+        <tr>
+          <th scope="col">Judge</th>
+          <th scope="col">Planted habit</th>
+          <th scope="col" class="num">Reviews</th>
+          <th scope="col" class="num">Mean given</th>
+          <th scope="col" class="num">Planted</th>
+          <th scope="col" class="num">Estimated</th>
+          <th scope="col" class="num">Error</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in calibration.judges %}
+          <tr>
+            <td>{{ row.name }} <span class="form-hint">{{ row.judge_id }}</span></td>
+            <td>
+              <span class="status-badge {% if row.habit == 'harsh' %}status-withdrawn{% elif row.habit == 'generous' %}status-done{% else %}status-closed{% endif %}">
+                {{ row.habit }}
+              </span>
+            </td>
+            <td class="num">{{ row.n }}</td>
+            <td class="num">{{ row.mean|floatformat:1 }}</td>
+            <td class="num">{{ row.planted_points|floatformat:1 }}</td>
+            <td class="num">{{ row.estimated|floatformat:1 }}</td>
+            <td class="num">{{ row.error|floatformat:1 }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="mt-2">
+    Correlation between planted and estimated offsets (Spearman rho):
+    <strong>{{ calibration.offset_rho|floatformat:3 }}</strong>.
+    The sign was right for {{ calibration.signs_ok }} of the {{ calibration.planted_count }}
+    planted habits, and the worst of them came back within
+    {{ calibration.worst_error|floatformat:1 }} points.
+  </p>
+</section>
+
+{# ---- 2. Order recovery ---- #}
+<section class="mb-4" id="order-recovery">
+  <h2 class="h4">2. Order recovery</h2>
+  <p class="form-hint">
+    How well each ranking agrees with the true quality, over all
+    {{ calibration.order.n }} projects. Raw means are what an event that never
+    normalized its scores would publish.
+  </p>
+  <div class="table-responsive">
+    <table class="data-table">
+      <caption class="visually-hidden">Agreement with the true order, raw and normalized</caption>
+      <thead>
+        <tr>
+          <th scope="col">Ranking</th>
+          <th scope="col" class="num">Kendall tau</th>
+          <th scope="col" class="num">Spearman rho</th>
+          <th scope="col" class="num">3 or more places off</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Raw means</td>
+          <td class="num">{{ calibration.order.tau_raw|floatformat:3 }}</td>
+          <td class="num">{{ calibration.order.rho_raw|floatformat:3 }}</td>
+          <td class="num">{{ calibration.order.off_raw }}</td>
+        </tr>
+        <tr>
+          <td>Normalized</td>
+          <td class="num">{{ calibration.order.tau_norm|floatformat:3 }}</td>
+          <td class="num">{{ calibration.order.rho_norm|floatformat:3 }}</td>
+          <td class="num">{{ calibration.order.off_norm }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{# ---- 3. Top 3 ---- #}
+<section class="mb-4" id="top-three">
+  <h2 class="h4">3. Top 3</h2>
+  <div class="table-responsive">
+    <table class="data-table">
+      <caption class="visually-hidden">The true top 3 against the raw and normalized top 3</caption>
+      <thead>
+        <tr>
+          <th scope="col" class="num">Place</th>
+          <th scope="col">True order</th>
+          <th scope="col">Raw means</th>
+          <th scope="col">Normalized</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in calibration.top_rows %}
+          <tr>
+            <td class="num">{{ row.place }}</td>
+            <td>
+              {% if row.true %}{{ row.true.title }}
+                <span class="form-hint">true quality {{ row.true.quality|floatformat:2 }}</span>
+              {% else %}&mdash;{% endif %}
+            </td>
+            <td>{{ row.raw|default:"&mdash;" }}</td>
+            <td>{{ row.norm|default:"&mdash;" }}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="4" class="form-hint">No project matches the planted truth.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{# ---- 4. Verdict ---- #}
+<section class="mb-4" id="verdict">
+  <h2 class="h4">4. Verdict</h2>
+  <div class="alert alert-info" role="status">
+    <p class="mb-0">{{ calibration.verdict }}</p>
+  </div>
+  <p class="form-hint">
+    This sentence is computed from the tables above on every request. No outcome
+    on this page is written into the code.
+  </p>
+</section>
+
+{# ---- 5. Honesty note ---- #}
+<section class="mb-4" id="honesty">
+  <h2 class="h4">5. What this does and does not prove</h2>
+  <ul class="list-group">
+    <li class="list-group-item">
+      The projects, teams, judges, reviews and scores here are synthetic. Nothing
+      on this page comes from a real submission or a real judge.
+    </li>
+    <li class="list-group-item">
+      The judge-to-project routing is deliberate, not random: {{ calibration.design }}
+      Raw means are therefore wrong in a known direction before the engine sees
+      anything.
+    </li>
+    <li class="list-group-item">
+      &lambda; = {{ calibration.lam }}
+      {% if calibration.lambda_source == "auto" %}chosen by the predeclared 5-fold cross-validation on these reviews{% else %}pre-declared for this event{% endif %},
+      and the fit is the same one the results page uses. The numbers follow the
+      current included set: excluding a review above changes them, because that is
+      what excluding a review means.
+    </li>
+    <li class="list-group-item">
+      A recovery here shows the method works when its assumptions hold &mdash; a
+      known truth, a connected judge-project graph, habits that are roughly
+      constant per judge. It is not a claim that every real event is fixed by
+      normalization, and a failure on another event would be a reason to look at
+      the assumptions, not at the data. The argument and its limits are written
+      out in <code>docs/NORMALIZATION-PROOF.md</code>, regenerated from the
+      organizers' <code>fixtures.json</code> by <code>scripts/normalization_proof.py</code>.
+    </li>
+  </ul>
+</section>
+
+</div>
+{% endblock %}

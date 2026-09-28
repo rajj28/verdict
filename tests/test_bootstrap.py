@@ -50,9 +50,10 @@ class BootstrapDemoTests(TestCase):
     def test_first_boot_seeds_the_fixture_event_and_the_demo_event(self):
         self.assertTrue(self.first.imported)
         self.assertTrue(self.first.demo_event_created)
+        # The third event is the synthetic calibration showcase (docs/SHOWCASE.md).
         self.assertEqual(
             sorted(Event.objects.values_list("slug", flat=True)),
-            ["demo-hack", "sample-hack-2026"],
+            ["demo-hack", "sample-hack-2026", "showcase"],
         )
         self.assertEqual(Project.objects.filter(event__slug="sample-hack-2026").count(), 41)
         self.assertEqual(Project.objects.filter(event__slug=DEMO_EVENT_SLUG).count(), 5)

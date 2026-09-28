@@ -72,14 +72,16 @@ document why (see `docs/ADVERSARIAL-T1-RACES.md`).
 | Identity | `src/accounts/services.py`, `src/accounts/policy.py`, `src/accounts/tokens.py` | Register/login/reset, demo-mode gate, bearer tokens |
 | Events | `src/events/services.py`, `src/events/policy.py` | Event CRUD, windows, tracks, prizes, questions, organizer roles |
 | Teams/projects | `src/teams/services.py`, `src/projects/services.py` | Invites with use-count races closed, revisions, stale-edit tokens, media |
-| Judging | `src/judging/assign.py`, `src/judging/forecast.py`, `src/judging/services.py`, `src/judging/policy.py` | Assignment proposals, pace/rebalance math, rubric locking, reviews, pairwise |
-| Scoring | `src/results/engine.py`, `src/results/closure.py` | Fit/rank/verify math (stdlib-only, no Django); bounded completion-witness search |
-| Publication | `src/results/services.py`, `src/results/prizes.py`, `src/results/models.py` | Preview, publish, `verify_publication`, feedback release, prize allocation |
+| Judging | `src/judging/assign.py`, `src/judging/forecast.py`, `src/judging/services.py`, `src/judging/policy.py` | Assignment proposals, pace/rebalance math, rubric locking, reviews, pairwise, per-judge review order (`order_judge_queue`) |
+| Scoring | `src/results/engine.py`, `src/results/closure.py` | Fit/rank/verify math and seeded rank-uncertainty re-runs (stdlib-only, no Django, inputs canonically ordered); bounded completion-witness search |
+| Publication | `src/results/services.py`, `src/results/consequences.py`, `src/results/prizes.py`, `src/results/models.py` | Preview, what-if consequences with digest-guarded execution, publish, `verify_publication`, feedback release, prize allocation |
+| Demo and rehearsal | `src/core/showcase.py`, `src/core/calibration_views.py`, `src/core/tour.py` | Synthetic calibration event with planted judge habits, the calibration page, per-visitor tour sandboxes (DEMO_MODE only) |
+| Operations | `scripts/backup.py`, `src/core/management/commands/backup_fingerprint.py`, `vendor/wheels/`, `scripts/offline_images.py` | Backup and fingerprint-verified restore, offline build inputs |
 | Community | `src/community/services.py`, `src/community/policy.py` | Voting configs, ballots, comments/moderation, hidden tallies |
 | Interop | `src/interop/exports.py`, `src/interop/importer.py`, `src/interop/webhooks.py`, `src/interop/certificates.py`, `src/interop/signing.py` | CSV/JSON export, fixture import, durable webhook outbox, HMAC links, Ed25519 records |
 | Integrity | `src/audit/services.py`, `src/audit/models.py`, `src/core/management/commands/runportal.py` | Append-only hash-chained audit, boot/migrate/seed/serve entrypoint |
 | UI | `src/templates/`, `src/static/js/`, `src/static/css/`, `src/static/vendor/`, `src/static/fonts/` | Server-rendered pages per role; vendored Bootstrap/fonts, no CDN |
-| Checks | `run.py`, `scripts/gate.py`, `scripts/verify_tiers.py`, `scripts/attack.py`, `scripts/normalization_proof.py`, `scripts/verify_record.py` | Acceptance, full gate, tier evidence, attack probes, proof regeneration, record verification |
+| Checks | `run.py`, `scripts/gate.py`, `scripts/verify_tiers.py`, `scripts/attack.py`, `scripts/normalization_proof.py`, `scripts/uncertainty_evidence.py`, `scripts/verify_record.py` | Acceptance, full gate, tier evidence, attack probes, proof and uncertainty regeneration, record verification |
 
 Key pages: gallery `src/templates/projects/gallery.html`, submission editor
 `src/templates/projects/editor.html`, judge queue/review/pairwise
@@ -91,10 +93,12 @@ results/progress/assignments `src/templates/manage/results.html`,
 `src/templates/manage/progress.html`, `src/templates/manage/assignments.html`,
 public results `src/templates/events/results_public.html`, ballot
 `src/templates/community/ballot.html`, record verify
-`src/templates/interop/verify.html`. Key scripts:
+`src/templates/interop/verify.html`, calibration check
+`src/templates/manage/calibration.html`, tour `src/templates/core/tour.html`.
+Key scripts:
 `src/static/js/api-forms.js` (sole write path), `judge-console.js`,
 `pairwise.js`, `command-center.js`, `results.js`, `submission-editor.js`,
-`voting.js`.
+`voting.js`, `consequences.js` (preview-then-confirm dialogs), `tour.js`.
 
 ## Decisions worth stealing, with reasons
 
@@ -137,3 +141,23 @@ public results `src/templates/events/results_public.html`, ballot
    (`src/verdict/settings.py` rejects it), so dev, CI and tests share one
    database semantics; `scripts/gate.py` runs check → migrations →
    Django tests → pure engine tests.
+8. **Preview through the real code path, execute against a digest.** A
+   consequence preview runs the same preview computation with the change applied
+   in memory (`src/results/consequences.py`), then the write carries the input
+   digest it was shown and is refused with `409 stale_preview` if the data moved
+   (`tests/test_consequences.py`). Reason: an estimate of consequences invites
+   surprises; an exact diff that cannot go stale does not.
+9. **Derived, never stored, statistics.** Rank uncertainty is recomputed from a
+   publication's stored inputs and cached by digest; it is not part of the hashed
+   snapshot (`tests/test_uncertainty_integration.py`). Reason: presentation
+   statistics can improve without invalidating every published Verify.
+10. **Canonical input order in the kernel.** `fit_additive`, `evaluate` and
+    `rank_uncertainty` sort reviews by id before summing. Reason: publish reads
+    database order and Verify replays stored order; without this, floating-point
+    sums differed in the last digit and a fresh publication of the fixture failed
+    its own Verify (`tests/test_astra_final.py`, `ImportedEventVerifyTests`).
+11. **Demo data through the production importer.** The calibration showcase and
+    every tour sandbox are built as fixture-shaped data and imported with
+    `import_fixture`, so they obey every constraint real data does; sandboxes get
+    their own accounts with unusable passwords (`tests/test_tour.py`). Reason:
+    demo paths that bypass the importer drift from the product.

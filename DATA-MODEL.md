@@ -146,6 +146,21 @@ assignments, reviews, progress, results, audit, pairwise), plus
 close. Regenerate the proof tables from the same inputs with
 `.venv\Scripts\python.exe scripts/normalization_proof.py`.
 
+## Backups, demo data and sandboxes
+
+- **Backups** are the only complete copy: `scripts/backup.py` stores a
+  `pg_dump`, the `appdata` volume (media, secret key, Ed25519 keys) and a
+  manifest with a fingerprint: row counts per model, the audit chain head and
+  every publication digest (`manage.py backup_fingerprint`). Restore refuses
+  unless the fingerprint matches exactly and every publication verifies
+  (`docs/BACKUP-RESTORE.md`).
+- **Showcase and tour data** use the same tables as real events. The showcase
+  event carries `source_id = evt_showcase`. Tour sandboxes are events with
+  `source_id` starting `evt_tour_`: they are hidden from public lists, owned by
+  accounts under `@tour.verdict.local` with unusable passwords, and deleted with
+  those accounts by `manage.py prune_tour_sandboxes`. No extra tables were added
+  for either.
+
 ## What is never exported
 
 Emails in any public output (only keyed hashes server-side); `Review.comment`

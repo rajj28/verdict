@@ -44,6 +44,24 @@ showcase with its own accounts. It switches roles in one click and walks one eve
 from submission to a verified publication. Every click is a real API call.
 `docs/TOUR.md` explains it.
 
+## For judges: one minute per tier
+
+After `docker compose up`, open <http://localhost:8080/login> and use the one-click demo
+sign-in for each role (or press **Take the 5-minute tour** on the home page).
+
+| Tier | Try this | You should see |
+|---|---|---|
+| T1 | `/projects`: search, then filter by track. As participant: `/events/demo-hack/team` (create a team, copy its invite link), `/events/demo-hack/submission` (save twice, submit) | fixture projects; a join link; revisions 1 and 2, each with a receipt hash |
+| T1 | As participant, try to save a project in the closed fixture event, `/events/sample-hack-2026/submission` | refused by the server: submissions closed 2026-03-01 18:00 UTC |
+| T2 | As organizer: `/manage/sample-hack-2026/results` (Judges, Explain, Robustness tabs), `/manage/sample-hack-2026/progress`, `/manage/sample-hack-2026/exports` | every judge's offset and why each project moved; live progress; CSV and JSON exports |
+| T2 | As judge B: `/api/v1/events/sample-hack-2026/judges/jdg_24/scores` (the checker's peer-scores probe) | `403`, from the backend |
+| T3 | As organizer: `/manage/demo-hack/voting`, Access **Authenticated account**, Voting opens now and closes tomorrow, **Save rules**. As participant: `/events/demo-hack/vote`, then `/events/demo-hack/voting/results` | a ballot in a per-voter random order with a quadratic budget; results hidden until the window closes; abuse flags, ballots and a voting audit on the management page |
+| T4 | `/api/docs/`, `/manage/sample-hack-2026/webhooks`, `/manage/showcase/certificates`, `/embed/sample-hack-2026`, and `event.json` from the exports page (re-import with `POST /api/v1/imports`) | OpenAPI for every UI action; signed webhook deliveries; certificates and signed judge records with a public verify page; the embeddable gallery; a round-trip export |
+| All | `/manage/sample-hack-2026/audit` | every state change: who, what, when, and why |
+
+`docs/TIER-EVIDENCE.md` maps every bullet of the brief to its check, code and a manual test;
+`python scripts/verify_tiers.py .dogfood.toml` runs all of them.
+
 ## Check every claim
 
 Every number below comes from a command you can run, and we ran each one on a clean
@@ -58,7 +76,7 @@ Every number below comes from a command you can run, and we ran each one on a cl
 | Backup, destroy, restore | `python scripts/backup.py create`, `docker compose down -v`, `up`, `python scripts/backup.py restore <dir> --yes` | `RESTORE OK: 1921 rows, audit head 7, 1/1 publications verified` |
 | Normalization proof | `docker compose exec web python scripts/normalization_proof.py` | regenerates `docs/NORMALIZATION-PROOF.md` byte for byte in the image (Python 3.12); Python 3.11's float `sum()` differs in the last digit of a few simulation statistics |
 | Rank uncertainty on the fixture | `python scripts/uncertainty_evidence.py` | noise SD 15.43; the leader is first in 22% of 200 re-runs |
-| Test suite (PostgreSQL) | `DATABASE_URL=postgres://... python scripts/gate.py` | system check and migrations clean; 1,128 Django tests and 65 pure engine tests, 0 failures |
+| Test suite (PostgreSQL) | `DATABASE_URL=postgres://... python scripts/gate.py` | system check and migrations clean; 1,133 Django tests and 66 pure engine tests, 0 failures |
 
 Note on the skips: webhook delivery to the checker's own local receiver is refused by
 the SSRF guard in the default configuration. Restart with `WEBHOOKS_ALLOW_PRIVATE=1`
@@ -185,7 +203,13 @@ and to what VERDICT does about it.
 - Open-link voting deters casual repeats; it cannot establish one human, one vote.
   Use email or account mode for binding tallies.
 - There is no in-person expo mode (table maps, judge walking routes).
-- Performance evidence is small samples, not a load test.
+- Performance evidence is small samples, not a load test. The first results view of an
+  event runs 200 re-runs and a robustness search (about 1–2 s on a laptop), and a
+  disqualify or exclusion preview computes the what-if state the same way (about 3 s);
+  results are then cached by their exact inputs, shared by all workers.
+- The committed normalization proof is the Docker image's output (Python 3.12). Python
+  3.11's float `sum()` rounds differently, so a few simulation statistics differ in the
+  last digit there; every figure quoted in the documentation is the same on both.
 
 ## Provenance
 

@@ -49,19 +49,21 @@ organizer acknowledges the shortfall (`publish` in `src/results/services.py`).
 
 Each review score is fitted to the additive model `score = project quality +
 judge offset` by block coordinate descent minimizing
-`sum (s - mu - b)^2 + lambda * sum b^2` (sorted-id order, tolerance 1e-10,
-cap 10,000 iterations; `lam == 0` recentres `sum n_j b_j = 0`). The normalized
-project score is `mu`. Ranks are competition ranks sharing ties at 2 dp.
+`sum (s - mu - b)^2 + lambda * sum b^2` (canonical order: judge, project,
+review id; tolerance 1e-10, cap 10,000 iterations; `lam == 0` recentres
+`sum n_j b_j = 0`). The normalized project score is `mu`. Ranks are
+competition ranks sharing ties at 2 dp.
 
 Lambda is not hand-picked. `select_lambda` runs seeded 5-fold CV over the
-grid `(0.5, 1, 2, 5, 10, 20, 50, 100)`: reviews are sorted by id, shuffled
-with seed `verdict`, split into fifths, each held-out score predicted as
-`mu_p + b_j` (119 predicted, 2 skipped where a single-review judge has no
-training data), smallest RMSE wins, ties go to the larger lambda. On the
-fixture (121 included reviews over 40 projects after excluding superseded
-`prj_07` and its 5 reviews) the procedure selects **lambda = 100**, CV RMSE
-19.52 against a project-mean baseline of 19.52 — i.e. near-maximal shrinkage,
-normalizing gently because the data does not support strong judge effects.
+grid `(0.5, 1, 2, 5, 10, 20, 50, 100)`: reviews are put in canonical order
+(judge, project, review id), shuffled with seed `verdict`, split into fifths,
+each held-out score predicted as `mu_p + b_j` (119 predicted, 2 skipped where
+a single-review judge has no training data), smallest RMSE wins, ties go to
+the larger lambda. On the fixture (121 included reviews over 40 projects after
+excluding superseded `prj_07` and its 5 reviews) the procedure selects
+**lambda = 100**, CV RMSE 19.52 against a project-mean baseline of 19.52 —
+i.e. near-maximal shrinkage, normalizing gently because the data does not
+support strong judge effects.
 
 Fixture effect, same command: 19 of 40 projects move rank raw → normalized
 (largest: `prj_28` 24 → 28); the top changes from tied `prj_34`/`prj_11` at

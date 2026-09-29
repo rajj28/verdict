@@ -149,13 +149,24 @@ Key scripts:
    surprises; an exact diff that cannot go stale does not.
 9. **Derived, never stored, statistics.** Rank uncertainty is recomputed from a
    publication's stored inputs and cached by digest; it is not part of the hashed
-   snapshot (`tests/test_uncertainty_integration.py`). Reason: presentation
-   statistics can improve without invalidating every published Verify.
-10. **Canonical input order in the kernel.** `fit_additive`, `evaluate` and
-    `rank_uncertainty` sort reviews by id before summing. Reason: publish reads
-    database order and Verify replays stored order; without this, floating-point
-    sums differed in the last digit and a fresh publication of the fixture failed
-    its own Verify (`tests/test_astra_final.py`, `ImportedEventVerifyTests`).
+   snapshot (`tests/test_uncertainty_integration.py`). Results previews and
+   what-if previews are cached the same way, keyed by the canonical input digest
+   plus event mode, prizes and overrides, in a file cache on the data volume
+   (`CACHES["previews"]`), so all gunicorn workers reuse one computation and any
+   data change is a new key. Reason: presentation statistics can improve without
+   invalidating every published Verify.
+10. **Canonical input order in the kernel.** `fit_additive`, `select_lambda`,
+    `evaluate` and `rank_uncertainty` put reviews in one order (judge, then
+    project, then review id: `review_order` in `src/results/engine.py`) before
+    summing, folding or drawing noise. Reason: publish reads database order and
+    Verify replays stored order; without this, floating-point sums differed in the
+    last digit and a fresh publication of the fixture failed its own Verify
+    (`tests/test_astra_final.py`, `ImportedEventVerifyTests`). Review ids are
+    random per install, so ordering by them alone also changed the
+    cross-validation folds, and with them the selected lambda, between two
+    installs of the same fixture; judge and project ids come from the data, so
+    every install now computes the same numbers (`tests/test_engine.py`,
+    `InstallIndependenceTests`).
 11. **Demo data through the production importer.** The calibration showcase and
     every tour sandbox are built as fixture-shaped data and imported with
     `import_fixture`, so they obey every constraint real data does; sandboxes get

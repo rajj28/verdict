@@ -14,8 +14,9 @@ itself changes no ranking.
    re-selected) and estimate review noise as `sigma =
    sqrt(SSE / (reviews - projects))` from the residuals.
 2. Draw 200 synthetic review sets: fitted value plus independent
-   normal noise with SD sigma (seeded, in review-id order), and refit
-   each one warm-started from the official fit.
+   normal noise with SD sigma (seeded, in canonical order: judge,
+   project, review id), and refit each one warm-started from the
+   official fit.
 3. Rank the projects in every re-run (competition ranks). Each
    project's rank interval is the central 90% of its 200 replicate
    ranks (sorted values at indices 10 and 189); the score interval is

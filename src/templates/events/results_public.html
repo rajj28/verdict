@@ -45,6 +45,15 @@ prizes. No judge name, id, offset or comment ever reaches this template
       The organizers have not published the results of this event. Judging may still be
       running, or the results may be out for a final check.
     </p>
+    {% if DEMO_MODE %}
+    <p class="mb-3">
+      This demo install starts unpublished on purpose, so you can publish it yourself: sign in as
+      the organizer and open the event's results, or take the five-minute tour, which publishes
+      and verifies a copy of the showcase in a private sandbox.
+    </p>
+    <a class="btn btn-primary" href="/manage/{{ event.slug }}/results">Review and publish (organizer)</a>
+    <a class="btn btn-outline-primary" href="/#tour">Take the tour</a>
+    {% endif %}
     <a class="btn btn-outline-primary" href="/events/{{ event.slug }}/">Back to the event</a>
   </div>
 {% else %}

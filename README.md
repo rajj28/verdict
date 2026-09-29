@@ -76,7 +76,7 @@ Every number below comes from a command you can run, and we ran each one on a cl
 | Backup, destroy, restore | `python scripts/backup.py create`, `docker compose down -v`, `up`, `python scripts/backup.py restore <dir> --yes` | `RESTORE OK: 1921 rows, audit head 7, 1/1 publications verified` |
 | Normalization proof | `docker compose exec web python scripts/normalization_proof.py` | regenerates `docs/NORMALIZATION-PROOF.md` byte for byte in the image (Python 3.12); Python 3.11's float `sum()` differs in the last digit of a few simulation statistics |
 | Rank uncertainty on the fixture | `python scripts/uncertainty_evidence.py` | noise SD 15.43; the leader is first in 22% of 200 re-runs |
-| Test suite (PostgreSQL) | `DATABASE_URL=postgres://... python scripts/gate.py` | system check and migrations clean; 1,133 Django tests and 66 pure engine tests, 0 failures |
+| Test suite (PostgreSQL) | `DATABASE_URL=postgres://... python scripts/gate.py` | system check and migrations clean; 1,135 Django tests and 66 pure engine tests, 0 failures |
 
 Note on the skips: webhook delivery to the checker's own local receiver is refused by
 the SSRF guard in the default configuration. Restart with `WEBHOOKS_ALLOW_PRIVATE=1`

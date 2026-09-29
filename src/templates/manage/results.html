@@ -429,9 +429,9 @@ word. Judge names appear here because this page is organizer-only.
           still counts them, with a flag.
         </p>
         <ul>
-          {% for project_id in under_reviewed %}
+          {% for item in under_reviewed %}
             <li>
-              <a class="link-underline" href="/events/{{ event.slug }}/projects/{{ project_id }}">{{ project_id.title }}</a>
+              <a class="link-underline" href="/events/{{ event.slug }}/projects/{{ item.project_id }}">{{ item.title }}</a>
             </li>
           {% endfor %}
         </ul>

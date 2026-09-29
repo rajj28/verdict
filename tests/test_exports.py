@@ -240,6 +240,50 @@ class CSVHeaderTests(TestCase):
             )
 
 
+class ResultsCSVBeforeReviewsTests(TestCase):
+    """An event with no reviews yet exports every project as unranked."""
+
+    @classmethod
+    def setUpTestData(cls):
+        past = timezone.now() - timedelta(days=10)
+        cls.organizer = User.objects.create_user("org@early.test", "password")
+        cls.event = Event.objects.create(
+            slug="early-results",
+            name="Early Results",
+            submissions_close_at=past,
+            judging_open_at=past,
+            created_by=cls.organizer,
+        )
+        EventRole.objects.create(
+            event=cls.event, user=cls.organizer, role=Role.ORGANIZER, public_id="org_early",
+        )
+        track = Track.objects.create(event=cls.event, name="Main", position=0)
+        rubric = Rubric.objects.create(event=cls.event)
+        JudgingCriterion.objects.create(
+            rubric=rubric, key="q", name="Q",
+            weight=Decimal("1.000"), min_score=1, max_score=5, position=0,
+        )
+        team = Team.objects.create(event=cls.event, name="Early Team")
+        Project.objects.create(
+            event=cls.event, team=team, track=track, public_id="prj_early",
+            title="Early Bird", status=ProjectStatus.SUBMITTED, revision=1,
+        )
+
+    def test_results_csv_lists_the_project_unranked(self):
+        rows = list(csv.reader(io.StringIO(results_csv(self.event))))
+        self.assertEqual(rows[0][0], "rank")
+        self.assertEqual(rows[1][:2], ["unranked", "prj_early"])
+        self.assertEqual(rows[1][-1], "unranked_no_reviews")
+
+    def test_the_export_endpoint_answers_200(self):
+        # The exports page links results.csv from the first day; with 'auto' lambda
+        # and no reviews it once answered 500.
+        self.client.force_login(self.organizer)
+        resp = self.client.get(f"/api/v1/events/{self.event.slug}/exports/results.csv")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("text/csv", resp["Content-Type"])
+
+
 class EventJsonRoundTripTests(TestCase):
     """Export fixture event → import as new event → same counts and raw means."""
 

@@ -428,6 +428,16 @@ class ResultsPageTests(OrganizerPagesTestCase):
         self.assertContains(page, "Superseded by a later submission")
         self.assertContains(page, "/exclusion")
 
+    def test_data_issues_link_each_under_reviewed_project_to_its_page(self):
+        self.client.force_login(self.organizer)
+        page = self.client.get(self.manage("results"))
+        # The link once put the whole row dict into the URL.
+        self.assertContains(
+            page,
+            f'href="/events/{self.event.slug}/projects/{self.unreviewed.public_id}">Gamma Project</a>',
+        )
+        self.assertNotContains(page, "/projects/{")
+
     def test_publishing_needs_the_unranked_acknowledgement_and_then_works(self):
         self.client.force_login(self.organizer)
         page = self.client.get(self.manage("results"))

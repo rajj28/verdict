@@ -314,9 +314,14 @@ def results_csv(event: Event) -> str:
         if review.project.public_id in by_public_id
     ]
     pairs = scored_reviews(reviews)
+    review_inputs = engine_reviews(pairs)
     lam_val = _lam_for_event(event)
+    # Same fallback as preview and publish: 'auto' lambda needs at least one review,
+    # and an event with none yet exports every project as unranked instead of failing.
+    if lam_val == "auto" and not review_inputs:
+        lam_val = 2.0
     result = engine.evaluate(
-        engine_reviews(pairs),
+        review_inputs,
         engine_criteria(event),
         lam=lam_val,
         target=event.reviews_per_project,

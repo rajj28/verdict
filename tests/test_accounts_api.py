@@ -5,6 +5,7 @@ login error, validated next, CSRF on the anonymous endpoints, offline password
 reset). Every rule has an allowed and a denied case.
 """
 import json
+import re
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
@@ -587,6 +588,25 @@ class PageTests(TestCase):
         self.assertEqual(response.context["cards"][0]["progress"]["submitted"],
                          response.context["cards"][0]["progress"]["assigned"]
                          - response.context["cards"][0]["progress"]["remaining"])
+
+    def test_every_dashboard_button_opens_a_real_page(self):
+        # The judge card once linked to /judge/<slug>/, a route that does not exist.
+        for role in ("judge_a", "participant", "organizer"):
+            with self.subTest(role=role):
+                self.client.get("/login")
+                post_json(self.client, DEMO_LOGIN, {"role": role})
+                body = self.client.get("/me").content.decode()
+                links = re.findall(r'<a class="btn btn-sm btn-[a-z-]+" href="(/[^"]+)"', body)
+                self.assertTrue(links)
+                for link in links:
+                    response = self.client.get(link.split("#")[0], follow=True)
+                    self.assertEqual(response.status_code, 200, link)
+        self.assertIn('href="/judge#queue-sample-hack-2026"', self._judge_dashboard())
+
+    def _judge_dashboard(self) -> str:
+        self.client.get("/login")
+        post_json(self.client, DEMO_LOGIN, {"role": "judge_a"})
+        return self.client.get("/me").content.decode()
 
     def test_the_participant_dashboard_shows_the_team_and_the_project(self):
         self.client.get("/login")

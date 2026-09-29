@@ -30,7 +30,8 @@
     {% endfor %}
   </div>
   {% if can_comment %}
-    <form data-api-method="POST" data-api-url="/api/v1/events/{{ project.event.slug }}/projects/{{ project.public_id }}/comments">
+    <form data-api-method="POST" data-api-url="/api/v1/events/{{ project.event.slug }}/projects/{{ project.public_id }}/comments"
+          data-success="reload">
       <label class="form-label" for="project-comment-body">Add a comment</label>
       <textarea class="form-control mb-2" id="project-comment-body" name="body" maxlength="1000" required></textarea>
       <div data-form-errors class="text-danger mb-2" role="alert"></div>

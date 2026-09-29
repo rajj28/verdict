@@ -170,6 +170,17 @@ pairwise Bradley–Terry mode. `docs/REAL-WORLD-JUDGING.md` maps how hackathons 
 today (Devpost, MLH expo judging, Gavel, NeurIPS review calibration) to what breaks,
 and to what VERDICT does about it.
 
+## Bonus challenges
+
+All four optional challenges are in this repository:
+
+| Challenge | Where to look |
+|---|---|
+| Normalization proof | `docs/NORMALIZATION-PROOF.md`, regenerated from the organizers' `fixtures.json` by `scripts/normalization_proof.py`; the method is defended in `JUDGING.md` and shown recovering planted judge bias in `docs/SHOWCASE.md` |
+| Pairwise mode | A Bradley–Terry estimator (`bradley_terry` in `src/results/engine.py`) and the judges' compare-two page at `/judge/<event>/pairwise`; see `JUDGING.md` |
+| Threat model | `THREAT-MODEL.md`: Sybil votes, ballot stuffing, collusion, deadline gaming, STRIDE, and the attacks we did not stop; `python scripts/attack.py .dogfood.toml` runs 28 of them |
+| API first | `docs/openapi.yaml` (137 operations), `docs/API.md`, and Swagger served offline at `/api/docs/` |
+
 ## Documentation
 
 | Document | Contents |

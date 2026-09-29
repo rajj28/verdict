@@ -11003,6 +11003,9 @@ components:
         display_name:
           type: string
           maxLength: 80
+        next:
+          type: string
+          maxLength: 2000
       required:
       - email
       - password

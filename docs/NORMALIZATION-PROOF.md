@@ -23,8 +23,8 @@ Duplicate handling: `prj_07` (titled "Dry Harbour") was superseded by `prj_41` a
 | 13 | =13 | = | `prj_15` | Copper Orbit | 2 | 66.67 | 66.71 |
 | 14 | =13 | ▼1 | `prj_36` | Salt Drift | 3 | 66.67 | 66.68 |
 | 15 | =13 | ▼2 | `prj_19` | Small Relay | 2 | 66.67 | 66.61 |
-| =16 | =16 | = | `prj_17` | Small Loom | 3 | 63.89 | 63.94 |
 | =16 | =16 | = | `prj_09` | Hollow Signal | 3 | 63.89 | 63.94 |
+| =16 | =16 | = | `prj_17` | Small Loom | 3 | 63.89 | 63.94 |
 | 18 | =16 | ▼2 | `prj_31` | Salt Ferry | 3 | 63.89 | 63.90 |
 | 19 | =16 | ▼3 | `prj_02` | Small Meadow | 3 | 63.89 | 63.83 |
 | 20 | =20 | = | `prj_18` | Open Kiln | 2 | 62.50 | 62.67 |
@@ -149,7 +149,7 @@ The predeclared procedure shuffles the 121 included reviews by sorted review id 
 | λ | Top-5 (normalized) | Spearman ρ vs λ=2 |
 |---:|---|---:|
 | 0 | `prj_11`, `prj_25`, `prj_16`, `prj_21`, `prj_38` | 0.8313 |
-| 1 | `prj_11`, `prj_34`, `prj_25`, `prj_16`, `prj_37` | 0.9943 |
+| 1 | `prj_11`, `prj_34`, `prj_25`, `prj_16`, `prj_37` | 0.9944 |
 | 2 | `prj_34`, `prj_11`, `prj_25`, `prj_37`, `prj_16` | 1.0000 |
 | 5 | `prj_34`, `prj_11`, `prj_25`, `prj_37`, `prj_10` | 0.9936 |
 
@@ -163,7 +163,7 @@ Design: the fixture's exact judge–project review pattern (121 pairs). Per repl
 
 | Method | Mean ρ | Top-5 recall | Best ranked first |
 |---|---:|---:|---:|
-| raw | 0.958 | 0.846 | 0.660 |
+| raw | 0.958 | 0.844 | 0.660 |
 | zscore | 0.871 | 0.652 | 0.250 |
 | add0 | 0.887 | 0.670 | 0.440 |
 | add2 | 0.959 | 0.830 | 0.600 |
@@ -176,7 +176,7 @@ Zero-variance judges skipped in 100.0% of replications (the forced constant judg
 
 | Method | Mean ρ | Top-5 recall | Best ranked first |
 |---|---:|---:|---:|
-| raw | 0.940 | 0.804 | 0.590 |
+| raw | 0.940 | 0.802 | 0.590 |
 | zscore | 0.879 | 0.672 | 0.250 |
 | add0 | 0.894 | 0.726 | 0.400 |
 | add2 | 0.950 | 0.818 | 0.570 |
@@ -189,7 +189,7 @@ Zero-variance judges skipped in 100.0% of replications (the forced constant judg
 
 | Method | Mean ρ | Top-5 recall | Best ranked first |
 |---|---:|---:|---:|
-| raw | 0.903 | 0.726 | 0.530 |
+| raw | 0.903 | 0.728 | 0.530 |
 | zscore | 0.877 | 0.608 | 0.290 |
 | add0 | 0.878 | 0.648 | 0.410 |
 | add2 | 0.930 | 0.748 | 0.550 |
@@ -202,7 +202,7 @@ Zero-variance judges skipped in 100.0% of replications (the forced constant judg
 
 | Method | Mean ρ | Top-5 recall | Best ranked first |
 |---|---:|---:|---:|
-| raw | 0.816 | 0.578 | 0.380 |
+| raw | 0.816 | 0.576 | 0.380 |
 | zscore | 0.868 | 0.622 | 0.330 |
 | add0 | 0.849 | 0.642 | 0.420 |
 | add2 | 0.877 | 0.662 | 0.520 |
@@ -242,11 +242,11 @@ Balanced random designs with 30 judges and 40 projects (same id sets, track-agno
 | Reviews per judge | Median SE | Power at 8 pts | Power at 12 pts |
 |---:|---:|---:|---:|
 | 3 | 3.58 | 0.150 | 0.284 |
-| 4 | 3.72 | 0.208 | 0.404 |
+| 4 | 3.72 | 0.207 | 0.404 |
 | 6 | 3.48 | 0.340 | 0.636 |
 | 8 | 3.17 | 0.463 | 0.799 |
 | 10 | 2.89 | 0.566 | 0.895 |
-| 12 | 2.76 | 0.647 | 0.937 |
+| 12 | 2.76 | 0.647 | 0.936 |
 | 16 | 2.40 | 0.801 | 0.987 |
 
 Assumed-noise sensitivity (same designs and seeds):
@@ -254,7 +254,7 @@ Assumed-noise sensitivity (same designs and seeds):
 | Noise multiplier | Assumed noise SD | Detection at 4 reviews, +8 pts | Detection at 16 reviews, +8 pts | First tested budget at 0.8 share |
 |---:|---:|---:|---:|---|
 | 0.75 | 8.19 | 0.335 | 0.962 | 10 |
-| 1 | 10.92 | 0.208 | 0.801 | 16 |
+| 1 | 10.92 | 0.207 | 0.801 | 16 |
 | 1.5 | 16.38 | 0.113 | 0.466 | not reached on tested grid |
 | 2 | 21.84 | 0.077 | 0.286 | not reached on tested grid |
 
@@ -283,7 +283,7 @@ The test does not reject this relabeling null at the 5% level. Nondetection is n
 
 ### Agreement between the normalized and Bradley–Terry rankings
 
-Spearman ρ = 0.8493, Kendall τ = 0.6667 over the 40 projects ranked by both methods (score-level correlation, then rank positions). 15 project(s) differ by more than 5 places:
+Spearman ρ = 0.8509, Kendall τ = 0.6684 over the 40 projects ranked by both methods (score-level correlation, then rank positions). 15 project(s) differ by more than 5 places:
 
 - `prj_02` (Small Meadow): normalized 19 vs Bradley–Terry 4
 - `prj_03` (Deep Compass): normalized 32 vs Bradley–Terry 20

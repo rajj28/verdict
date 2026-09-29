@@ -324,6 +324,8 @@ class BootstrapShowcaseTests(TestCase):
         )
         self.assertEqual(sorted(snapshot), ["demo-hack", "sample-hack-2026"])
 
+    # Production mode explicitly: the Docker image runs with DEMO_MODE=1 in its environment.
+    @override_settings(DEMO_MODE=False)
     def test_production_mode_seeds_nothing(self):
         environment = patch.dict(os.environ, {
             "ADMIN_EMAIL": ADMIN_EMAIL, "ADMIN_PASSWORD": "production-admin-password",

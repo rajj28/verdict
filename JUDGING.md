@@ -296,7 +296,7 @@ rows in position order, skip on 2-dp ties, and record unawarded reasons.
 - Correlated or strategic bias (vote-trading, team-targeted collusion) is not
   addressed by normalization; outliers (fixture: `jdg_04` on `prj_37`, 35.3
   below consensus) are detection-only signals, never auto-exclusions.
-- Derived Bradley–Terry agreement (fixture ρ = 0.8493, τ = 0.6667, 15
+- Derived Bradley–Terry agreement (fixture ρ = 0.8509, τ = 0.6684, 15
   projects differ by >5) is a cross-check on the same reviews, not
   independent evidence the offset model is right.
 - Historical replay uses the stored roster; the separate unchanged check

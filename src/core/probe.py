@@ -399,7 +399,11 @@ def _render_case(case: Attack, response):
     details = [str(response.status_code)]
     if case.must_contain:
         passed = passed and case.must_contain in text
-        details.append("formula neutralised" if case.must_contain in text else "unsafe cell missing")
+        if case.must_contain.startswith("'="):
+            details.append("formula neutralised" if case.must_contain in text else "unsafe cell missing")
+        else:
+            details.append(f"body has {case.must_contain}" if case.must_contain in text
+                           else f"body lacks {case.must_contain}")
     if case.must_not_contain:
         passed = passed and case.must_not_contain not in text
         details.append("no raw formula" if case.must_not_contain not in text else "raw formula present")

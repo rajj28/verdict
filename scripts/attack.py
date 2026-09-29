@@ -214,7 +214,8 @@ def main():
         print(f"PROBE  authenticated live suite ..... FAIL {status} invalid JSON")
         return 1
     for case in report.get("cases", []):
-        verdict = "REFUSED" if case.get("passed") else "LEAKED"
+        status = case.get("status_code") or 0
+        verdict = ("REFUSED" if status >= 400 else "DEFUSED") if case.get("passed") else "LEAKED"
         print(
             f"{case.get('area', 'ATTACK'):<16} {case.get('description', case.get('key'))} "
             f"..... {verdict} {case.get('actual')} (expected {case.get('expected')})"

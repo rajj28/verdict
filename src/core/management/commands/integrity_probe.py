@@ -20,7 +20,7 @@ class Command(BaseCommand):
         report = run_probe()
         lines = [
             f"{case['area']:<16} {case['description']} ..... "
-            f"{'REFUSED' if case['passed'] else 'LEAKED'} {case['actual']} "
+            f"{('REFUSED' if case.get('status_code', 0) >= 400 else 'DEFUSED') if case['passed'] else 'LEAKED'} {case['actual']} "
             f"(expected {case['expected']})"
             for case in report["cases"]
         ]

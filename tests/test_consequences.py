@@ -172,8 +172,7 @@ class ConsequencesTests(TestCase):
         self.assertIn("available", hypothetical["uncertainty"])
 
     def test_preview_cache_misses_when_reviews_prizes_or_project_status_change(self):
-        with results_services._PREVIEW_CACHE_LOCK:
-            results_services._PREVIEW_CACHE.clear()
+        results_services.clear_preview_cache()
         with mock.patch.object(
             results_services,
             "_preview_from_uncached",

@@ -191,6 +191,18 @@ USE_TZ = True
 STATIC_URL = "/static/"
 STATICFILES_DIRS = [BASE_DIR / "static"]
 # Not a manifest: media and static are served without a collectstatic manifest.
+# Results previews (200 re-runs and a robustness search) are memoized by their full
+# input digest in a cache every worker process shares: the results page, the
+# consequence dialog and the publish dialog reuse one computation.
+CACHES = {
+    "default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"},
+    "previews": {
+        "BACKEND": "django.core.cache.backends.filebased.FileBasedCache",
+        "LOCATION": str(DATA_DIR / "cache" / "previews"),
+        "OPTIONS": {"MAX_ENTRIES": 200},
+    },
+}
+
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {"BACKEND": "whitenoise.storage.CompressedStaticFilesStorage"},
@@ -281,6 +293,7 @@ if len(sys.argv) > 1 and sys.argv[1] == "test":
     PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
     # Each test starts with an empty results preview cache (see results.services).
     TEST_RUNNER = "core.test_runner.PreviewCacheIsolatingRunner"
+    CACHES["previews"] = {"BACKEND": "django.core.cache.backends.locmem.LocMemCache", "LOCATION": "previews"}
 
 LOGGING = {
     "version": 1,

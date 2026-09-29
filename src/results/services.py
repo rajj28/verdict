@@ -9,10 +9,8 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from collections import Counter, OrderedDict
+from collections import Counter
 from collections.abc import Callable
-from copy import deepcopy
-from threading import RLock
 from typing import Any
 
 from django.core.cache import cache
@@ -30,17 +28,22 @@ from projects.models import Project, ProjectStatus
 from results import engine, prizes
 from results.models import ResultPublication
 
-_PREVIEW_CACHE_SIZE = 16
-_PREVIEW_ENGINE_VERSION = 1
-_PREVIEW_CACHE: OrderedDict[str, dict] = OrderedDict()
-_PREVIEW_CACHE_LOCK = RLock()
+# Bumped whenever the engine's output for the same inputs changes (2: review_order).
+_PREVIEW_ENGINE_VERSION = 2
+_PREVIEW_TTL_SECONDS = 3600
+
+
+def _preview_cache():
+    """Shared by every worker process (settings.CACHES["previews"]); values are pickled,
+    so each caller gets its own copy."""
+    from django.core.cache import caches
+    return caches["previews"]
 
 
 
 def clear_preview_cache() -> None:
     """Forget memoized previews (the test runner calls this before every test)."""
-    with _PREVIEW_CACHE_LOCK:
-        _PREVIEW_CACHE.clear()
+    _preview_cache().clear()
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -383,11 +386,9 @@ def _preview_from(
         "engine_version": _PREVIEW_ENGINE_VERSION,
         "include_robustness": include_robustness,
     })
-    with _PREVIEW_CACHE_LOCK:
-        cached = _PREVIEW_CACHE.get(cache_key)
-        if cached is not None:
-            _PREVIEW_CACHE.move_to_end(cache_key)
-            return deepcopy(cached)
+    cached = _preview_cache().get(cache_key)
+    if cached is not None:
+        return cached
 
     result = _preview_from_uncached(
         event,
@@ -402,11 +403,7 @@ def _preview_from(
         rubric_version=rubric_version,
         prize_specs=prize_specs,
     )
-    with _PREVIEW_CACHE_LOCK:
-        _PREVIEW_CACHE[cache_key] = deepcopy(result)
-        _PREVIEW_CACHE.move_to_end(cache_key)
-        while len(_PREVIEW_CACHE) > _PREVIEW_CACHE_SIZE:
-            _PREVIEW_CACHE.popitem(last=False)
+    _preview_cache().set(cache_key, result, _PREVIEW_TTL_SECONDS)
     return result
 
 

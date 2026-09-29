@@ -80,7 +80,9 @@
     }).then(function (response) {
       return response.json().then(function (body) {
         if (!response.ok) {
-          throw new Error((body.error && body.error.message) || "Voting request failed.");
+          var failure = new Error((body.error && body.error.message) || "Voting request failed.");
+          failure.code = body.error && body.error.code;
+          throw failure;
         }
         return body;
       });
@@ -124,7 +126,10 @@
   send("GET", urlWithCredentials(apiUrl))
     .then(renderBallot)
     .catch(function (error) {
-      if (error.message !== "No ballot exists for this voter.") {
+      // A first visit has no ballot yet: that is a hint, not an error.
+      if (error.code === "ballot_not_found") {
+        showMessage("Press Start voting to get your ballot.", false);
+      } else {
         showMessage(error.message, true);
       }
     });

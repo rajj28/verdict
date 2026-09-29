@@ -1,7 +1,6 @@
 """Packet: Closure scenario engine tests. Pure stdlib unittest."""
 
 import copy
-import json
 import os
 import sys
 import unittest

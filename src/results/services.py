@@ -21,8 +21,8 @@ from core.clock import now
 from core.errors import ApiError
 from events.models import Event
 from events.policy import is_organizer
-from judging.models import Review, ReviewExclusion, ReviewStatus
-from judging.policy import engine_criteria, engine_reviews, included_reviews, review_values, scored_reviews
+from judging.models import Review, ReviewStatus
+from judging.policy import engine_criteria, review_values
 from judging.policy import included_comparisons
 from projects.models import Project, ProjectStatus
 from results import engine, prizes
@@ -1504,7 +1504,6 @@ def verify_publication(pub: ResultPublication) -> dict:
         return _unverifiable(pub, problem)
     stored_inputs = pub.inputs
     inc = stored_inputs.get("included", [])
-    exc = stored_inputs.get("excluded", [])
     params = stored_inputs.get("params", {})
     criteria_dicts = params.get("criteria", [])
 

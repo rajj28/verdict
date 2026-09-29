@@ -7,7 +7,6 @@ from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.views.decorators.clickjacking import xframe_options_exempt
 
-from events.models import Event
 from events.policy import is_organizer, visible_events
 from interop import certificates, policy
 from interop.signing import public_key_document, record_document

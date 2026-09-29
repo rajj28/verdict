@@ -4,7 +4,7 @@ DRF serializers and viewsets. Thin: validate, delegate to services, return the e
 """
 from core.errors import ApiError
 from core.pagination import VerdictPagination
-from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
+from drf_spectacular.utils import OpenApiParameter, extend_schema
 from events.models import Event
 from events.policy import get_event_by_slug, is_organizer
 from projects import services

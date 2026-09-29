@@ -195,7 +195,6 @@ class PreviewTests(ResultsTestCase):
 
     def test_superseded_project_not_in_included(self):
         """Superseded projects must never appear in included review inputs."""
-        inputs = services.collect_inputs(self.event)
         # All projects here are submitted – create one superseded and verify
         superseded_project = Project.objects.create(
             event=self.event, team=self.team2, track=self.track,
@@ -226,7 +225,6 @@ class PreviewTests(ResultsTestCase):
 class PublishTests(ResultsTestCase):
     def test_publish_blocked_while_judging_open(self):
         """Cannot publish while judging window is still open."""
-        future = timezone.now() + timedelta(days=1)
         event2 = Event.objects.create(
             slug="pub-test-open",
             name="Pub Test Open",
@@ -432,7 +430,7 @@ class FeedbackTests(ResultsTestCase):
 
     def test_team_sees_own_feedback_after_release(self):
         """team member can call project_feedback after release."""
-        pub = services.publish(self.organizer, self.event, note="Feedback access")
+        services.publish(self.organizer, self.event, note="Feedback access")
         services.release_feedback(self.organizer, self.event)
         try:
             data = services.project_feedback(self.event, self.project1)
@@ -461,7 +459,7 @@ class FeedbackTests(ResultsTestCase):
         )
 
     def test_release_twice_raises(self):
-        pub = services.publish(self.organizer, self.event, note="Double release")
+        services.publish(self.organizer, self.event, note="Double release")
         services.release_feedback(self.organizer, self.event)
         try:
             with self.assertRaises(ApiError) as ctx:

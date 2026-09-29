@@ -144,7 +144,7 @@ def _database_from_url(url: str) -> dict:
         raise ImproperlyConfigured(
             "DATABASE_URL must use the postgres:// or postgresql:// scheme "
             f"(got {parsed.scheme or '<empty>'!r}). VERDICT only supports "
-            "PostgreSQL. See .env.example and AGENTS.md for how to point this "
+            "PostgreSQL. See .env.example and README.md for how to point this "
             "at your local Postgres (Docker Compose or an isolated container)."
         )
     name = (parsed.path or "/").lstrip("/")
@@ -171,7 +171,7 @@ if not _database_url:
         "SQLite anywhere, including tests. Point it at your local Postgres: "
         "the Docker Compose 'db' service (via 'docker compose exec web ...' "
         "if it has no published host port) or an isolated PostgreSQL "
-        "container/test database. See .env.example and AGENTS.md."
+        "container/test database. See .env.example and README.md."
     )
 DATABASES = {"default": _database_from_url(_database_url)}
 

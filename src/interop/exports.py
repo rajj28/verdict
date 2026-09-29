@@ -16,7 +16,7 @@ import json
 from core.csvutil import write_csv
 from core.errors import ApiError
 from events.models import Event, EventRole, Role
-from judging.models import Assignment, Comparison, Review, ReviewStatus
+from judging.models import Assignment, Comparison, ReviewStatus
 from judging.policy import (
     engine_criteria,
     engine_reviews,
@@ -403,8 +403,7 @@ def event_json(event: Event) -> str:
     judge round-trips; password hashes, token hashes and secrets are never
     exported.
     """
-    from accounts.models import User
-    from judging.models import Criterion, CriterionScore, Review as JudgingReview
+    from judging.models import Review as JudgingReview
 
     # Event header
     fixture_event = {
@@ -482,7 +481,6 @@ def event_json(event: Event) -> str:
     ]
 
     # Scores (submitted reviews only)
-    judge_id_by_role: dict[int, str] = {jr.pk: jr.public_id for jr in judge_roles}
     reviews_qs = list(
         JudgingReview.objects.filter(event=event, status=ReviewStatus.SUBMITTED)
         .select_related("judge", "project")

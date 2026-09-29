@@ -15,7 +15,6 @@ from judging.assign import (  # noqa: E402
     JudgeInput,
     ProjectInput,
     ProposedAssignment,
-    UnfilledNeed,
     propose_assignments,
 )
 
@@ -386,7 +385,8 @@ class FillGapsTests(unittest.TestCase):
         unless the track lacks sufficient judges.
         """
         track = "trk_main"
-        judges = [make_judge(f"jdg_{i}", tracks=(track,)) for i in range(6)]
+        for i in range(6):
+            make_judge(f"jdg_{i}", tracks=(track,))
 
         # Projects p0–p4: p0 has 2 reviews, p1–p4 have 1 review each
         projects = [

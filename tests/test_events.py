@@ -17,7 +17,6 @@ Tests cover every rule in the P1-EV packet:
 - assertNumQueries for the event list endpoint
 """
 from datetime import timedelta
-from unittest.mock import patch
 
 from django.test import TestCase
 from django.utils import timezone
@@ -368,13 +367,13 @@ class OrganizerManagementTests(TestCase):
         self.event = _make_event(self.host)
 
     def test_add_organizer_by_email(self):
-        new_org = _make_user("new_org@example.org")
+        _make_user("new_org@example.org")
         role, created = services.add_organizer(self.host, self.event, "new_org@example.org")
         self.assertTrue(created)
         self.assertEqual(role.role, Role.ORGANIZER)
 
     def test_idempotent_for_existing_organizer(self):
-        new_org = _make_user("new_org@example.org")
+        _make_user("new_org@example.org")
         role1, _ = services.add_organizer(self.host, self.event, "new_org@example.org")
         role2, created2 = services.add_organizer(self.host, self.event, "new_org@example.org")
         self.assertFalse(created2)
@@ -418,7 +417,7 @@ class OrganizerManagementTests(TestCase):
         self.assertEqual(ctx.exception.status_code, 403)
 
     def test_audit_rows_written(self):
-        new_org = _make_user("new_org@example.org")
+        _make_user("new_org@example.org")
         role, _ = services.add_organizer(self.host, self.event, "new_org@example.org")
         self.assertTrue(
             AuditEvent.objects.filter(event=self.event, action="event.organizer_added").exists()
@@ -898,7 +897,7 @@ class EventApiTests(TestCase):
 
     def test_organizers_list_create_delete(self):
         self._auth(self.host)
-        new_org = _make_user("new_org@example.org")
+        _make_user("new_org@example.org")
         response = self.client.post(
             f"/api/v1/events/{self.event.slug}/organizers",
             data={"email": "new_org@example.org"},

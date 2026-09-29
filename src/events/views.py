@@ -7,7 +7,7 @@ from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, render
 
 from audit.models import AuditEvent
-from events.models import Event, EventRole, Role
+from events.models import Event, Role
 from events.policy import can_manage, judging_window_open, role_of, submission_window_open, visible_events
 from judging.models import ReviewStatus
 from projects.models import ProjectStatus

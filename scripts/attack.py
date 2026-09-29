@@ -180,7 +180,7 @@ def main():
             print(f"HTTP revoke temporary token ..... {'PASS' if revoke_ok else 'FAIL'}")
             if revoke_status == 200:
                 direct_results.append(result(
-                    "revoked token reuse", base + "/api/v1/me", f"GET",
+                    "revoked token reuse", base + "/api/v1/me", "GET",
                     f"Authorization: Bearer {plaintext}", None, 401,
                 ))
             else:

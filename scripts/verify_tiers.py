@@ -370,7 +370,6 @@ def main():
     peer = routes.get("peer_scores", "")
     match = re.search(r"/events/([^/]+)/judges/([^/]+)/scores", peer)
     event_slug = match.group(1) if match else "sample-hack-2026"
-    peer_id = match.group(2) if match else "jdg_24"
 
     # Exercise the whole disposable T1 lifecycle through public API writes.
     unique_suffix = secrets.token_hex(3)

@@ -22,7 +22,6 @@ from interop.exports import (
     assignments_csv,
     audit_csv,
     event_json,
-    export_csv,
     judges_csv,
     participants_csv,
     projects_csv,
@@ -41,7 +40,6 @@ from judging.models import (
     Criterion as JudgingCriterion,
 )
 from projects.models import Project, ProjectStatus
-from results.models import ResultPublication
 from teams.models import Team, TeamMember
 
 
@@ -281,7 +279,7 @@ class EventJsonRoundTripTests(TestCase):
         # Patch the source_id so it doesn't collide
         data["event"]["id"] = "evt_roundtrip_01"
         admin2 = User.objects.create_user("admin2@rtrip.test", "password", is_admin=True)
-        report2 = import_fixture(data, slug="sample-hack-roundtrip", actor=admin2)
+        import_fixture(data, slug="sample-hack-roundtrip", actor=admin2)
         rt_event = Event.objects.get(source_id="evt_roundtrip_01")
         try:
             original_submitted = (

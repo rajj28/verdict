@@ -12,7 +12,7 @@ top-level documents (`README.md`, `ARCHITECTURE.md`, `DATA-MODEL.md`, `JUDGING.m
    contract and engine maths the whole build follows.
 2. Work was cut into packets (`packets/`). Each one names the files it may touch,
    the behaviour to build and the tests that prove it, and ends with a fixed
-   SUMMARY / FILES / TESTS / GAPS report (see `../../AGENTS.md`).
+   SUMMARY / FILES / TESTS / GAPS report (see `AGENTS.md`).
 3. Coding agents implemented the packets: GitHub Copilot CLI for the hardest
    cross-cutting work, OpenCode models for well-specified work, and OpenAI Codex
    for independent audits.

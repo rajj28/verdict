@@ -4,7 +4,7 @@ Thin views: validate the request, delegate to services, return the envelope.
 """
 from __future__ import annotations
 
-from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
+from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -12,7 +12,6 @@ from rest_framework.views import APIView
 
 from core.errors import ApiError
 from events.policy import get_event_by_slug, is_organizer
-from projects.policy import visible_project
 from results import consequences as consequence_services
 from results import services
 from results.policy import (

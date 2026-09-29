@@ -12,7 +12,7 @@ from django.template.loader import render_to_string
 
 from core.clock import now
 from core.policy import visible_probe_runs
-from events.models import Event, EventRole, Role
+from events.models import EventRole, Role
 from events.policy import is_organizer, judging_window_open, submission_window_open, visible_events
 from judging.models import Review, ReviewStatus
 from projects.models import Project, ProjectStatus

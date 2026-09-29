@@ -71,7 +71,6 @@ def get_publication(event: Event, pub_public_id: str) -> ResultPublication:
 
 def can_see_feedback(user, event: Event, project) -> bool:
     """A team member of the project may see feedback after it is released."""
-    from events.models import EventRole, Role
     from teams.models import TeamMember
 
     if user is None or not getattr(user, "is_authenticated", False):

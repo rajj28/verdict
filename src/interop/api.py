@@ -302,7 +302,6 @@ class ImportView(APIView):
 
         slug_base = (data.get("event") or {}).get("id") or "imported-event"
         # Sanitize and try slug suffixes on collision.
-        import re
         from django.utils.text import slugify
 
         slug = slugify(slug_base)[:60] or "imported-event"

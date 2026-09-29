@@ -9,9 +9,9 @@ from accounts.models import User
 from core.clock import now
 from core.errors import ApiError
 from core.ids import new_public_id
-from django.db import IntegrityError, transaction
+from django.db import transaction
 from django.utils.text import slugify
-from events.models import CustomQuestion, Event, EventRole, Prize, RankingMethod, Role, Track
+from events.models import CustomQuestion, Event, EventRole, Prize, Role, Track
 
 EVENT_FIELDS = {
     "name", "tagline", "description", "submissions_open_at", "submissions_close_at",

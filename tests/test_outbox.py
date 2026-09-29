@@ -124,8 +124,8 @@ class OutboxTests(TestCase):
             if user:
                 client.force_authenticate(user)
                 client.force_login(user)
-            for path in (self.api, "/api/v1/admin/outbox", self.page, "/admin-panel/outbox"):
-                response = client.get(path)
+            for url in (self.api, "/api/v1/admin/outbox", self.page, "/admin-panel/outbox"):
+                response = client.get(url)
                 self.assertIn(response.status_code, (401, 403))
                 self.assertNotIn(b"secret-token", response.content)
         self.organizer.is_active = False

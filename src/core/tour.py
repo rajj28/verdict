@@ -196,7 +196,6 @@ def create_sandbox(request, *, throttle: bool = True) -> Event:
         source_id=f"org-{token}",
     )
     judge_role = EventRole.objects.get(event=event, role=Role.JUDGE, source_id="jdg_sc01")
-    participant_email = data["teams"][0]["members"][0]
     account_ids = set(EventRole.objects.filter(event=event).values_list("user_id", flat=True))
     account_ids.update(TeamMember.objects.filter(event=event).values_list("user_id", flat=True))
     User.objects.filter(pk__in=account_ids).update(password=make_password(None))

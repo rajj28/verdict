@@ -239,6 +239,18 @@ def raw_scores(
     }
 
 
+def review_order(review) -> tuple[str, str, str]:
+    """Canonical review order: judge, then project, then review id.
+
+    Review ids are generated per install (the organizers' fixture has none), so
+    ordering by them alone made seeded draws, fold assignment and float sums differ
+    between two installs of the same data. Judge and project ids come from the data
+    itself (``jdg_07``, ``prj_28``), so every install now computes identical numbers,
+    and they equal the evidence scripts, whose review ids are ``judge__project``.
+    """
+    return (review.judge_id, review.project_id, review.review_id)
+
+
 def fit_additive(
     scored: Sequence[ScoredReview], lam: float, init: Fit | None = None
 ) -> Fit:
@@ -260,8 +272,9 @@ def fit_additive(
     if lam < 0:
         raise ValueError("lam must be non-negative")
     # Canonical order: floating-point sums then match bit for bit whether the
-    # reviews come from the live database or from a publication's stored inputs.
-    scored = sorted(scored, key=lambda r: r.review_id)
+    # reviews come from the live database or from a publication's stored inputs,
+    # and between installs (review ids are random per install; see review_order).
+    scored = sorted(scored, key=review_order)
     if not scored:
         return Fit(mu={}, offset={}, iterations=0, converged=True)
     proj_ids = sorted({r.project_id for r in scored})
@@ -422,7 +435,8 @@ def explain(
         for r in scored
         if r.project_id == project_id
     ]
-    return sorted(rows, key=lambda e: e.review_id)
+    # One project: judge id (stable across installs), then review id.
+    return sorted(rows, key=lambda e: (e.judge_id, e.review_id))
 
 
 def rank(values: Mapping[str, float]) -> dict[str, str]:
@@ -603,7 +617,7 @@ def derived_comparisons(scored: Sequence[ScoredReview]) -> list[Comparison]:
         by_judge.setdefault(r.judge_id, []).append(r)
     out = []
     for j in sorted(by_judge):
-        rs = sorted(by_judge[j], key=lambda r: r.review_id)
+        rs = sorted(by_judge[j], key=review_order)
         for x in range(len(rs)):
             for y in range(x + 1, len(rs)):
                 a, b = rs[x], rs[y]
@@ -883,7 +897,7 @@ def select_lambda(
 ) -> LambdaChoice:
     """Pick lambda by seeded K-fold cross-validation (BUILD-SPEC 19).
 
-    Fold assignment is deterministic: reviews sort by ``review_id``,
+    Fold assignment is deterministic: reviews sort by :func:`review_order`,
     shuffle with ``random.Random(seed)``, then fold ``k`` holds out
     positions ``i % folds == k``. Each held-out review is predicted as
     ``mu_p + b_j`` from the training fit; reviews whose project or
@@ -907,7 +921,7 @@ def select_lambda(
     data = list(scored)
     if not data:
         raise ValueError("select_lambda needs at least one scored review")
-    ordered = sorted(data, key=lambda r: r.review_id)
+    ordered = sorted(data, key=review_order)
     rng = random.Random(seed)
     rng.shuffle(ordered)
     full = {lam: fit_additive(data, lam) for lam in grid_t}
@@ -1074,7 +1088,7 @@ def robustness(
     if lam < 0:
         raise ValueError("lam must be non-negative")
 
-    scored.sort(key=lambda r: r.review_id)
+    scored.sort(key=review_order)
     midpoint = FLIP_MIDPOINT
     assumption = (
         f"Official normalized ranking, rounded to 2 decimals; conditional on "
@@ -1178,7 +1192,7 @@ def robustness(
     flip_reviews: tuple[str, ...] = ()
     won = sorted(
         (r for r in scored if r.project_id == winner and r.score > midpoint),
-        key=lambda r: r.review_id,
+        key=review_order,
     )
     evaluations = 0
     searched_through = 0
@@ -1344,7 +1358,7 @@ def evaluate(
     """
     if method not in _OFFICIAL_METHODS:
         raise ValueError(f"method must be one of {_OFFICIAL_METHODS}")
-    reviews = sorted(reviews, key=lambda r: r.review_id)  # order-independent sums
+    reviews = sorted(reviews, key=review_order)  # order-independent sums
     scored = score_reviews(reviews, criteria)
     lambda_choice: LambdaChoice | None = None
     if isinstance(lam, str):
@@ -1868,7 +1882,7 @@ def rank_uncertainty(
     Reuses the official ``lam`` (never re-selected). Fits once, estimates
     the noise SD as ``sqrt(SSE / (n - P))`` from the residuals, then draws
     ``replicates`` synthetic review sets (``fitted value + N(0, sigma)`` in
-    ``review_id`` order from ``random.Random(seed)``) and refits each one
+    :func:`review_order` order from ``random.Random(seed)``) and refits each one
     warm-started from the official fit. Replicate ranks are competition
     ranks (1 + the number of strictly greater ``mu``).
 
@@ -1889,7 +1903,7 @@ def rank_uncertainty(
         raise ValueError("top_k must be at least 1")
     if not 0.0 <= tie_threshold <= 1.0:
         raise ValueError("tie_threshold must be between 0 and 1")
-    data = sorted(scored, key=lambda r: r.review_id)  # order-independent output
+    data = sorted(scored, key=review_order)  # order-independent output
     proj_ids = sorted({r.project_id for r in data})
     n = len(data)
     n_projects = len(proj_ids)
@@ -1938,7 +1952,7 @@ def rank_uncertainty(
             reason=reason,
         )
     fit = fit_additive(data, lam)
-    ordered = sorted(data, key=lambda r: r.review_id)
+    ordered = sorted(data, key=review_order)
     fitted = [fit.mu[r.project_id] + fit.offset[r.judge_id] for r in ordered]
     sse = sum((r.score - f) ** 2 for r, f in zip(ordered, fitted))
     df = n - n_projects

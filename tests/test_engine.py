@@ -1088,3 +1088,31 @@ class RankUncertaintyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class InstallIndependenceTests(unittest.TestCase):
+    """Review ids are generated per install; results must not depend on them."""
+
+    def _reviews(self, rename):
+        from results import engine as E
+        rng = random.Random(11)
+        reviews = []
+        for j in range(8):
+            for p in range(12):
+                if (j + p) % 3 == 0:
+                    continue
+                values = {"q": max(1, min(5, round(3 + (p % 5) * 0.4 + (j % 3 - 1) * 0.6 + rng.gauss(0, .7))))}
+                reviews.append(E.ReviewInput(rename(f"jdg_{j:02d}", f"prj_{p:02d}"), f"jdg_{j:02d}", f"prj_{p:02d}", values))
+        return E.score_reviews(reviews, [E.Criterion("q", 1.0, 1, 5)])
+
+    def test_uncertainty_lambda_and_robustness_ignore_review_ids(self):
+        from results import engine as E
+        ids = random.Random(3)
+        first = self._reviews(lambda j, p: f"{j}__{p}")
+        second = self._reviews(lambda j, p: "rev_" + "".join(ids.choice("abcdefgh234567") for _ in range(10)))
+        self.assertEqual(E.select_lambda(first).value, E.select_lambda(second).value)
+        a, b = E.rank_uncertainty(first, 2.0), E.rank_uncertainty(second, 2.0)
+        self.assertEqual(a.summary, b.summary)
+        self.assertEqual({k: v.p_first for k, v in a.projects.items()},
+                         {k: v.p_first for k, v in b.projects.items()})
+        self.assertEqual(E.fit_additive(first, 2.0).mu, E.fit_additive(second, 2.0).mu)

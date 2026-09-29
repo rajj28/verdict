@@ -33,12 +33,12 @@ EXPORTS          Participant cannot export organizer CSV data ..... REFUSED 403 
 AUTH             Anonymous judge API request requires authentication ..... REFUSED 401 (expected 401)
 AUTH             Session POST without CSRF is rejected ..... REFUSED 403 (expected 403)
 AUTH             A revoked temporary bearer token is rejected ..... REFUSED 401 (expected 401)
-EXPORTS          CSV formula payload is neutralised ..... REFUSED 200; formula neutralised; no raw formula (expected 200 with formula cell quoted)
-VOTING           Non-organizer cannot read live voting results ..... REFUSED 403; formula neutralised (expected 403)
-VOTING           The same authenticated voter cannot create a second ballot ..... REFUSED 409; formula neutralised (expected 409)
-VOTING           A quadratic ballot over its credit budget is refused ..... REFUSED 400; formula neutralised (expected 400)
+EXPORTS          CSV formula payload is neutralised ..... DEFUSED 200; formula neutralised; no raw formula (expected 200 with formula cell quoted)
+VOTING           Non-organizer cannot read live voting results ..... REFUSED 403; body has results_hidden (expected 403)
+VOTING           The same authenticated voter cannot create a second ballot ..... REFUSED 409; body has duplicate_voter (expected 409)
+VOTING           A quadratic ballot over its credit budget is refused ..... REFUSED 400; body has budget_exceeded (expected 400)
 CERTIFICATES     A participant cannot view another team's certificate ..... REFUSED 403 (expected 403)
-SIGNED RECORDS   A tampered judge record fails signature verification ..... REFUSED 200; formula neutralised (expected 200)
+SIGNED RECORDS   A tampered judge record fails signature verification ..... DEFUSED 200; body has "valid":false (expected 200)
 WEBHOOKS         An organizer cannot configure a loopback webhook destination ..... REFUSED 400 (expected 400)
 summary 28/28 attacks refused
 direct HTTP checks 14/14 passed

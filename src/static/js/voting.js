@@ -35,6 +35,11 @@
   function renderBallot(data) {
     ballotId = data.ballot;
     projectList.replaceChildren();
+    // The per-project limit is a single-style rule; a quadratic ballot is bounded by its
+    // credit budget only (n votes cost n*n credits), which the server enforces.
+    var perProject = data.style === "quadratic"
+      ? Math.max(1, Math.floor(Math.sqrt(data.credits)))
+      : data.max_votes_per_project;
     data.projects.forEach(function (project) {
       var row = document.createElement("div");
       row.className = "row g-2 align-items-center border-bottom pb-2";
@@ -46,7 +51,7 @@
       input.type = "number";
       input.name = project.public_id;
       input.min = "0";
-      input.max = String(data.max_votes_per_project);
+      input.max = String(perProject);
       input.value = String(project.votes || 0);
       input.setAttribute("aria-label", "Votes for " + project.title);
       label.appendChild(input);

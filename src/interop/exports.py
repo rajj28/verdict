@@ -505,8 +505,22 @@ def event_json(event: Event) -> str:
             "submitted_at": review.submitted_at.isoformat() if review.submitted_at else None,
         })
 
+    # The rubric the scores are on, so a re-import keeps its criteria, weights and ranges.
+    rubric = [
+        {
+            "key": c.key,
+            "name": c.name,
+            "description": c.description,
+            "weight": str(c.weight),
+            "min_score": c.min_score,
+            "max_score": c.max_score,
+        }
+        for c in rubric_criteria(event)
+    ]
+
     export = {
         "event": fixture_event,
+        "rubric": {"criteria": rubric},
         "tracks": tracks,
         "judges": judges,
         "teams": teams,

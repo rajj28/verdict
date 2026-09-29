@@ -4,8 +4,9 @@ Everything happens in one transaction (BUILD-SEC section 8 step 1); the caller i
 responsible for skipping when an event with the same source_id already exists.
 """
 import hashlib
+import re
 from dataclasses import dataclass, field
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 import audit.services
 from accounts.models import User
@@ -132,7 +133,7 @@ def import_fixture(data: dict, *, slug: str | None = None, actor=None,
     )
 
     tracks = _import_tracks(event, data.get("tracks") or [])
-    rubric, criteria_by_key = _import_rubric(event)
+    rubric, criteria_by_key = _import_rubric(event, _rubric_spec(data))
     judges = _import_judges(event, data.get("judges") or [], tracks, password_hash)
     teams, participant_count = _import_teams(event, data.get("teams") or [], password_hash)
     projects = _import_projects(event, data.get("projects") or [], teams, tracks, report, actor)
@@ -184,19 +185,73 @@ def _import_tracks(event: Event, rows: list) -> dict:
     return tracks
 
 
-def _import_rubric(event: Event) -> tuple[Rubric, dict]:
+def _rubric_spec(data: dict) -> list[dict]:
+    """The criteria the imported event is scored on.
+
+    An event.json export declares its rubric, so a round trip keeps the event's own
+    criteria, weights and ranges. A fixtures-shaped document without one is scored on
+    the organizers' three criteria, unless its scores use other keys: then on exactly
+    the keys they use. The organizers' fixtures.json, the showcase and the tour all
+    score the default three, so they import exactly as before.
+    """
+    declared = data.get("rubric")
+    if isinstance(declared, dict) and declared.get("criteria"):
+        return _declared_criteria(declared["criteria"])
+    defaults = [
+        {"key": key, "name": name, "weight": weight, "min_score": RUBRIC_MIN, "max_score": RUBRIC_MAX}
+        for key, name, weight in RUBRIC_CRITERIA
+    ]
+    used: list[str] = []
+    for row in data.get("scores") or []:
+        for key in (row.get("criteria") or {}) if isinstance(row, dict) else ():
+            if key not in used:
+                used.append(key)
+    if not used or set(used) == {item["key"] for item in defaults}:
+        return defaults
+    return _declared_criteria([
+        {"key": key, "name": key.replace("_", " ").replace("-", " ").capitalize()} for key in used
+    ])
+
+
+def _declared_criteria(items) -> list[dict]:
+    """Validate a rubric from the document with the same limits the rubric editor uses."""
+    invalid = ApiError("invalid_fixture", "The rubric must list 1 to 10 criteria, each with a "
+                       "unique key, a positive weight and a score range.")
+    if not isinstance(items, list) or not 1 <= len(items) <= 10:
+        raise invalid
+    criteria, keys = [], set()
+    for item in items:
+        if not isinstance(item, dict):
+            raise invalid
+        key = item.get("key")
+        name = item.get("name") or key
+        description = item.get("description") or ""
+        minimum = item.get("min_score", RUBRIC_MIN)
+        maximum = item.get("max_score", RUBRIC_MAX)
+        try:
+            weight = Decimal(str(item.get("weight", "1.000")))
+        except InvalidOperation:
+            raise invalid from None
+        if (
+            not isinstance(key, str) or not re.fullmatch(r"[-a-zA-Z0-9_]{1,60}", key) or key in keys
+            or not isinstance(name, str) or len(name) > 120 or not isinstance(description, str)
+            or not weight.is_finite() or not Decimal("0") < weight <= Decimal("999.999")
+            or any(isinstance(v, bool) or not isinstance(v, int) for v in (minimum, maximum))
+            or not 0 <= minimum < maximum <= 32767
+        ):
+            raise invalid
+        keys.add(key)
+        criteria.append({"key": key, "name": name, "description": description,
+                         "weight": weight.quantize(Decimal("0.001")),
+                         "min_score": minimum, "max_score": maximum})
+    return criteria
+
+
+def _import_rubric(event: Event, spec: list[dict]) -> tuple[Rubric, dict]:
     rubric = Rubric.objects.create(event=event, version=RUBRIC_VERSION)
     criteria = {}
-    for position, (key, name, weight) in enumerate(RUBRIC_CRITERIA, start=1):
-        criteria[key] = Criterion.objects.create(
-            rubric=rubric,
-            key=key,
-            name=name,
-            weight=weight,
-            min_score=RUBRIC_MIN,
-            max_score=RUBRIC_MAX,
-            position=position,
-        )
+    for position, item in enumerate(spec, start=1):
+        criteria[item["key"]] = Criterion.objects.create(rubric=rubric, position=position, **item)
     return rubric, criteria
 
 
@@ -347,6 +402,15 @@ def _import_scores(event: Event, rows: list, judges: dict, projects: dict, crite
             # One review per assignment; a repeated fixture row is recorded, not doubled.
             report.notes.append(
                 f"Skipped repeated score from {judge.public_id} for {project.public_id}."
+            )
+            continue
+        missing = [key for key in criteria_by_key if key not in (row.get("criteria") or {})]
+        if missing:
+            # A submitted review has a value for every criterion, as submit_review
+            # requires; a partial row is recorded, not imported half-scored.
+            report.notes.append(
+                f"Skipped score from {judge.public_id} for {project.public_id}: "
+                f"no value for {', '.join(missing)}."
             )
             continue
         seen_pairs.add((judge.pk, project.pk))

@@ -129,11 +129,16 @@ signed record per judge per event (Ed25519 via `src/interop/signing.py`).
 ## Import path
 
 `POST /api/v1/imports` → `import_fixture()` in `src/interop/importer.py` runs in
-one transaction: fixed rubric, tracks, judges, teams, projects, scores from
+one transaction: rubric, tracks, judges, teams, projects, scores from
 `fixtures.json`-shaped data (41 projects, 126 scores, 30 judges in the
-shipped file). Bounded file size, schema validation, referential checks and
-all-or-nothing rollback; duplicate IDs and path traversal are refused
-(`tests/test_import.py` covers the contract).
+shipped file). The rubric is the one the document declares (`event.json`
+exports carry theirs, so a round trip keeps criteria, weights and ranges),
+else the criteria its scores use, else the organizers' three
+(functionality, quality, innovation, 1-5). A score row without a value for
+every criterion is skipped with a note, never imported half-scored. Bounded
+file size, schema validation, referential checks and all-or-nothing
+rollback; duplicate IDs and path traversal are refused (`tests/test_import.py`
+covers the contract).
 
 ## Export path
 

@@ -1,5 +1,6 @@
 """interop.importer: the fixture must land as one auditable, provenance-keeping event."""
 import json
+from decimal import Decimal
 
 from django.conf import settings
 from django.db import IntegrityError, transaction
@@ -213,3 +214,91 @@ class ImportTests(TestCase):
                 import_fixture(broken, slug="second-event", actor=self.admin)
         self.assertFalse(Event.objects.filter(slug="second-event").exists())
         self.assertFalse(Project.objects.filter(title="Collides").exists())
+
+
+class RubricImportTests(TestCase):
+    """An imported event is scored on the document's own rubric, and never half-scored."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.admin = User.objects.create_user("admin@example.org", "verdict-demo", is_admin=True)
+
+    @staticmethod
+    def document(tag: str, criteria: dict, **extra) -> dict:
+        """One track, judge, team, project and score row, with ids unique to ``tag``."""
+        data = {
+            "event": {"id": f"evt_{tag}", "name": f"Rubric {tag}",
+                      "submissions_close": "2026-03-01T18:00:00Z"},
+            "tracks": [{"id": f"trk_{tag}", "name": "Main"}],
+            "judges": [{"id": f"jdg_{tag}", "name": "Rae Judge", "email": f"rae-{tag}@example.org",
+                        "tracks": [f"trk_{tag}"]}],
+            "teams": [{"id": f"tm_{tag}", "name": f"Team {tag}", "members": [f"m-{tag}@example.org"]}],
+            "projects": [{"id": f"prj_{tag}", "team": f"tm_{tag}", "track": f"trk_{tag}",
+                          "title": f"Probe {tag}", "summary": "", "repo_url": "",
+                          "submitted_at": "2026-02-27T04:08:00Z"}],
+            "scores": [{"judge": f"jdg_{tag}", "project": f"prj_{tag}", "criteria": criteria,
+                        "comment": ""}],
+        }
+        data.update(extra)
+        return data
+
+    def imported(self, data: dict):
+        report = import_fixture(data, slug=data["event"]["id"].replace("_", "-"), actor=self.admin)
+        event = Event.objects.get(source_id=data["event"]["id"])
+        return report, event, list(Criterion.objects.filter(rubric__event=event).order_by("position"))
+
+    def assert_results_compute(self, event, project_id: str):
+        from results.services import preview
+
+        rows = preview(event)["rows"]
+        self.assertEqual([row["project_id"] for row in rows], [project_id])
+
+    def test_a_declared_rubric_is_kept(self):
+        rubric = {"criteria": [{"key": "impact", "name": "Impact", "weight": "2.500",
+                                "min_score": 0, "max_score": 10}]}
+        report, event, criteria = self.imported(self.document("r1", {"impact": 7}, rubric=rubric))
+        self.assertEqual([(c.key, c.weight, c.min_score, c.max_score) for c in criteria],
+                         [("impact", Decimal("2.500"), 0, 10)])
+        self.assertEqual(report.counts["reviews"], 1)
+        # Not clamped to the default 1-5 range.
+        self.assertEqual(CriterionScore.objects.get(review__event=event).value, 7)
+        self.assert_results_compute(event, "prj_r1")
+
+    def test_scores_on_other_criteria_define_the_rubric(self):
+        report, event, criteria = self.imported(self.document("r2", {"quality": 4}))
+        self.assertEqual([c.key for c in criteria], ["quality"])
+        self.assertEqual(report.counts["reviews"], 1)
+        self.assert_results_compute(event, "prj_r2")
+
+    def test_a_row_missing_a_criterion_is_skipped_with_a_note(self):
+        rubric = {"criteria": [{"key": "quality", "name": "Quality"},
+                               {"key": "impact", "name": "Impact"}]}
+        report, event, _ = self.imported(self.document("r3", {"quality": 4}, rubric=rubric))
+        self.assertEqual(report.counts["reviews"], 0)
+        self.assertFalse(Review.objects.filter(event=event).exists())
+        self.assertIn("Skipped score from jdg_r3 for prj_r3: no value for impact.", report.notes)
+
+    def test_an_event_json_round_trip_keeps_a_custom_rubric(self):
+        # The export once had no rubric, so a re-import got the default three criteria,
+        # its reviews lacked two of them and the results page answered 500.
+        from interop.exports import event_json
+
+        rubric = {"criteria": [{"key": "quality", "name": "Quality", "weight": "3.000",
+                                "min_score": 1, "max_score": 7, "description": "Craft"}]}
+        _, original, before = self.imported(self.document("r4", {"quality": 6}, rubric=rubric))
+        exported = json.loads(event_json(original))
+        exported["event"]["id"] = "evt_r4_copy"
+        report, copy, after = self.imported(exported)
+        self.assertEqual([(c.key, c.name, c.description, c.weight, c.min_score, c.max_score)
+                          for c in after],
+                         [(c.key, c.name, c.description, c.weight, c.min_score, c.max_score)
+                          for c in before])
+        self.assertEqual(report.counts["reviews"], 1)
+        self.assert_results_compute(copy, "prj_r4")
+
+    def test_an_invalid_declared_rubric_is_refused(self):
+        rubric = {"criteria": [{"key": "quality", "name": "Quality", "weight": "0"}]}
+        with self.assertRaises(ApiError) as caught:
+            self.imported(self.document("r5", {"quality": 4}, rubric=rubric))
+        self.assertEqual(caught.exception.code, "invalid_fixture")
+        self.assertFalse(Event.objects.filter(source_id="evt_r5").exists())

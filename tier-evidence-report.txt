@@ -5,25 +5,25 @@ T1  gallery search returns matching projects ..... PASS
 T1  create disposable verification event ..... PASS
   POST /api/v1/events  as organizer  -> 201
 T1  create event track ..... PASS
-  POST /api/v1/events/tier-evidence-1790683256-d91ace/tracks  as organizer  -> 201
+  POST /api/v1/events/tier-evidence-1790689280-1f2d8f/tracks  as organizer  -> 201
 T1  participant creates a team ..... PASS
-  POST /api/v1/events/tier-evidence-1790683256-d91ace/teams  as participant  -> 201
+  POST /api/v1/events/tier-evidence-1790689280-1f2d8f/teams  as participant  -> 201
 T1  create project draft ..... PASS
-  POST /api/v1/events/tier-evidence-1790683256-d91ace/projects  as participant  -> 201
+  POST /api/v1/events/tier-evidence-1790689280-1f2d8f/projects  as participant  -> 201
 T1  submit project draft ..... PASS
-  POST /api/v1/events/tier-evidence-1790683256-d91ace/projects/prj_3lbgbi6tmd/submit  as participant  -> 200
+  POST /api/v1/events/tier-evidence-1790689280-1f2d8f/projects/prj_5tp74mdeeq/submit  as participant  -> 200
 T1  edit submitted project ..... PASS
-  PATCH /api/v1/events/tier-evidence-1790683256-d91ace/projects/prj_3lbgbi6tmd  as participant  -> 200
+  PATCH /api/v1/events/tier-evidence-1790689280-1f2d8f/projects/prj_5tp74mdeeq  as participant  -> 200
 T1  create invite link ..... PASS
   GET /register  as visitor  -> 200
   POST /api/v1/auth/register  as joiner  -> 201
-  POST /api/v1/events/tier-evidence-1790683256-d91ace/teams/tm_7kxzygtabt/invite  as participant  -> 201
+  POST /api/v1/events/tier-evidence-1790689280-1f2d8f/teams/tm_oy5wtiiq3u/invite  as participant  -> 201
 T1  invite-link join ..... PASS
-  POST /api/v1/invites/cllItP1taIbTGKUE0NuLHz8cD0if-bAcKo93NQko7Mg/accept  as joiner  -> 201
+  POST /api/v1/invites/EEB7RUaDa8k6KAwt3xroEX66t-i8QaIjrNfLxcjaYzE/accept  as joiner  -> 201
 T1  close submissions ..... PASS
-  POST /api/v1/events/tier-evidence-1790683256-d91ace/close-submissions  as organizer  -> 200
+  POST /api/v1/events/tier-evidence-1790689280-1f2d8f/close-submissions  as organizer  -> 200
 T1  edit after close is refused ..... PASS
-  PATCH /api/v1/events/tier-evidence-1790683256-d91ace/projects/prj_3lbgbi6tmd  as participant  -> 403
+  PATCH /api/v1/events/tier-evidence-1790689280-1f2d8f/projects/prj_5tp74mdeeq  as participant  -> 403
 T2  locked rubric rejects edits ..... PASS
   GET /api/v1/events/sample-hack-2026/rubric  as organizer  -> 200
   PUT /api/v1/events/sample-hack-2026/rubric  as organizer  -> 409
@@ -53,127 +53,129 @@ T2  normalization preview is available ..... PASS
   GET /api/v1/events/sample-hack-2026/results/preview  as organizer  -> 200
 T3  authenticated voting opens a ballot ..... PASS
   POST /api/v1/events  as organizer  -> 201
-  POST /api/v1/events/tier-evidence-voting-1790683259-5fe99c/tracks  as organizer  -> 201
-  PATCH /api/v1/events/tier-evidence-voting-1790683259-5fe99c/voting/config  as organizer  -> 200
+  POST /api/v1/events/tier-evidence-voting-1790689283-63225c/tracks  as organizer  -> 201
+  PATCH /api/v1/events/tier-evidence-voting-1790689283-63225c/voting/config  as organizer  -> 200
   GET /register  as voter2  -> 200
   POST /api/v1/auth/register  as voter2  -> 201
-  POST /api/v1/events/tier-evidence-voting-1790683259-5fe99c/teams  as voter2(session)  -> 201
-  POST /api/v1/events/tier-evidence-voting-1790683259-5fe99c/projects  as voter2(session)  -> 201
-  POST /api/v1/events/tier-evidence-voting-1790683259-5fe99c/projects/prj_a2vkyqkjjq/submit  as voter2(session)  -> 200
+  POST /api/v1/events/tier-evidence-voting-1790689283-63225c/teams  as voter2(session)  -> 201
+  POST /api/v1/events/tier-evidence-voting-1790689283-63225c/projects  as voter2(session)  -> 201
+  POST /api/v1/events/tier-evidence-voting-1790689283-63225c/projects/prj_qtmohwnvnq/submit  as voter2(session)  -> 200
   GET /register  as voter3  -> 200
   POST /api/v1/auth/register  as voter3  -> 201
-  POST /api/v1/events/tier-evidence-voting-1790683259-5fe99c/teams  as voter3(session)  -> 201
-  POST /api/v1/events/tier-evidence-voting-1790683259-5fe99c/projects  as voter3(session)  -> 201
-  POST /api/v1/events/tier-evidence-voting-1790683259-5fe99c/projects/prj_s63olvw4u3/submit  as voter3(session)  -> 200
-  POST /api/v1/events/tier-evidence-voting-1790683259-5fe99c/teams  as participant  -> 201
-  POST /api/v1/events/tier-evidence-voting-1790683259-5fe99c/projects  as participant  -> 201
-  POST /api/v1/events/tier-evidence-voting-1790683259-5fe99c/projects/prj_rybfndh3uf/submit  as participant  -> 200
-  POST /api/v1/events/tier-evidence-voting-1790683259-5fe99c/votes/ballot  as participant  -> 201
+  POST /api/v1/events/tier-evidence-voting-1790689283-63225c/teams  as voter3(session)  -> 201
+  POST /api/v1/events/tier-evidence-voting-1790689283-63225c/projects  as voter3(session)  -> 201
+  POST /api/v1/events/tier-evidence-voting-1790689283-63225c/projects/prj_o3enmj4nw6/submit  as voter3(session)  -> 200
+  POST /api/v1/events/tier-evidence-voting-1790689283-63225c/teams  as participant  -> 201
+  POST /api/v1/events/tier-evidence-voting-1790689283-63225c/projects  as participant  -> 201
+  POST /api/v1/events/tier-evidence-voting-1790689283-63225c/projects/prj_hlig4enuqu/submit  as participant  -> 200
+  POST /api/v1/events/tier-evidence-voting-1790689283-63225c/votes/ballot  as participant  -> 201
 T3  duplicate ballot is refused ..... PASS
-  POST /api/v1/events/tier-evidence-voting-1790683259-5fe99c/votes/ballot  as participant  -> 409
+  POST /api/v1/events/tier-evidence-voting-1790689283-63225c/votes/ballot  as participant  -> 409
 T3  quadratic budget is enforced ..... PASS
-  PUT /api/v1/events/tier-evidence-voting-1790683259-5fe99c/votes/ballot/bal_kveyra43c7  as participant  -> 400
+  PUT /api/v1/events/tier-evidence-voting-1790689283-63225c/votes/ballot/bal_exntztztax  as participant  -> 400
 T3  ballot within budget is accepted ..... PASS
-  PUT /api/v1/events/tier-evidence-voting-1790683259-5fe99c/votes/ballot/bal_kveyra43c7  as participant  -> 200
+  PUT /api/v1/events/tier-evidence-voting-1790689283-63225c/votes/ballot/bal_exntztztax  as participant  -> 200
 T3  ballot order is stable per ballot, random per voter ..... PASS
-  GET /api/v1/events/tier-evidence-voting-1790683259-5fe99c/votes/ballot/bal_kveyra43c7  as participant  -> 200
-  GET /api/v1/events/tier-evidence-voting-1790683259-5fe99c/votes/ballot/bal_kveyra43c7  as participant  -> 200
-  POST /api/v1/events/tier-evidence-voting-1790683259-5fe99c/votes/ballot  as voter2(session)  -> 201
-  GET /api/v1/events/tier-evidence-voting-1790683259-5fe99c/votes/ballot/bal_zozvqalooz  as voter2(session)  -> 200
+  GET /api/v1/events/tier-evidence-voting-1790689283-63225c/votes/ballot/bal_exntztztax  as participant  -> 200
+  GET /api/v1/events/tier-evidence-voting-1790689283-63225c/votes/ballot/bal_exntztztax  as participant  -> 200
+  POST /api/v1/events/tier-evidence-voting-1790689283-63225c/votes/ballot  as voter2(session)  -> 201
+  GET /api/v1/events/tier-evidence-voting-1790689283-63225c/votes/ballot/bal_ndqg2nmrjw  as voter2(session)  -> 200
+  POST /api/v1/events/tier-evidence-voting-1790689283-63225c/votes/ballot  as voter3(session)  -> 201
+  GET /api/v1/events/tier-evidence-voting-1790689283-63225c/votes/ballot/bal_etziqbv3g6  as voter3(session)  -> 200
 T3  results hidden from voters during window ..... PASS
-  GET /api/v1/events/tier-evidence-voting-1790683259-5fe99c/voting/results  as participant  -> 403
+  GET /api/v1/events/tier-evidence-voting-1790689283-63225c/voting/results  as participant  -> 403
 T3  results hidden from visitors during window ..... PASS
-  GET /api/v1/events/tier-evidence-voting-1790683259-5fe99c/voting/results  as visitor  -> 403
+  GET /api/v1/events/tier-evidence-voting-1790689283-63225c/voting/results  as visitor  -> 403
 T3  results page hidden during window ..... PASS
-  GET /events/tier-evidence-voting-1790683259-5fe99c/voting/results  as voter2(session)  -> 403
+  GET /events/tier-evidence-voting-1790689283-63225c/voting/results  as voter2(session)  -> 403
 T3  votes export hidden from voters ..... PASS
-  GET /api/v1/events/tier-evidence-voting-1790683259-5fe99c/exports/votes.csv  as participant  -> 403
+  GET /api/v1/events/tier-evidence-voting-1790689283-63225c/exports/votes.csv  as participant  -> 403
 T3  organizer still sees live tallies ..... PASS
-  GET /api/v1/events/tier-evidence-voting-1790683259-5fe99c/voting/results  as organizer  -> 200
+  GET /api/v1/events/tier-evidence-voting-1790689283-63225c/voting/results  as organizer  -> 200
 T3  organizer votes export ..... PASS
-  GET /api/v1/events/tier-evidence-voting-1790683259-5fe99c/exports/votes.csv  as organizer  -> 200
+  GET /api/v1/events/tier-evidence-voting-1790689283-63225c/exports/votes.csv  as organizer  -> 200
 T3  comment create ..... PASS
-  POST /api/v1/events/tier-evidence-voting-1790683259-5fe99c/projects/prj_rybfndh3uf/comments  as participant  -> 201
+  POST /api/v1/events/tier-evidence-voting-1790689283-63225c/projects/prj_hlig4enuqu/comments  as participant  -> 201
 T3  comment hide with reason ..... PASS
-  POST /api/v1/events/tier-evidence-voting-1790683259-5fe99c/comments/cmt_tsvgnprjun/hide  as organizer  -> 200
+  POST /api/v1/events/tier-evidence-voting-1790689283-63225c/comments/cmt_hvzczb3gis/hide  as organizer  -> 200
 T3  hidden comment leaves the thread ..... PASS
-  GET /api/v1/events/tier-evidence-voting-1790683259-5fe99c/projects/prj_rybfndh3uf/comments  as participant  -> 200
+  GET /api/v1/events/tier-evidence-voting-1790689283-63225c/projects/prj_hlig4enuqu/comments  as participant  -> 200
 T3  comment restore ..... PASS
-  POST /api/v1/events/tier-evidence-voting-1790683259-5fe99c/comments/cmt_tsvgnprjun/restore  as organizer  -> 200
+  POST /api/v1/events/tier-evidence-voting-1790689283-63225c/comments/cmt_hvzczb3gis/restore  as organizer  -> 200
 T3  fifth comment still allowed ..... PASS
-  POST /api/v1/events/tier-evidence-voting-1790683259-5fe99c/projects/prj_rybfndh3uf/comments  as participant  -> 201
-  POST /api/v1/events/tier-evidence-voting-1790683259-5fe99c/projects/prj_rybfndh3uf/comments  as participant  -> 201
-  POST /api/v1/events/tier-evidence-voting-1790683259-5fe99c/projects/prj_rybfndh3uf/comments  as participant  -> 201
-  POST /api/v1/events/tier-evidence-voting-1790683259-5fe99c/projects/prj_rybfndh3uf/comments  as participant  -> 201
+  POST /api/v1/events/tier-evidence-voting-1790689283-63225c/projects/prj_hlig4enuqu/comments  as participant  -> 201
+  POST /api/v1/events/tier-evidence-voting-1790689283-63225c/projects/prj_hlig4enuqu/comments  as participant  -> 201
+  POST /api/v1/events/tier-evidence-voting-1790689283-63225c/projects/prj_hlig4enuqu/comments  as participant  -> 201
+  POST /api/v1/events/tier-evidence-voting-1790689283-63225c/projects/prj_hlig4enuqu/comments  as participant  -> 201
 T3  comment rate limit answers 429 ..... PASS
-  POST /api/v1/events/tier-evidence-voting-1790683259-5fe99c/projects/prj_rybfndh3uf/comments  as participant  -> 429
+  POST /api/v1/events/tier-evidence-voting-1790689283-63225c/projects/prj_hlig4enuqu/comments  as participant  -> 429
 T3  abuse audit trail is readable ..... PASS
-  GET /api/v1/events/tier-evidence-voting-1790683259-5fe99c/voting/manage  as organizer  -> 200
+  GET /api/v1/events/tier-evidence-voting-1790689283-63225c/voting/manage  as organizer  -> 200
 T3  event audit log is readable ..... PASS
-  GET /api/v1/events/tier-evidence-voting-1790683259-5fe99c/audit  as organizer  -> 200
+  GET /api/v1/events/tier-evidence-voting-1790689283-63225c/audit  as organizer  -> 200
 T3  open-link voting opens a ballot ..... PASS
   POST /api/v1/events  as organizer  -> 201
-  POST /api/v1/events/tier-evidence-open-link-1790683259-5fe99c/tracks  as organizer  -> 201
-  PATCH /api/v1/events/tier-evidence-open-link-1790683259-5fe99c/voting/config  as organizer  -> 200
-  GET /api/v1/events/tier-evidence-open-link-1790683259-5fe99c/voting/config  as organizer  -> 200
-  POST /api/v1/events/tier-evidence-open-link-1790683259-5fe99c/teams  as participant  -> 201
-  POST /api/v1/events/tier-evidence-open-link-1790683259-5fe99c/projects  as participant  -> 201
-  POST /api/v1/events/tier-evidence-open-link-1790683259-5fe99c/projects/prj_txrybo44t5/submit  as participant  -> 200
-  POST /api/v1/events/tier-evidence-open-link-1790683259-5fe99c/votes/ballot  as visitor  -> 201
+  POST /api/v1/events/tier-evidence-open-link-1790689283-63225c/tracks  as organizer  -> 201
+  PATCH /api/v1/events/tier-evidence-open-link-1790689283-63225c/voting/config  as organizer  -> 200
+  GET /api/v1/events/tier-evidence-open-link-1790689283-63225c/voting/config  as organizer  -> 200
+  POST /api/v1/events/tier-evidence-open-link-1790689283-63225c/teams  as participant  -> 201
+  POST /api/v1/events/tier-evidence-open-link-1790689283-63225c/projects  as participant  -> 201
+  POST /api/v1/events/tier-evidence-open-link-1790689283-63225c/projects/prj_g57xnhsqmp/submit  as participant  -> 200
+  POST /api/v1/events/tier-evidence-open-link-1790689283-63225c/votes/ballot  as visitor  -> 201
 T3  open-link duplicate is refused ..... PASS
-  POST /api/v1/events/tier-evidence-open-link-1790683259-5fe99c/votes/ballot  as visitor  -> 409
+  POST /api/v1/events/tier-evidence-open-link-1790689283-63225c/votes/ballot  as visitor  -> 409
 T3  email link is queued offline ..... PASS
   POST /api/v1/events  as organizer  -> 201
-  POST /api/v1/events/tier-evidence-email-gated-1790683259-5fe99c/tracks  as organizer  -> 201
-  PATCH /api/v1/events/tier-evidence-email-gated-1790683259-5fe99c/voting/config  as organizer  -> 200
-  POST /api/v1/events/tier-evidence-email-gated-1790683259-5fe99c/teams  as participant  -> 201
-  POST /api/v1/events/tier-evidence-email-gated-1790683259-5fe99c/projects  as participant  -> 201
-  POST /api/v1/events/tier-evidence-email-gated-1790683259-5fe99c/projects/prj_56zln3zgxr/submit  as participant  -> 200
-  POST /api/v1/events/tier-evidence-email-gated-1790683259-5fe99c/votes/email  as visitor  -> 202
+  POST /api/v1/events/tier-evidence-email-gated-1790689283-63225c/tracks  as organizer  -> 201
+  PATCH /api/v1/events/tier-evidence-email-gated-1790689283-63225c/voting/config  as organizer  -> 200
+  POST /api/v1/events/tier-evidence-email-gated-1790689283-63225c/teams  as participant  -> 201
+  POST /api/v1/events/tier-evidence-email-gated-1790689283-63225c/projects  as participant  -> 201
+  POST /api/v1/events/tier-evidence-email-gated-1790689283-63225c/projects/prj_j6chyl32d5/submit  as participant  -> 200
+  POST /api/v1/events/tier-evidence-email-gated-1790689283-63225c/votes/email  as visitor  -> 202
 T3  offline outbox holds the link ..... PASS
-  GET /api/v1/events/tier-evidence-email-gated-1790683259-5fe99c/outbox  as organizer  -> 200
+  GET /api/v1/events/tier-evidence-email-gated-1790689283-63225c/outbox  as organizer  -> 200
 T3  email ticket opens a ballot ..... PASS
-  POST /api/v1/events/tier-evidence-email-gated-1790683259-5fe99c/votes/email/verify  as visitor  -> 201
+  POST /api/v1/events/tier-evidence-email-gated-1790689283-63225c/votes/email/verify  as visitor  -> 201
 T4  schema documents every UI endpoint ..... PASS
   GET /api/schema/  as visitor  -> 200
 T4  API docs page is served ..... PASS
   GET /api/docs/  as visitor  -> 200
 T4  private webhook destinations are refused by default ..... PASS
-  POST /api/v1/events/tier-evidence-voting-1790683259-5fe99c/webhooks  as organizer  -> 400
+  POST /api/v1/events/tier-evidence-voting-1790689283-63225c/webhooks  as organizer  -> 400
 T4  webhook delivery carries a valid HMAC signature ..... SKIPPED
   reason: the server refuses private destinations (WEBHOOKS_ALLOW_PRIVATE=0); restart it with WEBHOOKS_ALLOW_PRIVATE=1 to watch signed delivery to this checker's local receiver
 T4  webhook secret is never listed ..... SKIPPED
   reason: the server refuses private destinations (WEBHOOKS_ALLOW_PRIVATE=0); restart it with WEBHOOKS_ALLOW_PRIVATE=1 to watch signed delivery to this checker's local receiver
 T4  embed is public with relaxed framing ..... PASS
-  GET /embed/tier-evidence-voting-1790683259-5fe99c  as visitor  -> 200
-  GET /embed/tier-evidence-voting-1790683259-5fe99c  as visitor  -> 200
+  GET /embed/tier-evidence-voting-1790689283-63225c  as visitor  -> 200
+  GET /embed/tier-evidence-voting-1790689283-63225c  as visitor  -> 200
 T4  framing stays denied outside the embed ..... PASS
   GET /projects  as visitor  -> 200
 T4  certificate owner can read ..... PASS
-  GET /events/tier-evidence-voting-1790683259-5fe99c/certificates/participation/prj_a2vkyqkjjq  as owner(session)  -> 200
+  GET /events/tier-evidence-voting-1790689283-63225c/certificates/participation/prj_qtmohwnvnq  as owner(session)  -> 200
 T4  certificate stranger is refused ..... PASS
-  GET /events/tier-evidence-voting-1790683259-5fe99c/certificates/participation/prj_a2vkyqkjjq  as stranger(session)  -> 403
+  GET /events/tier-evidence-voting-1790689283-63225c/certificates/participation/prj_qtmohwnvnq  as stranger(session)  -> 403
 T4  signed judge record verifies ..... PASS
   GET /api/v1/me  as judge_a  -> 200
   POST /api/v1/events  as organizer  -> 201
-  POST /api/v1/events/tier-evidence-judging-1790683259-5fe99c/tracks  as organizer  -> 201
-  POST /api/v1/events/tier-evidence-judging-1790683259-5fe99c/teams  as participant  -> 201
-  POST /api/v1/events/tier-evidence-judging-1790683259-5fe99c/projects  as participant  -> 201
-  POST /api/v1/events/tier-evidence-judging-1790683259-5fe99c/projects/prj_u2rwwpivi3/submit  as participant  -> 200
-  PUT /api/v1/events/tier-evidence-judging-1790683259-5fe99c/rubric  as organizer  -> 200
-  POST /api/v1/events/tier-evidence-judging-1790683259-5fe99c/judges  as organizer  -> 201
-  POST /api/v1/events/tier-evidence-judging-1790683259-5fe99c/close-submissions  as organizer  -> 200
-  POST /api/v1/events/tier-evidence-judging-1790683259-5fe99c/assignments  as organizer  -> 201
-  PUT /api/v1/events/tier-evidence-judging-1790683259-5fe99c/judge/reviews/prj_u2rwwpivi3  as judge_a  -> 200
-  POST /api/v1/events/tier-evidence-judging-1790683259-5fe99c/judge/reviews/prj_u2rwwpivi3/submit  as judge_a  -> 200
-  POST /api/v1/events/tier-evidence-judging-1790683259-5fe99c/close-judging  as organizer  -> 200
-  POST /api/v1/events/tier-evidence-judging-1790683259-5fe99c/judge-records  as organizer  -> 200
-  GET /records/rec_6rycn3p5ln  as visitor  -> 200
+  POST /api/v1/events/tier-evidence-judging-1790689283-63225c/tracks  as organizer  -> 201
+  POST /api/v1/events/tier-evidence-judging-1790689283-63225c/teams  as participant  -> 201
+  POST /api/v1/events/tier-evidence-judging-1790689283-63225c/projects  as participant  -> 201
+  POST /api/v1/events/tier-evidence-judging-1790689283-63225c/projects/prj_25qejhnzei/submit  as participant  -> 200
+  PUT /api/v1/events/tier-evidence-judging-1790689283-63225c/rubric  as organizer  -> 200
+  POST /api/v1/events/tier-evidence-judging-1790689283-63225c/judges  as organizer  -> 201
+  POST /api/v1/events/tier-evidence-judging-1790689283-63225c/close-submissions  as organizer  -> 200
+  POST /api/v1/events/tier-evidence-judging-1790689283-63225c/assignments  as organizer  -> 201
+  PUT /api/v1/events/tier-evidence-judging-1790689283-63225c/judge/reviews/prj_25qejhnzei  as judge_a  -> 200
+  POST /api/v1/events/tier-evidence-judging-1790689283-63225c/judge/reviews/prj_25qejhnzei/submit  as judge_a  -> 200
+  POST /api/v1/events/tier-evidence-judging-1790689283-63225c/close-judging  as organizer  -> 200
+  POST /api/v1/events/tier-evidence-judging-1790689283-63225c/judge-records  as organizer  -> 200
+  GET /records/rec_ax4orfqawv  as visitor  -> 200
   POST /api/v1/records/verify  as visitor  -> 200
 T4  tampered judge record fails ..... PASS
   POST /api/v1/records/verify  as visitor  -> 200
 T4  event.json round trip keeps equal counts ..... PASS
-  GET /api/v1/events/tier-evidence-judging-1790683259-5fe99c/exports/event.json  as organizer  -> 200
+  GET /api/v1/events/tier-evidence-judging-1790689283-63225c/exports/event.json  as organizer  -> 200
   POST /api/v1/imports  as organizer  -> 201
 T1 summary 12/12 checks passed
 T2 summary 13/13 checks passed

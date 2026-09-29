@@ -7,7 +7,7 @@ anyone can re-verify the result. One command, no network, no accounts.
 Django 5.2 + Django REST Framework + PostgreSQL 16, server-rendered pages, no
 JavaScript build step, MIT licensed.
 
-**Demo video:** _link added at submission_. **Try it yourself:** run it, open
+**Demo video (5:53):** <https://youtu.be/EuBbR1fjryw>. **Try it yourself:** run it, open
 <http://localhost:8080> and press **Take the 5-minute tour**.
 
 ## Run it

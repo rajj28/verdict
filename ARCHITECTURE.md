@@ -1,5 +1,7 @@
 # Architecture
 
+![How a request flows through VERDICT, from the browser or curl through the API, the backend policy layer, services and the results engine to PostgreSQL](docs/assets/verdict-system.gif)
+
 VERDICT is a modular Django monolith: one deployable (`Dockerfile` →
 gunicorn), one database (PostgreSQL 16, `docker-compose.yml` service `db`),
 one background worker (`webhook-worker`, `python manage.py deliver_webhooks

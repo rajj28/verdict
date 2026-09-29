@@ -160,6 +160,21 @@ class RegisterTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("email", response.json()["error"]["fields"])
 
+    def test_registration_returns_to_the_page_that_sent_the_visitor(self):
+        # An invite link sends a new teammate to /register?next=/invite?token=...
+        response = post_json(self.client, REGISTER, {"email": "maya@example.org",
+                                                     "password": "a-long-enough-password",
+                                                     "next": "/invite?token=abc123"})
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["redirect_to"], "/invite?token=abc123")
+
+    def test_registration_never_redirects_off_host(self):
+        response = post_json(self.client, REGISTER, {"email": "eve@example.org",
+                                                     "password": "a-long-enough-password",
+                                                     "next": "https://evil.example/phish"})
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["redirect_to"], "/me")
+
     def test_an_email_can_only_be_registered_once(self):
         User.objects.create_user("taken@example.org", "a-long-enough-password")
         response = post_json(self.client, REGISTER, {"email": "TAKEN@example.org",

@@ -87,6 +87,7 @@ class RegisterSerializer(serializers.Serializer):
     email = serializers.CharField(allow_blank=True, max_length=254)
     password = serializers.CharField(allow_blank=True, trim_whitespace=False, max_length=256)
     display_name = serializers.CharField(required=False, allow_blank=True, max_length=80)
+    next = serializers.CharField(required=False, allow_blank=True, max_length=2000)
 
 
 class DemoLoginSerializer(serializers.Serializer):
@@ -315,9 +316,14 @@ class RegisterView(APIView):
         require_csrf(request)
         serializer = RegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        user = register_user(**serializer.validated_data)
+        data = serializer.validated_data
+        user = register_user(email=data["email"], password=data["password"],
+                             display_name=data.get("display_name", ""))
         start_session(request, user)
-        return Response({"user": user_self(user), "redirect_to": "/me"}, status=201)
+        # Like login: return to the page that sent the visitor here (an invite link),
+        # but only ever on this host.
+        return Response({"user": user_self(user), "redirect_to": safe_next(request, data.get("next"))},
+                        status=201)
 
 
 class DemoLoginView(APIView):
